@@ -35,6 +35,7 @@ export default function SettingsPage() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [icloudMsg, setIcloudMsg] = useState('');
   const [briefText, setBriefText] = useState<string | null>(null);
+  const [loops, setLoops] = useState<{ id: string; title: string; body: string | null; due_at: string | null }[]>([]);
 
   const authHeader = useCallback(
     () => ({ Authorization: `Bearer ${session!.access_token}`, 'Content-Type': 'application/json' }),
@@ -47,6 +48,17 @@ export default function SettingsPage() {
     if (r.ok) setInts(await r.json());
   }, [session]);
 
+  const loadLoops = useCallback(async () => {
+    if (!session) return;
+    const r = await fetch('/api/loops', { headers: { Authorization: `Bearer ${session.access_token}` } });
+    if (r.ok) setLoops((await r.json()).loops ?? []);
+  }, [session]);
+
+  async function closeLoop(id: string, status: 'done' | 'dropped') {
+    await fetch('/api/loops', { method: 'PATCH', headers: authHeader(), body: JSON.stringify({ id, status }) });
+    loadLoops();
+  }
+
   useEffect(() => {
     if (!loading && !session) router.push('/login');
   }, [loading, session, router]);
@@ -56,7 +68,8 @@ export default function SettingsPage() {
     setGmailParam(new URLSearchParams(window.location.search).get('gmail'));
     fetch('/api/health').then((r) => r.json()).then(setHealth).catch(() => {});
     loadInts();
-  }, [loadInts]);
+    loadLoops();
+  }, [loadInts, loadLoops]);
 
   if (loading || !session) return null;
 
@@ -221,6 +234,28 @@ export default function SettingsPage() {
             </p>
           )}
         </div>
+      </section>
+
+      {/* ── Open loops ──────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Open loops</h2>
+        {loops.length === 0 ? (
+          <p className="text-sm text-zinc-400">None — Calliad files these as they come up in chat.</p>
+        ) : (
+          <ul className="space-y-2">
+            {loops.map((l) => (
+              <li key={l.id} className="text-sm text-zinc-700 dark:text-zinc-300 flex items-start gap-2">
+                <span className="flex-1">
+                  {l.title}
+                  {l.due_at && <span className="text-zinc-400"> · due {new Date(l.due_at).toLocaleDateString()}</span>}
+                  {l.body && <span className="block text-xs text-zinc-500">{l.body}</span>}
+                </span>
+                <button className="text-xs underline shrink-0" onClick={() => closeLoop(l.id, 'done')}>done</button>
+                <button className="text-xs underline shrink-0 text-zinc-400" onClick={() => closeLoop(l.id, 'dropped')}>drop</button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {/* ── Notifications ────────────────────────────────────────────── */}

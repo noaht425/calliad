@@ -10,6 +10,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
     "@ducanh2912/next-pwa": "^10.2.9",
+    "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.112.3",
     "dexie": "^4.4.5",
     "googleapis": "^161.0.0",

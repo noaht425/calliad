@@ -6,6 +6,8 @@ import { route } from '@/lib/router/route';
 import { call } from '@/lib/brain/call';
 import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
+import { relevantLoops } from '@/lib/memory/loops';
+import { detectLoopsFromTurn } from '@/lib/memory/detect';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -59,11 +61,12 @@ export async function POST(req: NextRequest) {
   }
 
   // ── brain ───────────────────────────────────────────────────────────────
-  const [recent, integrations] = await Promise.all([
+  const [recent, integrations, loops] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
+    relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
   ]);
-  const state: TurnState = { now: new Date(), tz: TZ, recent, integrations };
+  const state: TurnState = { now: new Date(), tz: TZ, recent, integrations, loops };
   const { meta, stream } = await call({
     purpose: 'chat',
     tier: decision.tier,
@@ -86,6 +89,10 @@ export async function POST(req: NextRequest) {
       text: finalText, surface: 'pwa', tier: meta.tier, model: meta.model, cost_usd: meta.costUsd, capped: meta.capped,
     });
     yield sse({ done: true, costUsd: meta.costUsd });
+    // T1 pass: file any open loop this exchange opened. Fire-and-forget.
+    void detectLoopsFromTurn(user.id, text, finalText, conversationId).catch((e) =>
+      console.error('[chat] loop detect', e),
+    );
   }();
 
   return streamResponse(conversationId, body$);

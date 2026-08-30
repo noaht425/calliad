@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type Anthropic from '@anthropic-ai/sdk';
 import type { IntegrationContext } from '@/lib/integrations/context';
+import type { OpenLoop } from '@/lib/memory/loops';
 
 const CONTENT_DIR = path.join(process.cwd(), 'content');
 
@@ -61,6 +62,18 @@ export interface TurnState {
   tz: string;
   recent: { role: 'user' | 'assistant'; content: string }[]; // last ~10–20
   integrations?: IntegrationContext; // upcoming calendar + watched-label mail
+  loops?: OpenLoop[];                // relevant open loops (working state)
+}
+
+function renderLoops(loops: OpenLoop[], tz: string): string {
+  const lines = ['## Open loops (working state — things in progress or pending a decision)'];
+  for (const l of loops) {
+    const due = l.due_at
+      ? ` — due ${new Date(l.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz })}`
+      : '';
+    lines.push(`- ${l.title}${due}${l.body ? `: ${l.body}` : ''}`);
+  }
+  return lines.join('\n');
 }
 
 function renderIntegrations(ctx: IntegrationContext, tz: string): string {
@@ -126,6 +139,9 @@ export function assemble(userText: string, state: TurnState): AssembledPrompt {
 
   if (state.integrations) {
     system.push({ type: 'text', text: renderIntegrations(state.integrations, state.tz) });
+  }
+  if (state.loops?.length) {
+    system.push({ type: 'text', text: renderLoops(state.loops, state.tz) });
   }
 
   const messages: Anthropic.MessageParam[] = [

@@ -4,6 +4,7 @@ import { call } from '@/lib/brain/call';
 import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
 import { getBriefExtras } from '@/lib/brief/extras';
+import { relevantLoops } from '@/lib/memory/loops';
 import type { TurnState } from '@/lib/brain/prompt';
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
@@ -47,7 +48,7 @@ export async function composeBrief(
   const now = new Date();
 
   const dayAgo = new Date(now.getTime() - 36 * 3600 * 1000).toISOString();
-  const [integrations, recentUser, extras] = await Promise.all([
+  const [integrations, recentUser, extras, loops] = await Promise.all([
     getIntegrationContext(userId, { daysAhead: 8, emailLimit: 10 }).catch(() => undefined),
     // Only what NOAH said recently — never feed the brief its own past output back
     // in (that echoes hallucinations forward). This is "things he mentioned",
@@ -60,6 +61,7 @@ export async function composeBrief(
       .order('created_at', { ascending: false })
       .limit(8),
     getBriefExtras().catch(() => ({ weather: null, headlines: [] as string[] })),
+    relevantLoops(userId, { dueWithinDays: 14 }).catch(() => []),
   ]);
 
   const notes = (recentUser.data ?? [])
@@ -74,7 +76,7 @@ export async function composeBrief(
       }]
     : [];
 
-  const state: TurnState = { now, tz: TZ, recent, integrations };
+  const state: TurnState = { now, tz: TZ, recent, integrations, loops };
 
   const conversationId = randomUUID();
   await adminClient.from('conversations').insert({
