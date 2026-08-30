@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { allOpenLoops, upsertLoop, setLoopStatus } from '@/lib/memory/loops';
+import { detectLoopsFromTurn } from '@/lib/memory/detect';
+import { t1Available } from '@/lib/llm/gemini';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,11 +20,25 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ loops: await allOpenLoops(user.id) });
 }
 
-// POST { title, body?, due_at?, tags? } → manual add
+// POST { title, ... }  → manual add
+// POST { probe: "..." } → run T1 detection synchronously on that text + report
 export async function POST(req: NextRequest) {
   const user = await requireUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const b = (await req.json().catch(() => ({}))) as { title?: string; body?: string; due_at?: string; tags?: string[] };
+  const b = (await req.json().catch(() => ({}))) as { title?: string; body?: string; due_at?: string; tags?: string[]; probe?: string };
+
+  if (b.probe?.trim()) {
+    const before = (await allOpenLoops(user.id)).length;
+    await detectLoopsFromTurn(user.id, b.probe.trim(), '(diagnostic run)', null);
+    const after = await allOpenLoops(user.id);
+    return NextResponse.json({
+      ok: true,
+      t1Available: t1Available(),
+      filed: after.length - before,
+      loops: after.map((l) => l.title),
+    });
+  }
+
   if (!b.title?.trim()) return NextResponse.json({ error: 'title required' }, { status: 400 });
   const r = await upsertLoop(user.id, { title: b.title, body: b.body, due_at: b.due_at ?? null, tags: b.tags, source: 'manual' });
   return NextResponse.json({ ok: true, result: r });

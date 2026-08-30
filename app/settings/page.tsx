@@ -36,6 +36,7 @@ export default function SettingsPage() {
   const [icloudMsg, setIcloudMsg] = useState('');
   const [briefText, setBriefText] = useState<string | null>(null);
   const [loops, setLoops] = useState<{ id: string; title: string; body: string | null; due_at: string | null }[]>([]);
+  const [loopDiag, setLoopDiag] = useState<string | null>(null);
 
   const authHeader = useCallback(
     () => ({ Authorization: `Bearer ${session!.access_token}`, 'Content-Type': 'application/json' }),
@@ -56,6 +57,18 @@ export default function SettingsPage() {
 
   async function closeLoop(id: string, status: 'done' | 'dropped') {
     await fetch('/api/loops', { method: 'PATCH', headers: authHeader(), body: JSON.stringify({ id, status }) });
+    loadLoops();
+  }
+
+  async function testDetection() {
+    setBusy('loopdiag'); setLoopDiag(null);
+    const r = await fetch('/api/loops', {
+      method: 'POST', headers: authHeader(),
+      body: JSON.stringify({ probe: 'I need to email Prof. Tomasso about the seminar reading by Friday.' }),
+    });
+    const j = await r.json();
+    setBusy(null);
+    setLoopDiag(`T1 key configured: ${j.t1Available ? 'yes' : 'NO'} · filed this run: ${j.filed ?? 0}`);
     loadLoops();
   }
 
@@ -239,6 +252,12 @@ export default function SettingsPage() {
       {/* ── Open loops ──────────────────────────────────────────────── */}
       <section className="mb-8">
         <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Open loops</h2>
+        <div className="mb-3">
+          <button className="text-xs underline" disabled={busy !== null} onClick={testDetection}>
+            {busy === 'loopdiag' ? 'testing…' : 'test detection'}
+          </button>
+          {loopDiag && <span className="text-xs text-zinc-500 ml-2">{loopDiag}</span>}
+        </div>
         {loops.length === 0 ? (
           <p className="text-sm text-zinc-400">None — Calliad files these as they come up in chat.</p>
         ) : (

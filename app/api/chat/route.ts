@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { waitUntil } from '@vercel/functions';
 import { randomUUID } from 'node:crypto';
 import { supabase } from '@/lib/supabase';
 import { adminClient } from '@/lib/supabase.server';
@@ -89,9 +90,12 @@ export async function POST(req: NextRequest) {
       text: finalText, surface: 'pwa', tier: meta.tier, model: meta.model, cost_usd: meta.costUsd, capped: meta.capped,
     });
     yield sse({ done: true, costUsd: meta.costUsd });
-    // T1 pass: file any open loop this exchange opened. Fire-and-forget.
-    void detectLoopsFromTurn(user.id, text, finalText, conversationId).catch((e) =>
-      console.error('[chat] loop detect', e),
+    // T1 pass: file any open loop this exchange opened. waitUntil keeps the
+    // serverless function alive until it finishes (a bare promise would be reaped).
+    waitUntil(
+      detectLoopsFromTurn(user.id, text, finalText, conversationId).catch((e) =>
+        console.error('[chat] loop detect', e),
+      ),
     );
   }();
 
