@@ -34,7 +34,12 @@ export interface BrainStream {
 }
 
 const FALLBACK = 'Something broke on my end — try that again in a minute.';
-const EFFORT: Record<Tier, 'low' | 'high'> = { T0: 'low', T1: 'low', T2: 'low', T3: 'high' };
+// `output_config.effort` is only accepted on the Sonnet-5 / Opus-5 tier. Haiku 4.5
+// (the T1 downgrade fallback) 400s on it — so effort is set per-model, not per-tier.
+const EFFORT_MODELS: Record<string, 'low' | 'high'> = {
+  'claude-sonnet-5': 'low',
+  'claude-opus-5': 'high',
+};
 
 export async function call(req: BrainRequest): Promise<BrainStream> {
   await rollMonthIfNeeded();
@@ -76,13 +81,15 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
     try {
       for (let attempt = 0; ; attempt++) {
         try {
-          const s = anthropic.messages.stream({
+          const params: Anthropic.Messages.MessageStreamParams = {
             model,
             max_tokens: req.maxTokens ?? 1024,
             system,
             messages,
-            output_config: { effort: EFFORT[tier] },
-          });
+          };
+          const effort = EFFORT_MODELS[model];
+          if (effort) params.output_config = { effort };
+          const s = anthropic.messages.stream(params);
           for await (const ev of s) {
             if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
               meta.text += ev.delta.text;
