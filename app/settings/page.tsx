@@ -37,6 +37,8 @@ export default function SettingsPage() {
   const [briefText, setBriefText] = useState<string | null>(null);
   const [loops, setLoops] = useState<{ id: string; title: string; body: string | null; due_at: string | null }[]>([]);
   const [loopDiag, setLoopDiag] = useState<string | null>(null);
+  const [syllabi, setSyllabi] = useState<{ id: string; filename: string; course: string | null; extracted: { exams?: unknown[]; assignments?: unknown[] } }[]>([]);
+  const [syllabusMsg, setSyllabusMsg] = useState<string | null>(null);
 
   const authHeader = useCallback(
     () => ({ Authorization: `Bearer ${session!.access_token}`, 'Content-Type': 'application/json' }),
@@ -54,6 +56,27 @@ export default function SettingsPage() {
     const r = await fetch('/api/loops', { headers: { Authorization: `Bearer ${session.access_token}` } });
     if (r.ok) setLoops((await r.json()).loops ?? []);
   }, [session]);
+
+  const loadSyllabi = useCallback(async () => {
+    if (!session) return;
+    const r = await fetch('/api/ingest/syllabus', { headers: { Authorization: `Bearer ${session.access_token}` } });
+    if (r.ok) setSyllabi((await r.json()).documents ?? []);
+  }, [session]);
+
+  async function uploadSyllabus(file: File) {
+    setBusy('syllabus'); setSyllabusMsg(null);
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('/api/ingest/syllabus', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session!.access_token}` },
+      body: fd,
+    });
+    const j = await r.json();
+    setBusy(null);
+    setSyllabusMsg(j.ok ? `${j.course ?? 'course'}: ${j.loopsFiled} deadline(s) filed` : (j.error ?? 'failed'));
+    loadSyllabi(); loadLoops();
+  }
 
   async function closeLoop(id: string, status: 'done' | 'dropped') {
     await fetch('/api/loops', { method: 'PATCH', headers: authHeader(), body: JSON.stringify({ id, status }) });
@@ -82,7 +105,8 @@ export default function SettingsPage() {
     fetch('/api/health').then((r) => r.json()).then(setHealth).catch(() => {});
     loadInts();
     loadLoops();
-  }, [loadInts, loadLoops]);
+    loadSyllabi();
+  }, [loadInts, loadLoops, loadSyllabi]);
 
   if (loading || !session) return null;
 
@@ -261,6 +285,31 @@ export default function SettingsPage() {
             </p>
           )}
         </div>
+      </section>
+
+      {/* ── Syllabi ─────────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Syllabi</h2>
+        <label className={`${btn} inline-block cursor-pointer`}>
+          {busy === 'syllabus' ? 'Reading…' : 'Upload a syllabus (PDF)'}
+          <input
+            type="file"
+            accept="application/pdf,.pdf,.txt,.md"
+            className="hidden"
+            disabled={busy !== null}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadSyllabus(f); e.target.value = ''; }}
+          />
+        </label>
+        {syllabusMsg && <p className="text-xs text-zinc-500 mt-2">{syllabusMsg}</p>}
+        {syllabi.length > 0 && (
+          <ul className="mt-3 space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+            {syllabi.map((s) => (
+              <li key={s.id}>
+                {s.course ?? s.filename} — {(s.extracted?.exams?.length ?? 0)} exams, {(s.extracted?.assignments?.length ?? 0)} assignments
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {/* ── Open loops ──────────────────────────────────────────────── */}
