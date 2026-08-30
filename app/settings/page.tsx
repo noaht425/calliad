@@ -13,7 +13,7 @@ type KillLevel = 'off' | 'pause_proactive' | 'pause_all';
 interface IntegrationsState {
   gmail: { connected: boolean; email?: string; label?: string; lastScannedAt?: string | null };
   icloud: { connected: boolean; calendars?: string[]; lastSyncedAt?: string | null };
-  counts: { calendar_events: number; email_items: number };
+  counts: { calendar_events: number; schedule_events: number; email_items: number };
 }
 
 const btn = 'rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium px-3 py-2 disabled:opacity-40';
@@ -88,6 +88,13 @@ export default function SettingsPage() {
   async function syncNow() {
     setBusy('sync');
     await fetch('/api/integrations', { method: 'POST', headers: authHeader(), body: JSON.stringify({ what: 'all' }) });
+    setBusy(null);
+    loadInts();
+  }
+
+  async function loadSchedule() {
+    setBusy('schedule');
+    await fetch('/api/integrations', { method: 'POST', headers: authHeader(), body: JSON.stringify({ what: 'schedule' }) });
     setBusy(null);
     loadInts();
   }
@@ -173,13 +180,24 @@ export default function SettingsPage() {
           )}
         </div>
 
+        {/* Class schedule (materialised from the profile, not a live calendar) */}
+        <div className="mb-4">
+          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Class schedule</p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            {ints?.counts.schedule_events ?? 0} meetings loaded (Fall 2026 term) ·{' '}
+            <button className="underline" disabled={busy !== null} onClick={loadSchedule}>
+              {busy === 'schedule' ? 'loading…' : 'reload'}
+            </button>
+          </p>
+        </div>
+
         {(ints?.gmail.connected || ints?.icloud.connected) && (
           <div className="flex items-center gap-3">
             <button className={btn} disabled={busy !== null} onClick={syncNow}>
               {busy === 'sync' ? 'Syncing…' : 'Sync now'}
             </button>
             <span className="text-xs text-zinc-500 dark:text-zinc-400">
-              {ints?.counts.calendar_events ?? 0} events · {ints?.counts.email_items ?? 0} emails
+              {ints?.counts.calendar_events ?? 0} calendar · {ints?.counts.email_items ?? 0} emails
             </span>
           </div>
         )}

@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { adminClient } from '@/lib/supabase.server';
 import { getGmailStatus, scanGmailLabel } from '@/lib/integrations/gmail';
 import { syncCalendarEvents } from '@/lib/integrations/icloud-calendar';
+import { materializeSchedule } from '@/lib/integrations/schedule';
 import { getIntegrationContext } from '@/lib/integrations/context';
 
 export const runtime = 'nodejs';
@@ -20,10 +21,11 @@ export async function GET(req: NextRequest) {
   const user = await requireUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const [gmail, icloudSvc, evCount, emCount, ctx] = await Promise.all([
+  const [gmail, icloudSvc, evCount, schedCount, emCount, ctx] = await Promise.all([
     getGmailStatus(user.id),
     adminClient.from('connected_services').select('metadata').eq('user_id', user.id).eq('service', 'icloud_calendar').maybeSingle(),
-    adminClient.from('calendar_events').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
+    adminClient.from('calendar_events').select('id', { count: 'exact', head: true }).eq('user_id', user.id).neq('source', 'schedule'),
+    adminClient.from('calendar_events').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('source', 'schedule'),
     adminClient.from('email_items').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 5 }),
   ]);
@@ -39,7 +41,11 @@ export async function GET(req: NextRequest) {
     icloud: icm
       ? { connected: true, calendars: icalNames, lastSyncedAt: icm.last_synced_at ?? null }
       : { connected: false },
-    counts: { calendar_events: evCount.count ?? 0, email_items: emCount.count ?? 0 },
+    counts: {
+      calendar_events: evCount.count ?? 0,
+      schedule_events: schedCount.count ?? 0,
+      email_items: emCount.count ?? 0,
+    },
     preview: ctx,
   });
 }
@@ -53,6 +59,7 @@ export async function POST(req: NextRequest) {
   const out: Record<string, unknown> = {};
   if (what === 'calendar' || what === 'all') out.calendar = await syncCalendarEvents(user.id);
   if (what === 'gmail' || what === 'all') out.gmail = await scanGmailLabel(user.id);
+  if (what === 'schedule') out.schedule = await materializeSchedule(user.id);
   return NextResponse.json({ ok: true, ...out });
 }
 
