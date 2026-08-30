@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { audit } from '@/lib/hub/audit';
+import { checkSecret } from '@/lib/hub/guard';
 
 export const runtime = 'nodejs';
 
 // Phase 0: acknowledge + log only. No processing until Phase 1 wires real sources.
 export async function POST(req: NextRequest, ctx: { params: Promise<{ source: string }> }) {
+  const denied = checkSecret(req, 'WEBHOOK_SECRET', ['x-webhook-secret']);
+  if (denied) return denied;
+
   const { source } = await ctx.params;
-
-  if (req.headers.get('x-webhook-secret') !== process.env.WEBHOOK_SECRET) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
   let payload: unknown = null;
   try { payload = await req.json(); } catch { /* non-JSON bodies allowed */ }
 
