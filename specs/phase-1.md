@@ -59,8 +59,19 @@
   `composeBrief` appends a fenced extras block; instruction asks for a one-line weather note
   + 2–3 headlines.
 
+### ✅ Working memory + T1 (Gemini)
+- `0003_memory.sql` — `open_loops`, `profile_facts`, `taste_log`.
+- `lib/llm/gemini.ts` — T1 tier: `gemini-2.5-flash-lite` JSON classifier, records a
+  `model_calls` row (`tier T1`), no-op without `GOOGLE_AI_KEY`.
+- `lib/memory/{loops,detect}.ts` — `relevantLoops` / `upsertLoop` (title-merge) /
+  `setLoopStatus`; `detectLoopsFromTurn` runs a cheap T1 pass after each chat turn and
+  files open loops (fire-and-forget from `/api/chat`).
+- Open loops rendered into the brain ("Open loops" block) + the brief.
+- `/api/loops` (GET / POST manual / PATCH done|dropped) + Settings list.
+- Prompt cache TTL bumped 5m → **1h** (bursty usage shares one ~$0.03 prefix write).
+
 ### ⏭ Next
-- [ ] Memory tables `0003` — `profile_facts`, `open_loops`, `taste_log`; profile *slice* by intent.
+- [ ] Profile *slice* by intent (currently whole file minus Music) + `profile_facts` propose→confirm.
 - [ ] Syllabus ingestion (build against a stand-in PDF; real syllabi later).
 - [ ] Morning brief cron; nudge v1 (assignment 48h / exam 72h).
 - [ ] T1 = Gemini wired (`GOOGLE_AI_KEY`).
