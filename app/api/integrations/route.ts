@@ -50,3 +50,22 @@ export async function POST(req: NextRequest) {
   if (what === 'gmail' || what === 'all') out.gmail = await scanGmailLabel(user.id);
   return NextResponse.json({ ok: true, ...out });
 }
+
+// DELETE ?service=gmail|icloud_calendar → forget the connection (and its synced rows).
+export async function DELETE(req: NextRequest) {
+  const user = await requireUser(req);
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const service = req.nextUrl.searchParams.get('service');
+  if (service !== 'gmail' && service !== 'icloud_calendar') {
+    return NextResponse.json({ error: 'service must be gmail or icloud_calendar' }, { status: 400 });
+  }
+
+  await adminClient.from('connected_services').delete().eq('user_id', user.id).eq('service', service);
+  if (service === 'icloud_calendar') {
+    await adminClient.from('calendar_events').delete().eq('user_id', user.id).eq('source', 'icloud');
+  } else {
+    await adminClient.from('email_items').delete().eq('user_id', user.id);
+  }
+  return NextResponse.json({ ok: true, disconnected: service });
+}

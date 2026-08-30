@@ -90,6 +90,14 @@ export default function SettingsPage() {
     loadInts();
   }
 
+  async function disconnect(service: 'gmail' | 'icloud_calendar') {
+    setBusy(`disc-${service}`);
+    await fetch(`/api/integrations?service=${service}`, { method: 'DELETE', headers: authHeader() });
+    setBusy(null);
+    setCals(null); setIcloudMsg('');
+    loadInts();
+  }
+
   return (
     <div className="min-h-dvh bg-[#fafaf8] dark:bg-[#0a0a0a] px-4 pt-12 pb-24 max-w-xl mx-auto">
       <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-6">Settings</h1>
@@ -107,6 +115,8 @@ export default function SettingsPage() {
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               {ints.gmail.email} · label <span className="font-mono">{ints.gmail.label}</span> ·{' '}
               {ints.gmail.lastScannedAt ? `scanned ${new Date(ints.gmail.lastScannedAt).toLocaleString()}` : 'not scanned yet'}
+              {' · '}
+              <button className="underline" disabled={busy !== null} onClick={() => disconnect('gmail')}>disconnect</button>
             </p>
           ) : (
             <a href={`/api/auth/gmail/authorize?token=${session.access_token}`} className={`${btn} inline-block mt-1 no-underline`}>
@@ -122,6 +132,8 @@ export default function SettingsPage() {
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               {ints.icloud.calendarName} ·{' '}
               {ints.icloud.lastSyncedAt ? `synced ${new Date(ints.icloud.lastSyncedAt).toLocaleString()}` : 'not synced yet'}
+              {' · '}
+              <button className="underline" disabled={busy !== null} onClick={() => disconnect('icloud_calendar')}>disconnect &amp; re-pick</button>
             </p>
           ) : (
             <div className="mt-2 space-y-2">
