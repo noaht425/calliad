@@ -152,11 +152,17 @@ export async function syncCalendarEvents(
       const objects = await conn.client.fetchCalendarObjects({
         calendar: { url: cal.url } as DAVCalendar,
         timeRange: { start: windowStart.toISOString(), end: windowEnd.toISOString() },
+        // Ask iCloud to expand recurring events into concrete instances within the
+        // window (otherwise we get the master VEVENT on its original seed date).
+        expand: true,
       });
       for (const obj of objects) {
         if (!obj.data) continue;
-        const parsed = parseICalEvent(String(obj.data), cal.url, cal.name);
-        if (parsed) events.push(parsed);
+        // An expanded object can contain several VEVENTs (one per occurrence).
+        for (const block of String(obj.data).match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) ?? []) {
+          const parsed = parseICalEvent(block, cal.url, cal.name);
+          if (parsed) events.push(parsed);
+        }
       }
       syncedUrls.push(cal.url);
     } catch (err) {
@@ -164,11 +170,15 @@ export async function syncCalendarEvents(
     }
   }
 
+  // Expanded recurring instances share one UID — key each row by uid + start so
+  // occurrences don't collapse into a single row on upsert.
+  const rowKey = (e: ParsedCalendarEvent) => `${e.uid}::${e.startAt}`;
+
   if (events.length > 0) {
     await adminClient.from('calendar_events').upsert(
       events.map((e) => ({
         user_id: userId,
-        uid: e.uid,
+        uid: rowKey(e),
         calendar_url: e.calendarUrl,
         calendar_name: e.calendarName,
         title: e.title,
@@ -188,7 +198,7 @@ export async function syncCalendarEvents(
   // Prune only within calendars we actually synced this run.
   let removed = 0;
   if (syncedUrls.length > 0) {
-    const syncedUids = new Set(events.map((e) => e.uid));
+    const syncedUids = new Set(events.map((e) => rowKey(e)));
     const { data: existing } = await adminClient
       .from('calendar_events')
       .select('uid')
