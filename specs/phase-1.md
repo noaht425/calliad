@@ -70,8 +70,18 @@
 - `/api/loops` (GET / POST manual / PATCH done|dropped) + Settings list.
 - Prompt cache TTL bumped 5m → **1h** (bursty usage shares one ~$0.03 prefix write).
 
+### ✅ Nudge v1
+- `0004_nudges.sql` — `open_loops.last_nudged_at`.
+- `lib/memory/loops.ts::loopsDueForNudge` — open dated loops inside the deadline window
+  (exam-type 72h / else 48h), not yet nudged; `markNudged`.
+- `lib/nudge/compose.ts` — nudges the single most-urgent loop, one next action, calm
+  (persona reminder-tone rules), T2, persisted; `{force}` previews any dated loop without
+  marking.
+- `/api/cron/nudge` 18:00 UTC + `/api/nudge` manual (`?force=1`). Settings "Run nudge check".
+- **Cron consolidation** (Hobby caps at 2): `/api/cron/brief` now runs sync → brief at 12:00;
+  `/api/cron/nudge` at 18:00. `heartbeat`/`sync` routes kept for manual/external use.
+
 ### ⏭ Next
-- [ ] Nudge v1 — assignment 48h / exam 72h off `open_loops.due_at` (there are real dated loops now).
 - [ ] Syllabus ingestion (build against a stand-in PDF; real syllabi later) — feeds dated loops.
 - [ ] Profile *slice* by intent (currently whole file minus Music) + `profile_facts` propose→confirm.
 - [ ] Frictionless capture (link → reading list); cheap-win Q&A.
