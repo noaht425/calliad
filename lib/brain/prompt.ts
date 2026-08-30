@@ -76,7 +76,7 @@ function renderIntegrations(ctx: IntegrationContext, tz: string): string {
       lines.push(`- ${e.title} · ${when}${e.location ? ` · ${e.location}` : ''}`);
     }
   } else {
-    lines.push('', 'Calendar checked — nothing in the next 14 days. Do NOT invent a schedule; if asked about the week, say the calendar is clear and note that class times etc. in the profile are reference, not confirmed events.');
+    lines.push('', 'Calendar checked — nothing scheduled in the next 14 days. If asked about the week, say the calendar is clear in one line. Do NOT invent events, and do NOT list things that are not happening. Class times in the profile are reference only, not confirmed events.');
   }
 
   if (ctx.emails.length) {
