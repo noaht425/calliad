@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth";
 import { PushSetup } from "@/components/PushSetup";
-import { GlobalCaptureBar } from "@/components/GlobalCaptureBar";
 import { GlobalChatPanel } from "@/components/GlobalChatPanel";
 import { LanguageProvider } from "@/lib/i18n";
 import "./globals.css";
@@ -47,7 +46,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <LanguageProvider>
             <PushSetup />
             {children}
-            <GlobalCaptureBar />
             <GlobalChatPanel />
           </LanguageProvider>
         </AuthProvider>
