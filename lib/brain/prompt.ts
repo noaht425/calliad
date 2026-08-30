@@ -112,13 +112,13 @@ export function assemble(userText: string, state: TurnState): AssembledPrompt {
     {
       type: 'text',
       text: `${PERSONA}\n\n${OPERATING_RULES}`,
-      cache_control: { type: 'ephemeral' },
+      cache_control: { type: 'ephemeral', ttl: '1h' },
     },
     // Layer 3 — profile slice, second cache breakpoint (stable within a session).
     {
       type: 'text',
       text: `## About Noah\n\n${PROFILE_SLICE}`,
-      cache_control: { type: 'ephemeral' },
+      cache_control: { type: 'ephemeral', ttl: '1h' },
     },
     // Layer 4 — fresh every turn, MUST sit after the last breakpoint.
     { type: 'text', text: nowLine },

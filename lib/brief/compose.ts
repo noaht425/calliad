@@ -46,20 +46,33 @@ export async function composeBrief(
 ): Promise<BriefResult> {
   const now = new Date();
 
-  const [integrations, recentConv, extras] = await Promise.all([
+  const dayAgo = new Date(now.getTime() - 36 * 3600 * 1000).toISOString();
+  const [integrations, recentUser, extras] = await Promise.all([
     getIntegrationContext(userId, { daysAhead: 8, emailLimit: 10 }).catch(() => undefined),
+    // Only what NOAH said recently — never feed the brief its own past output back
+    // in (that echoes hallucinations forward). This is "things he mentioned",
+    // labelled as such, not a task list.
     adminClient
       .from('messages')
-      .select('role, content, conversation_id, created_at')
-      .in('role', ['user', 'assistant'])
+      .select('content, created_at')
+      .eq('role', 'user')
+      .gte('created_at', dayAgo)
       .order('created_at', { ascending: false })
-      .limit(6),
+      .limit(8),
     getBriefExtras().catch(() => ({ weather: null, headlines: [] as string[] })),
   ]);
 
-  const recent = (recentConv.data ?? [])
-    .reverse()
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+  const notes = (recentUser.data ?? [])
+    .map((m) => m.content.trim())
+    .filter((c) => c && c.length < 500 && !/^(run|what'?s|show|test)\b/i.test(c)); // drop bare commands
+
+  const recent: TurnState['recent'] = notes.length
+    ? [{
+        role: 'user',
+        content:
+          `Background — things Noah said in the last day or so (not tasks, not questions to answer here; only surface one if it genuinely needs a decision today):\n${notes.map((n) => `- ${n}`).join('\n')}`,
+      }]
+    : [];
 
   const state: TurnState = { now, tz: TZ, recent, integrations };
 
