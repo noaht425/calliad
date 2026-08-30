@@ -43,8 +43,20 @@
   brain like any other event. `POST /api/integrations {what:'schedule'}` + Settings "reload".
   **Greek course time still TBD** — add to `CLASSES` and reload when set.
 
+### ✅ Morning brief
+- `lib/brief/compose.ts` — today+week from `getIntegrationContext` + last 6 turns → brain
+  (`purpose:brief`, proactive, T2, 600 tok) → persisted as a `cron` conversation. `occasion`
+  'scheduled' | 'manual' varies the framing (manual drops "morning brief").
+- `lib/hub/push.ts` — web-push helper (VAPID, prunes 410s).
+- `/api/cron/brief` — daily 12:00 UTC (8am EDT / 7am EST), after `/api/cron/sync` 11:00,
+  heartbeat 10:00. CRON_SECRET + kill-switch + quiet-hours guarded. Pushes + audits.
+- `/api/brief` — bearer manual run (`?push=1`). "Run morning brief now" button in Settings.
+- **Gap:** brief lands as a DB conversation + push, but tapping the push → blank home chat
+  (home doesn't load past conversations yet). Next polish: show today's brief on the home
+  screen.
+
 ### ⏭ Next
-- [ ] Morning brief — cron + endpoint, composes from calendar + mail + open loops.
+- [ ] Surface the brief on the home screen (tap-push → see it).
 - [ ] Memory tables `0003` — `profile_facts`, `open_loops`, `taste_log`; profile *slice* by intent.
 - [ ] Syllabus ingestion (build against a stand-in PDF; real syllabi later).
 - [ ] Morning brief cron; nudge v1 (assignment 48h / exam 72h).
