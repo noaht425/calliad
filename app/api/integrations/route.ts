@@ -29,10 +29,15 @@ export async function GET(req: NextRequest) {
   ]);
 
   const icm = (icloudSvc.data?.metadata ?? null) as Record<string, unknown> | null;
+  const icalNames = Array.isArray(icm?.calendars)
+    ? (icm!.calendars as { name: string }[]).map((c) => c.name)
+    : icm?.calendar_name
+      ? [icm.calendar_name as string]
+      : [];
   return NextResponse.json({
     gmail,
     icloud: icm
-      ? { connected: true, calendarName: icm.calendar_name ?? null, lastSyncedAt: icm.last_synced_at ?? null }
+      ? { connected: true, calendars: icalNames, lastSyncedAt: icm.last_synced_at ?? null }
       : { connected: false },
     counts: { calendar_events: evCount.count ?? 0, email_items: emCount.count ?? 0 },
     preview: ctx,

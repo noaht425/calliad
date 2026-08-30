@@ -1,69 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { DAVClient } from 'tsdav';
 import { supabase } from '@/lib/supabase';
 import { adminClient } from '@/lib/supabase.server';
+import { listICloudCalendars, syncCalendarEvents, type SelectedCalendar } from '@/lib/integrations/icloud-calendar';
 
 export const runtime = 'nodejs';
 
-// POST { apple_id, app_password }               → returns calendar list to pick from
-// POST { apple_id, app_password, calendar_url } → saves the connection + first sync
+// POST { apple_id, app_password }                    → returns calendar list to pick from
+// POST { apple_id, app_password, calendar_urls: [] } → saves the selection + first sync
 export async function POST(req: NextRequest) {
   const token = req.headers.get('authorization')?.replace('Bearer ', '');
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { apple_id, app_password, calendar_url, calendar_name } = (await req.json()) as {
-    apple_id?: string; app_password?: string; calendar_url?: string; calendar_name?: string;
+  const { apple_id, app_password, calendar_urls } = (await req.json()) as {
+    apple_id?: string; app_password?: string; calendar_urls?: string[];
   };
   if (!apple_id || !app_password) {
     return NextResponse.json({ error: 'apple_id and app_password required' }, { status: 400 });
   }
 
-  const client = new DAVClient({
-    serverUrl: 'https://caldav.icloud.com',
-    credentials: { username: apple_id, password: app_password },
-    authMethod: 'Basic',
-    defaultAccountType: 'caldav',
-  });
-
+  let all: SelectedCalendar[];
   try {
-    await client.login();
-    const calendars = await client.fetchCalendars();
-    const eventCalendars = calendars
-      .filter((c) => {
-        const comps = (c.components ?? []) as string[];
-        return comps.length === 0 || comps.includes('VEVENT');
-      })
-      .map((c) => ({ url: c.url, displayName: (c.displayName as string) ?? c.url }));
-
-    if (!calendar_url) {
-      return NextResponse.json({ ok: true, calendars: eventCalendars });
-    }
-
-    const calName =
-      calendar_name ?? eventCalendars.find((c) => c.url === calendar_url)?.displayName ?? 'iCloud Calendar';
-
-    await adminClient.from('connected_services').upsert(
-      {
-        user_id: user.id,
-        service: 'icloud_calendar',
-        access_token: app_password,
-        token_expires_at: null,
-        metadata: { apple_id, calendar_url, calendar_name: calName, last_synced_at: null },
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id,service' },
-    );
-
-    try {
-      const { syncCalendarEvents } = await import('@/lib/integrations/icloud-calendar');
-      const r = await syncCalendarEvents(user.id);
-      return NextResponse.json({ ok: true, calendarName: calName, firstSync: r });
-    } catch (syncErr) {
-      console.error('[icloud/connect] first sync failed', syncErr);
-      return NextResponse.json({ ok: true, calendarName: calName, firstSync: { error: 'sync_failed' } });
-    }
+    all = await listICloudCalendars(apple_id, app_password);
   } catch (err) {
     const msg = String(err);
     if (/401|unauthor|auth/i.test(msg)) {
@@ -71,5 +30,34 @@ export async function POST(req: NextRequest) {
     }
     console.error('[icloud/connect]', err);
     return NextResponse.json({ error: 'Connection failed' }, { status: 500 });
+  }
+
+  if (!calendar_urls || calendar_urls.length === 0) {
+    return NextResponse.json({ ok: true, calendars: all });
+  }
+
+  const selected = all.filter((c) => calendar_urls.includes(c.url));
+  if (selected.length === 0) {
+    return NextResponse.json({ error: 'none of the given calendar_urls matched' }, { status: 400 });
+  }
+
+  await adminClient.from('connected_services').upsert(
+    {
+      user_id: user.id,
+      service: 'icloud_calendar',
+      access_token: app_password,
+      token_expires_at: null,
+      metadata: { apple_id, calendars: selected, last_synced_at: null },
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id,service' },
+  );
+
+  try {
+    const r = await syncCalendarEvents(user.id);
+    return NextResponse.json({ ok: true, calendars: selected.map((c) => c.name), firstSync: r });
+  } catch (syncErr) {
+    console.error('[icloud/connect] first sync failed', syncErr);
+    return NextResponse.json({ ok: true, calendars: selected.map((c) => c.name), firstSync: { error: 'sync_failed' } });
   }
 }

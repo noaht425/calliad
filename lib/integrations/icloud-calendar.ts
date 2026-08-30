@@ -14,10 +14,11 @@ export interface ParsedCalendarEvent {
   rawIcal: string;
 }
 
+export interface SelectedCalendar { url: string; name: string }
+
 export interface ICloudConnection {
   client: DAVClient;
-  calendarUrl: string;
-  calendarName: string;
+  calendars: SelectedCalendar[];
 }
 
 export async function getICloudConnection(userId: string): Promise<ICloudConnection | null> {
@@ -26,21 +27,27 @@ export async function getICloudConnection(userId: string): Promise<ICloudConnect
     .select('access_token, metadata')
     .eq('user_id', userId)
     .eq('service', 'icloud_calendar')
-    .single();
+    .maybeSingle();
 
   if (!data?.access_token) return null;
-  const m = (data.metadata ?? {}) as Record<string, string>;
-  if (!m.apple_id || !m.calendar_url) return null;
+  const m = (data.metadata ?? {}) as Record<string, unknown>;
+  const appleId = m.apple_id as string | undefined;
+
+  // New shape: metadata.calendars = [{url,name}]. Fall back to the old single-cal shape.
+  let calendars = (m.calendars as SelectedCalendar[] | undefined) ?? [];
+  if (calendars.length === 0 && m.calendar_url) {
+    calendars = [{ url: m.calendar_url as string, name: (m.calendar_name as string) ?? 'iCloud Calendar' }];
+  }
+  if (!appleId || calendars.length === 0) return null;
 
   const client = new DAVClient({
     serverUrl: 'https://caldav.icloud.com',
-    credentials: { username: m.apple_id, password: data.access_token },
+    credentials: { username: appleId, password: data.access_token },
     authMethod: 'Basic',
     defaultAccountType: 'caldav',
   });
-
   await client.login();
-  return { client, calendarUrl: m.calendar_url, calendarName: m.calendar_name ?? 'iCloud Calendar' };
+  return { client, calendars };
 }
 
 function unfoldiCal(ical: string): string {
@@ -57,7 +64,6 @@ function icalDateToISO(value: string, params: string): string {
   if (params.includes('VALUE=DATE')) {
     return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T00:00:00Z`;
   }
-
   const isUtc = value.endsWith('Z');
   const v = value.replace('Z', '');
   const year = parseInt(v.slice(0, 4), 10);
@@ -66,21 +72,16 @@ function icalDateToISO(value: string, params: string): string {
   const hour = parseInt(v.slice(9, 11) || '0', 10);
   const min = parseInt(v.slice(11, 13) || '0', 10);
   const sec = parseInt(v.slice(13, 15) || '0', 10);
-
   if (isUtc) return new Date(Date.UTC(year, month, day, hour, min, sec)).toISOString();
 
   const tzid = params.match(/TZID=([^;:]+)/)?.[1];
   if (!tzid) return new Date(Date.UTC(year, month, day, hour, min, sec)).toISOString();
-
-  // Inverse-lookup: find the UTC time that Intl renders as our local time in tzid.
-  // approxUtc treats local as UTC; we measure the rendering error and correct it.
   try {
     const approxUtc = new Date(Date.UTC(year, month, day, hour, min, sec));
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: tzid,
       year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false,
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
     }).formatToParts(approxUtc);
     const get = (type: string) => parseInt(parts.find((p) => p.type === type)!.value, 10);
     const renderedMs = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
@@ -96,14 +97,11 @@ export function parseICalEvent(ical: string, calendarUrl: string, calendarName: 
   const match = unfolded.match(/BEGIN:VEVENT([\s\S]*?)END:VEVENT/);
   if (!match) return null;
   const block = match[1];
-
   const uid = getICalProp(block, 'UID')?.value;
   const summary = getICalProp(block, 'SUMMARY')?.value;
   const dtstart = getICalProp(block, 'DTSTART');
   if (!uid || !summary || !dtstart) return null;
-
   const dtend = getICalProp(block, 'DTEND');
-
   return {
     uid,
     calendarUrl,
@@ -118,28 +116,52 @@ export function parseICalEvent(ical: string, calendarUrl: string, calendarName: 
   };
 }
 
-export async function syncCalendarEvents(userId: string): Promise<{ synced: number; removed: number; error?: string }> {
-  const conn = await getICloudConnection(userId);
-  if (!conn) return { synced: 0, removed: 0, error: 'not_connected' };
+/** List every event-capable calendar for the given credentials (for the picker). */
+export async function listICloudCalendars(appleId: string, appPassword: string): Promise<SelectedCalendar[]> {
+  const client = new DAVClient({
+    serverUrl: 'https://caldav.icloud.com',
+    credentials: { username: appleId, password: appPassword },
+    authMethod: 'Basic',
+    defaultAccountType: 'caldav',
+  });
+  await client.login();
+  const cals = await client.fetchCalendars();
+  return cals
+    .filter((c) => {
+      const comps = (c.components ?? []) as string[];
+      return comps.length === 0 || comps.includes('VEVENT');
+    })
+    .map((c) => ({ url: c.url, name: (c.displayName as string) ?? c.url }));
+}
 
-  const { client, calendarUrl, calendarName } = conn;
+export async function syncCalendarEvents(
+  userId: string,
+): Promise<{ synced: number; removed: number; calendars: number; error?: string }> {
+  const conn = await getICloudConnection(userId);
+  if (!conn) return { synced: 0, removed: 0, calendars: 0, error: 'not_connected' };
 
   const now = new Date();
-  const windowStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days back
-  const windowEnd = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
-
-  const calendar = { url: calendarUrl } as DAVCalendar;
-
-  const objects = await client.fetchCalendarObjects({
-    calendar,
-    timeRange: { start: windowStart.toISOString(), end: windowEnd.toISOString() },
-  });
+  const windowStart = new Date(now.getTime() - 7 * 86400000);
+  const windowEnd = new Date(now.getTime() + 365 * 86400000);
 
   const events: ParsedCalendarEvent[] = [];
-  for (const obj of objects) {
-    if (!obj.data) continue;
-    const parsed = parseICalEvent(String(obj.data), calendarUrl, calendarName);
-    if (parsed) events.push(parsed);
+  const syncedUrls: string[] = [];
+
+  for (const cal of conn.calendars) {
+    try {
+      const objects = await conn.client.fetchCalendarObjects({
+        calendar: { url: cal.url } as DAVCalendar,
+        timeRange: { start: windowStart.toISOString(), end: windowEnd.toISOString() },
+      });
+      for (const obj of objects) {
+        if (!obj.data) continue;
+        const parsed = parseICalEvent(String(obj.data), cal.url, cal.name);
+        if (parsed) events.push(parsed);
+      }
+      syncedUrls.push(cal.url);
+    } catch (err) {
+      console.error('[icloud] calendar sync failed', cal.name, err);
+    }
   }
 
   if (events.length > 0) {
@@ -159,40 +181,40 @@ export async function syncCalendarEvents(userId: string): Promise<{ synced: numb
         source: 'icloud',
         updated_at: new Date().toISOString(),
       })),
-      { onConflict: 'user_id,uid', ignoreDuplicates: false }
+      { onConflict: 'user_id,uid', ignoreDuplicates: false },
     );
   }
 
-  // Remove events in the window that iCloud no longer returns (deleted/moved)
+  // Prune only within calendars we actually synced this run.
   let removed = 0;
-  const syncedUids = events.map((e) => e.uid);
-  const { data: existing } = await adminClient
-    .from('calendar_events')
-    .select('uid')
-    .eq('user_id', userId)
-    .eq('source', 'icloud')
-    .gte('start_at', windowStart.toISOString())
-    .lte('start_at', windowEnd.toISOString());
-
-  const toDelete = (existing ?? []).map((r) => r.uid).filter((uid) => !syncedUids.includes(uid));
-  if (toDelete.length > 0) {
-    await adminClient.from('calendar_events').delete().eq('user_id', userId).in('uid', toDelete);
-    removed = toDelete.length;
+  if (syncedUrls.length > 0) {
+    const syncedUids = new Set(events.map((e) => e.uid));
+    const { data: existing } = await adminClient
+      .from('calendar_events')
+      .select('uid')
+      .eq('user_id', userId)
+      .eq('source', 'icloud')
+      .in('calendar_url', syncedUrls)
+      .gte('start_at', windowStart.toISOString())
+      .lte('start_at', windowEnd.toISOString());
+    const toDelete = (existing ?? []).map((r) => r.uid).filter((uid) => !syncedUids.has(uid));
+    if (toDelete.length > 0) {
+      await adminClient.from('calendar_events').delete().eq('user_id', userId).in('uid', toDelete);
+      removed = toDelete.length;
+    }
   }
 
-  // Record last sync time
   const { data: svc } = await adminClient
     .from('connected_services')
     .select('metadata')
     .eq('user_id', userId)
     .eq('service', 'icloud_calendar')
-    .single();
-
+    .maybeSingle();
   await adminClient
     .from('connected_services')
     .update({ metadata: { ...((svc?.metadata ?? {}) as object), last_synced_at: new Date().toISOString() } })
     .eq('user_id', userId)
     .eq('service', 'icloud_calendar');
 
-  return { synced: events.length, removed };
+  return { synced: events.length, removed, calendars: syncedUrls.length };
 }

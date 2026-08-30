@@ -6,14 +6,13 @@ import { supabase } from '@/lib/supabase';
 import { requestPushPermission } from '@/components/PushSetup';
 import { BottomNav } from '@/components/BottomNav';
 
-// useSearchParams() opts this route out of static prerender.
 export const dynamic = 'force-dynamic';
 
 type KillLevel = 'off' | 'pause_proactive' | 'pause_all';
 
 interface IntegrationsState {
   gmail: { connected: boolean; email?: string; label?: string; lastScannedAt?: string | null };
-  icloud: { connected: boolean; calendarName?: string | null; lastSyncedAt?: string | null };
+  icloud: { connected: boolean; calendars?: string[]; lastSyncedAt?: string | null };
   counts: { calendar_events: number; email_items: number };
 }
 
@@ -32,7 +31,8 @@ export default function SettingsPage() {
   // iCloud connect form
   const [appleId, setAppleId] = useState('');
   const [appPw, setAppPw] = useState('');
-  const [cals, setCals] = useState<{ url: string; displayName: string }[] | null>(null);
+  const [cals, setCals] = useState<{ url: string; name: string }[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [icloudMsg, setIcloudMsg] = useState('');
 
   const authHeader = useCallback(
@@ -68,18 +68,20 @@ export default function SettingsPage() {
     setBusy(null);
     if (!r.ok) { setIcloudMsg(j.error ?? 'Failed'); return; }
     setCals(j.calendars ?? []);
+    setPicked(new Set());
   }
 
-  async function saveICloud(url: string, name: string) {
+  async function saveICloud() {
     setBusy('icloud-save'); setIcloudMsg('');
     const r = await fetch('/api/auth/icloud/connect', {
       method: 'POST', headers: authHeader(),
-      body: JSON.stringify({ apple_id: appleId, app_password: appPw, calendar_url: url, calendar_name: name }),
+      body: JSON.stringify({ apple_id: appleId, app_password: appPw, calendar_urls: [...picked] }),
     });
     const j = await r.json();
     setBusy(null);
     if (!r.ok) { setIcloudMsg(j.error ?? 'Failed'); return; }
-    setCals(null); setAppPw(''); setIcloudMsg(`Connected: ${j.calendarName} (synced ${j.firstSync?.synced ?? 0})`);
+    setCals(null); setAppPw(''); setPicked(new Set());
+    setIcloudMsg(`Connected: ${(j.calendars ?? []).join(', ')} (synced ${j.firstSync?.synced ?? 0})`);
     loadInts();
   }
 
@@ -130,7 +132,7 @@ export default function SettingsPage() {
           <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">iCloud Calendar</p>
           {ints?.icloud.connected ? (
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              {ints.icloud.calendarName} ·{' '}
+              {(ints.icloud.calendars ?? []).join(', ') || 'no calendars'} ·{' '}
               {ints.icloud.lastSyncedAt ? `synced ${new Date(ints.icloud.lastSyncedAt).toLocaleString()}` : 'not synced yet'}
               {' · '}
               <button className="underline" disabled={busy !== null} onClick={() => disconnect('icloud_calendar')}>disconnect &amp; re-pick</button>
@@ -146,12 +148,24 @@ export default function SettingsPage() {
               )}
               {cals && (
                 <div className="space-y-1">
-                  <p className="text-xs text-zinc-500">Pick the calendar to sync:</p>
+                  <p className="text-xs text-zinc-500">Pick the calendars to sync:</p>
                   {cals.map((c) => (
-                    <button key={c.url} className={`${field} text-left`} disabled={busy !== null} onClick={() => saveICloud(c.url, c.displayName)}>
-                      {c.displayName}
-                    </button>
+                    <label key={c.url} className="flex items-center gap-2 text-sm py-1">
+                      <input
+                        type="checkbox"
+                        checked={picked.has(c.url)}
+                        onChange={(e) => setPicked((p) => {
+                          const n = new Set(p);
+                          if (e.target.checked) n.add(c.url); else n.delete(c.url);
+                          return n;
+                        })}
+                      />
+                      {c.name}
+                    </label>
                   ))}
+                  <button className={btn} disabled={busy !== null || picked.size === 0} onClick={saveICloud}>
+                    {busy === 'icloud-save' ? 'Connecting…' : `Connect ${picked.size || ''} calendar${picked.size === 1 ? '' : 's'}`}
+                  </button>
                 </div>
               )}
               {icloudMsg && <p className="text-xs text-zinc-500">{icloudMsg}</p>}
