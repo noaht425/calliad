@@ -51,12 +51,15 @@
 - `/api/cron/brief` — daily 12:00 UTC (8am EDT / 7am EST), after `/api/cron/sync` 11:00,
   heartbeat 10:00. CRON_SECRET + kill-switch + quiet-hours guarded. Pushes + audits.
 - `/api/brief` — bearer manual run (`?push=1`). "Run morning brief now" button in Settings.
-- **Gap:** brief lands as a DB conversation + push, but tapping the push → blank home chat
-  (home doesn't load past conversations yet). Next polish: show today's brief on the home
-  screen.
+- **Home surfacing:** `/api/brief/latest` (most recent cron conversation, last 18h) →
+  `Chat.tsx` loads it on mount, so the home screen opens on today's brief and replies thread
+  onto it. Tapping the push now lands somewhere useful.
+- **Weather + news:** `lib/brief/extras.ts` — Open-Meteo (no key; Hartford coords, swap when
+  Noah's not in term) + NPR/BBC RSS (no key, last ~30h, deduped top 6). Failure-tolerant.
+  `composeBrief` appends a fenced extras block; instruction asks for a one-line weather note
+  + 2–3 headlines.
 
 ### ⏭ Next
-- [ ] Surface the brief on the home screen (tap-push → see it).
 - [ ] Memory tables `0003` — `profile_facts`, `open_loops`, `taste_log`; profile *slice* by intent.
 - [ ] Syllabus ingestion (build against a stand-in PDF; real syllabi later).
 - [ ] Morning brief cron; nudge v1 (assignment 48h / exam 72h).
