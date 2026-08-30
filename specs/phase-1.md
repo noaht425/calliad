@@ -23,13 +23,25 @@
 - Deps: `googleapis` + `tsdav` back in.
 
 ### ✅ Calendar + mail wired into the brain
-- `TurnState.integrations` → `prompt.ts` renders a fresh layer-4 block (events plain,
-  email `<untrusted>`-fenced) after the cache breakpoints. `/api/chat` fetches
-  `getIntegrationContext` (next 14d events + 8 recent labeled emails) per turn.
+- `TurnState.integrations` → `prompt.ts` renders a fresh layer-4 "Live data" block (events
+  plain, email `<untrusted>`-fenced) after the cache breakpoints. Always emitted — when the
+  window is empty it says so and forbids inventing a schedule from profile class-times.
+  `/api/chat` fetches `getIntegrationContext` (next 14d events + 8 recent labeled emails).
+- New operating rules: no thinking out loud; Live data is ground truth, profile is reference.
 - Multi-calendar iCloud: `metadata.calendars = [{url,name}]`, per-calendar prune,
-  disconnect/re-pick in Settings. iCloud CalDAV can't see subscribed ("Other")
-  calendars or the auto Birthdays calendar — an "add calendar by ICS URL" option is a
-  possible follow-up if a needed feed lives there.
+  disconnect/re-pick in Settings.
+- **Recurrence:** `fetchCalendarObjects({ expand: true })` — iCloud returns concrete instances;
+  row key `uid::start`. iCloud CalDAV can't see subscribed ("Other") calendars or the auto
+  Birthdays calendar (ICS-URL subscribe = possible follow-up).
+- **Ignore-list:** `IGNORE_TITLE_SUBSTRINGS` in `icloud-calendar.ts` drops stale open-ended
+  recurrences (old piano/trumpet lessons, house cleaners). Extend as they surface.
+
+### ✅ Class schedule materialised (`lib/integrations/schedule.ts`)
+- Noah's classes live only in his transcript. `materializeSchedule(userId)` generates dated
+  `calendar_events` rows (`source: 'schedule'`) for every meeting Sep 8 – Dec 14 (4 classes +
+  Wed counseling), skipping Trinity Days / Thanksgiving, DST-correct ET→UTC. Flows into the
+  brain like any other event. `POST /api/integrations {what:'schedule'}` + Settings "reload".
+  **Greek course time still TBD** — add to `CLASSES` and reload when set.
 
 ### ⏭ Next
 - [ ] Morning brief — cron + endpoint, composes from calendar + mail + open loops.
