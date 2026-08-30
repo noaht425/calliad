@@ -4,7 +4,9 @@ import { audit } from '@/lib/hub/audit';
 // T1 tier — cheap classification / extraction / tagging. Gemini Flash-Lite.
 // Not persona-facing. Reuse the model string Doug's deployed code uses.
 
-const MODEL = 'gemini-2.5-flash-lite';
+// gemini-2.5-flash-lite was retired for new API keys (Aug 2026). 3.5-flash-lite
+// is the current cheap tier.
+const MODEL = 'gemini-3.5-flash-lite';
 // Rough public rate for the Flash-Lite tier, USD per MTok. Re-check when confirmed.
 const PRICE = { input: 0.1, output: 0.4 };
 
