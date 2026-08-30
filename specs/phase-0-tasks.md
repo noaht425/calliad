@@ -20,26 +20,32 @@ rework.
 
 ---
 
-## Build progress (live — updated 2026-08-30)
+## Build progress — PHASE 0 COMPLETE (2026-08-30)
 
-**Code-complete and `next build`-green** on `noaht425/calliad` (commits `f520f2a` seed,
-`ab76c60` Track A, `06c4390` Tracks B–E):
+Deployed on Vercel (`calliad-psi.vercel.app`), Supabase live, **§10 acceptance test passed in
+full**. Repo `noaht425/calliad` @ tag `phase-0`.
 
-- ✅ **A** — forked/seeded (private repo, no upstream; full donor on branch `phase-1-reference`),
-  pruned to the skeleton, deps swapped to `@anthropic-ai/sdk@0.122`, planning docs → `planning/`,
-  `.env.local` scaffolded with generated hub + VAPID secrets.
-- ✅ **B** — `supabase/migrations/0001_init.sql` written (not yet applied — needs live DB).
-  `lib/hub/{config,audit}.ts`.
+- ✅ **A** — seeded (private repo, no upstream; full donor on branch `phase-1-reference`),
+  pruned, deps → `@anthropic-ai/sdk@0.122`, planning docs → `planning/`.
+- ✅ **B** — `0001_init.sql` applied to Supabase; `lib/hub/{config,audit}.ts`.
 - ✅ **C** — `lib/router/{tiers,route}.ts`, `lib/brain/{prompt,call}.ts`; persona.md + trimmed
-  profile.md vendored to `content/`.
-- ✅ **D** — `/api/chat` (real SSE brain route), `/api/health`, `/api/admin/killswitch`,
+  profile.md in `content/`.
+- ✅ **D** — `/api/chat` (SSE brain route), `/api/health`, `/api/admin/killswitch`,
   `/api/webhook/[source]`.
-- ✅ **E** — `/api/cron/heartbeat` + `vercel.json` cron.
-- ⏳ **F3/F4** — chat panel already streams SSE; kill-switch UI is read-only in settings (curl
-  to set). Revisit against Doug's UI refresh.
-- ⛔ **Blocked on Noah:** real `ANTHROPIC_API_KEY` + Supabase creds in `.env.local`;
-  `supabase link` + apply `0001_init.sql`; then Vercel import + env vars; then **G** (run the
-  §10 acceptance test — nothing has executed end-to-end yet).
+- ✅ **E** — `/api/cron/heartbeat` + `vercel.json` daily cron.
+- ✅ **G** — acceptance test: in-persona streamed reply, audit rows in order, `model_calls`
+  with real cost, prompt caching (turn 2 ~8× cheaper), kill switch, spend-cap downgrade to
+  Haiku/T1. Total test spend ~$0.06.
+
+**Fixes made during bring-up** (all committed): Vercel Framework Preset was "Other" (→ Next.js);
+Supabase clients hardened against missing build-time env; secret guards fail closed;
+`SPEND_CAP_USD_MONTH` now read from env not the config table; `output_config.effort` no longer
+sent to Haiku (400s); chat input was hidden behind the fixed BottomNav.
+
+**Known loose ends (non-blocking):** re-add `WEBHOOK_SECRET` in Vercel; Supabase Site URL set
+but login sends a magic link not a code (fine for one user); Doug's UI refresh not yet
+reconciled; `content/{persona,profile}.md` are manual copies of `planning/` until Phase 1's
+DB-backed profile slice.
 
 ---
 
