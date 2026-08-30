@@ -71,10 +71,9 @@
 - Prompt cache TTL bumped 5m → **1h** (bursty usage shares one ~$0.03 prefix write).
 
 ### ⏭ Next
+- [ ] Nudge v1 — assignment 48h / exam 72h off `open_loops.due_at` (there are real dated loops now).
+- [ ] Syllabus ingestion (build against a stand-in PDF; real syllabi later) — feeds dated loops.
 - [ ] Profile *slice* by intent (currently whole file minus Music) + `profile_facts` propose→confirm.
-- [ ] Syllabus ingestion (build against a stand-in PDF; real syllabi later).
-- [ ] Morning brief cron; nudge v1 (assignment 48h / exam 72h).
-- [ ] T1 = Gemini wired (`GOOGLE_AI_KEY`).
 - [ ] Frictionless capture (link → reading list); cheap-win Q&A.
 
 ## Setup Noah must do (for the integrations to work)
