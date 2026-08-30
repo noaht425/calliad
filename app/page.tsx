@@ -16,11 +16,10 @@ export default function HomePage() {
   if (loading || !session) return null;
 
   return (
-    <div className="flex flex-col h-dvh">
-      <div className="flex-1 min-h-0 pb-16">
-        <Chat />
-      </div>
+    // BottomNav is position:fixed (~56px). pb-14 keeps the chat input above it.
+    <main className="h-dvh pb-14">
+      <Chat />
       <BottomNav />
-    </div>
+    </main>
   );
 }
