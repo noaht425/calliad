@@ -34,6 +34,7 @@ export default function SettingsPage() {
   const [cals, setCals] = useState<{ url: string; name: string }[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [icloudMsg, setIcloudMsg] = useState('');
+  const [briefText, setBriefText] = useState<string | null>(null);
 
   const authHeader = useCallback(
     () => ({ Authorization: `Bearer ${session!.access_token}`, 'Content-Type': 'application/json' }),
@@ -97,6 +98,14 @@ export default function SettingsPage() {
     await fetch('/api/integrations', { method: 'POST', headers: authHeader(), body: JSON.stringify({ what: 'schedule' }) });
     setBusy(null);
     loadInts();
+  }
+
+  async function runBrief() {
+    setBusy('brief'); setBriefText(null);
+    const r = await fetch('/api/brief?push=1', { headers: { Authorization: `Bearer ${session!.access_token}` } });
+    const j = await r.json();
+    setBusy(null);
+    setBriefText(j.deferred ? '(deferred — spend cap reached)' : (j.text ?? j.error ?? 'failed'));
   }
 
   async function disconnect(service: 'gmail' | 'icloud_calendar') {
@@ -192,7 +201,7 @@ export default function SettingsPage() {
         </div>
 
         {(ints?.gmail.connected || ints?.icloud.connected) && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 mb-3">
             <button className={btn} disabled={busy !== null} onClick={syncNow}>
               {busy === 'sync' ? 'Syncing…' : 'Sync now'}
             </button>
@@ -201,6 +210,17 @@ export default function SettingsPage() {
             </span>
           </div>
         )}
+
+        <div>
+          <button className={btn} disabled={busy !== null} onClick={runBrief}>
+            {busy === 'brief' ? 'Composing…' : 'Run morning brief now'}
+          </button>
+          {briefText && (
+            <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap border-l-2 border-zinc-300 dark:border-zinc-700 pl-3">
+              {briefText}
+            </p>
+          )}
+        </div>
       </section>
 
       {/* ── Notifications ────────────────────────────────────────────── */}
