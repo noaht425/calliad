@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const brief = await composeBrief(user.id);
+  const brief = await composeBrief(user.id, 'manual');
   if (!brief.deferred && req.nextUrl.searchParams.get('push') === '1') {
     await sendPush(user.id, { title: 'Morning brief', body: brief.text.slice(0, 160), url: '/', tag: 'brief' });
   }
