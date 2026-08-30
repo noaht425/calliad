@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type Anthropic from '@anthropic-ai/sdk';
+import type { IntegrationContext } from '@/lib/integrations/context';
 
 const CONTENT_DIR = path.join(process.cwd(), 'content');
 
@@ -54,6 +55,34 @@ export interface TurnState {
   now: Date;
   tz: string;
   recent: { role: 'user' | 'assistant'; content: string }[]; // last ~10–20
+  integrations?: IntegrationContext; // upcoming calendar + watched-label mail
+}
+
+function renderIntegrations(ctx: IntegrationContext, tz: string): string {
+  const lines: string[] = [];
+  if (ctx.events.length) {
+    lines.push('## Upcoming calendar');
+    for (const e of ctx.events.slice(0, 25)) {
+      const d = new Date(e.start_at);
+      const when = e.all_day
+        ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz })
+        : d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz });
+      lines.push(`- ${e.title} · ${when}${e.location ? ` · ${e.location}` : ''}`);
+    }
+  }
+  if (ctx.emails.length) {
+    lines.push('');
+    lines.push('## Recent mail in the watched label');
+    lines.push('<untrusted source="gmail">');
+    for (const m of ctx.emails.slice(0, 8)) {
+      const when = m.received_at
+        ? new Date(m.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: tz })
+        : '';
+      lines.push(`- [${when}] ${m.from_addr} — ${m.subject}${m.snippet ? `: ${m.snippet.slice(0, 160)}` : ''}`);
+    }
+    lines.push('</untrusted>');
+  }
+  return lines.join('\n');
 }
 
 export interface AssembledPrompt {
@@ -85,6 +114,10 @@ export function assemble(userText: string, state: TurnState): AssembledPrompt {
     // Layer 4 — fresh every turn, MUST sit after the last breakpoint.
     { type: 'text', text: nowLine },
   ];
+
+  if (state.integrations && (state.integrations.events.length || state.integrations.emails.length)) {
+    system.push({ type: 'text', text: renderIntegrations(state.integrations, state.tz) });
+  }
 
   const messages: Anthropic.MessageParam[] = [
     ...state.recent.map((m) => ({ role: m.role, content: m.content })),

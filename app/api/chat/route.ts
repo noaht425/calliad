@@ -5,6 +5,7 @@ import { adminClient } from '@/lib/supabase.server';
 import { route } from '@/lib/router/route';
 import { call } from '@/lib/brain/call';
 import { audit } from '@/lib/hub/audit';
+import { getIntegrationContext } from '@/lib/integrations/context';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -58,8 +59,11 @@ export async function POST(req: NextRequest) {
   }
 
   // ── brain ───────────────────────────────────────────────────────────────
-  const recent = await recentTurns(conversationId, text);
-  const state: TurnState = { now: new Date(), tz: TZ, recent };
+  const [recent, integrations] = await Promise.all([
+    recentTurns(conversationId, text),
+    getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
+  ]);
+  const state: TurnState = { now: new Date(), tz: TZ, recent, integrations };
   const { meta, stream } = await call({
     purpose: 'chat',
     tier: decision.tier,
