@@ -13,6 +13,12 @@ const SEED: Record<string, string> = {
 };
 
 export async function getConfig(key: string): Promise<string> {
+  // The monthly spend cap is an operator setting, controlled via env — not runtime
+  // state. Env wins when set; the config row is only a fallback / record.
+  if (key === 'spend_cap_usd_month' && process.env.SPEND_CAP_USD_MONTH) {
+    return process.env.SPEND_CAP_USD_MONTH;
+  }
+
   const { data } = await adminClient.from('config').select('value').eq('key', key).maybeSingle();
   if (data) return data.value;
   // self-heal: a fresh DB may not be seeded yet
