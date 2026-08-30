@@ -61,7 +61,7 @@
 
 ### ✅ Working memory + T1 (Gemini)
 - `0003_memory.sql` — `open_loops`, `profile_facts`, `taste_log`.
-- `lib/llm/gemini.ts` — T1 tier: `gemini-2.5-flash-lite` JSON classifier, records a
+- `lib/llm/gemini.ts` — T1 tier: `gemini-3.5-flash-lite` (2.5 retired for new keys) JSON classifier, records a
   `model_calls` row (`tier T1`), no-op without `GOOGLE_AI_KEY`.
 - `lib/memory/{loops,detect}.ts` — `relevantLoops` / `upsertLoop` (title-merge) /
   `setLoopStatus`; `detectLoopsFromTurn` runs a cheap T1 pass after each chat turn and
