@@ -94,3 +94,37 @@ export async function setLoopStatus(userId: string, id: string, status: 'done' |
     .eq('user_id', userId)
     .eq('id', id);
 }
+
+const isExam = (l: OpenLoop) =>
+  l.tags.some((t) => /exam|midterm|final|test|quiz/i.test(t)) || /exam|midterm|final\b|test\b/i.test(l.title);
+
+/**
+ * Open, dated loops that have crossed into the deadline window (exam-type 72h,
+ * everything else 48h) and haven't been nudged yet. Most-urgent first.
+ */
+export async function loopsDueForNudge(userId: string): Promise<OpenLoop[]> {
+  const now = Date.now();
+  const { data } = await adminClient
+    .from('open_loops')
+    .select('id, title, body, due_at, status, tags, source, last_nudged_at')
+    .eq('user_id', userId)
+    .eq('status', 'open')
+    .is('last_nudged_at', null)
+    .not('due_at', 'is', null)
+    .gte('due_at', new Date(now).toISOString())               // not already past
+    .lte('due_at', new Date(now + 72 * 3600_000).toISOString()) // within the widest window
+    .order('due_at', { ascending: true });
+
+  return ((data ?? []) as (OpenLoop & { last_nudged_at: string | null })[]).filter((l) => {
+    const hoursOut = (Date.parse(l.due_at!) - now) / 3600_000;
+    return hoursOut <= (isExam(l) ? 72 : 48);
+  });
+}
+
+export async function markNudged(userId: string, id: string): Promise<void> {
+  await adminClient
+    .from('open_loops')
+    .update({ last_nudged_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('id', id);
+}

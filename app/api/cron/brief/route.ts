@@ -5,6 +5,8 @@ import { config } from '@/lib/hub/config';
 import { checkSecret } from '@/lib/hub/guard';
 import { sendPush } from '@/lib/hub/push';
 import { composeBrief } from '@/lib/brief/compose';
+import { syncCalendarEvents } from '@/lib/integrations/icloud-calendar';
+import { scanGmailLabel } from '@/lib/integrations/gmail';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -31,13 +33,24 @@ async function handle(req: NextRequest) {
 
   // Everyone with any connected service or synced schedule gets a brief. Phase 0/1
   // is single-user, but this generalises.
-  const { data: svc } = await adminClient.from('connected_services').select('user_id');
+  const { data: svc } = await adminClient.from('connected_services').select('user_id, service');
   const { data: sched } = await adminClient.from('calendar_events').select('user_id').eq('source', 'schedule').limit(1000);
   const userIds = [...new Set([...(svc ?? []), ...(sched ?? [])].map((r) => r.user_id))];
+  const svcByUser = new Map<string, Set<string>>();
+  for (const s of svc ?? []) {
+    if (!svcByUser.has(s.user_id)) svcByUser.set(s.user_id, new Set());
+    svcByUser.get(s.user_id)!.add(s.service);
+  }
 
   const results: Record<string, unknown>[] = [];
   for (const userId of userIds) {
     try {
+      // Freshen the calendar/mail first so the brief sees today's state
+      // (folded in — Hobby-plan cron limit means we run one morning job).
+      const s = svcByUser.get(userId) ?? new Set<string>();
+      if (s.has('icloud_calendar')) await syncCalendarEvents(userId).catch(() => {});
+      if (s.has('gmail')) await scanGmailLabel(userId).catch(() => {});
+
       const brief = await composeBrief(userId);
       if (brief.deferred) { results.push({ userId, deferred: true }); continue; }
       const push = await sendPush(userId, {

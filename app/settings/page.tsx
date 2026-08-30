@@ -134,6 +134,15 @@ export default function SettingsPage() {
     setBriefText(j.deferred ? '(deferred — spend cap reached)' : (j.text ?? j.error ?? 'failed'));
   }
 
+  async function runNudge() {
+    setBusy('nudge'); setBriefText(null);
+    // force=1 so the preview shows a composed nudge even if nothing's strictly in-window yet
+    const r = await fetch('/api/nudge?force=1', { headers: { Authorization: `Bearer ${session!.access_token}` } });
+    const j = await r.json();
+    setBusy(null);
+    setBriefText(j.text ?? j.note ?? j.error ?? 'nothing to nudge');
+  }
+
   async function disconnect(service: 'gmail' | 'icloud_calendar') {
     setBusy(`disc-${service}`);
     await fetch(`/api/integrations?service=${service}`, { method: 'DELETE', headers: authHeader() });
@@ -237,10 +246,15 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <div>
+        <div className="flex flex-wrap gap-2">
           <button className={btn} disabled={busy !== null} onClick={runBrief}>
             {busy === 'brief' ? 'Composing…' : 'Run morning brief now'}
           </button>
+          <button className={btn} disabled={busy !== null} onClick={runNudge}>
+            {busy === 'nudge' ? 'Checking…' : 'Run nudge check'}
+          </button>
+        </div>
+        <div>
           {briefText && (
             <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap border-l-2 border-zinc-300 dark:border-zinc-700 pl-3">
               {briefText}
