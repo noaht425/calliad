@@ -134,6 +134,13 @@ export async function listICloudCalendars(appleId: string, appPassword: string):
     .map((c) => ({ url: c.url, name: (c.displayName as string) ?? c.url }));
 }
 
+// Stale recurring events in the real calendar (old lessons etc. with no end date)
+// that expand:true resurrects. Case-insensitive substring match on the title.
+// Add more as they surface — or make this user-editable later.
+const IGNORE_TITLE_SUBSTRINGS = ['piano lesson', 'trumpet lesson', 'house cleaners'];
+const isIgnored = (title: string) =>
+  IGNORE_TITLE_SUBSTRINGS.some((s) => title.toLowerCase().includes(s));
+
 export async function syncCalendarEvents(
   userId: string,
 ): Promise<{ synced: number; removed: number; calendars: number; error?: string }> {
@@ -161,7 +168,7 @@ export async function syncCalendarEvents(
         // An expanded object can contain several VEVENTs (one per occurrence).
         for (const block of String(obj.data).match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) ?? []) {
           const parsed = parseICalEvent(block, cal.url, cal.name);
-          if (parsed) events.push(parsed);
+          if (parsed && !isIgnored(parsed.title)) events.push(parsed);
         }
       }
       syncedUrls.push(cal.url);
