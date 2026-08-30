@@ -22,8 +22,17 @@
 - Settings page — Connect Gmail / Connect iCloud / Sync now / counts.
 - Deps: `googleapis` + `tsdav` back in.
 
+### ✅ Calendar + mail wired into the brain
+- `TurnState.integrations` → `prompt.ts` renders a fresh layer-4 block (events plain,
+  email `<untrusted>`-fenced) after the cache breakpoints. `/api/chat` fetches
+  `getIntegrationContext` (next 14d events + 8 recent labeled emails) per turn.
+- Multi-calendar iCloud: `metadata.calendars = [{url,name}]`, per-calendar prune,
+  disconnect/re-pick in Settings. iCloud CalDAV can't see subscribed ("Other")
+  calendars or the auto Birthdays calendar — an "add calendar by ICS URL" option is a
+  possible follow-up if a needed feed lives there.
+
 ### ⏭ Next
-- [ ] Wire `getIntegrationContext` into the brain prompt (layer 4) + the morning brief.
+- [ ] Morning brief — cron + endpoint, composes from calendar + mail + open loops.
 - [ ] Memory tables `0003` — `profile_facts`, `open_loops`, `taste_log`; profile *slice* by intent.
 - [ ] Syllabus ingestion (build against a stand-in PDF; real syllabi later).
 - [ ] Morning brief cron; nudge v1 (assignment 48h / exam 72h).
