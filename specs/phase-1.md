@@ -81,8 +81,18 @@
 - **Cron consolidation** (Hobby caps at 2): `/api/cron/brief` now runs sync → brief at 12:00;
   `/api/cron/nudge` at 18:00. `heartbeat`/`sync` routes kept for manual/external use.
 
-### ⏭ Next
-- [ ] Syllabus ingestion (build against a stand-in PDF; real syllabi later) — feeds dated loops.
+### ✅ Syllabus ingestion (pattern C — the anchor engine)
+- `0005_documents.sql` — `documents` (kind/course/raw_text/extracted).
+- `lib/ingest/syllabus.ts` — PDF (native Claude `document` block) or text → Sonnet →
+  strict JSON `{course, exams[], assignments[], grading[], notes}`; records a `model_calls`
+  row (T2/extract); files dated exams+assignments as `open_loops` (`source:'syllabus'`,
+  tagged `<course>`+`exam|assignment`). Clean-replace per course on re-ingest.
+- `/api/ingest/syllabus` (multipart PDF or JSON `{text}`; GET lists). Settings upload +
+  list. `test/stand-in-syllabus-CLCV-390.pdf` placeholder — Noah swaps in real syllabi.
+- Verified: both exams w/ dates+topics, 3 dated papers + weekly-responses (null date),
+  full grading. Deadlines flow into brief + nudge automatically.
+
+### ⏭ Next (Phase 1 tail)
 - [ ] Profile *slice* by intent (currently whole file minus Music) + `profile_facts` propose→confirm.
 - [ ] Frictionless capture (link → reading list); cheap-win Q&A.
 
