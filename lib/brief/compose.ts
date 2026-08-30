@@ -3,11 +3,29 @@ import { adminClient } from '@/lib/supabase.server';
 import { call } from '@/lib/brain/call';
 import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
+import { getBriefExtras } from '@/lib/brief/extras';
 import type { TurnState } from '@/lib/brain/prompt';
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 
-const COMMON = `Follow the "Morning brief" example in the persona: a short greeting, today's schedule from the Live data block, anything due soon, a birthday if one falls within about three weeks, and anything from the recent conversation or watched mail that needs a decision. One message, a few sentences. If the day is quiet, say so in one plain line and stop — don't pad it, and don't list things that aren't on the calendar. Only mention events that are actually in the Live data. Match the greeting to the current time of day; don't comment on what time it is.`;
+const COMMON = `Follow the "Morning brief" example in the persona: a short greeting, today's schedule from the Live data block, anything due soon, a birthday if one falls within about three weeks, and anything from the recent conversation or watched mail that needs a decision. Then a one-line weather note for today, and 2–3 news headlines from the last day — just the gist, no editorializing, skip any that are trivial. One message; keep it tight. If the day is quiet, say so in one plain line — don't pad it, and don't list things that aren't on the calendar. Only mention events that are actually in the Live data. Match the greeting to the current time of day; don't comment on what time it is.`;
+
+function extrasBlock(w: Awaited<ReturnType<typeof getBriefExtras>>): string {
+  const lines: string[] = ['## Weather + news (for the brief)'];
+  lines.push(
+    w.weather
+      ? `Weather ${w.weather.label}: ${w.weather.summary}, ${w.weather.lowF}–${w.weather.highF}°F, ${w.weather.precipPct}% precip.`
+      : 'Weather: unavailable.',
+  );
+  if (w.headlines.length) {
+    lines.push('', 'Recent headlines:', '<untrusted source="rss">');
+    for (const h of w.headlines) lines.push(`- ${h}`);
+    lines.push('</untrusted>');
+  } else {
+    lines.push('', 'Headlines: unavailable.');
+  }
+  return lines.join('\n');
+}
 
 const INSTRUCTION = {
   scheduled: `It's the daily brief. Write Noah's rundown for today in your normal voice. ${COMMON}`,
@@ -28,7 +46,7 @@ export async function composeBrief(
 ): Promise<BriefResult> {
   const now = new Date();
 
-  const [integrations, recentConv] = await Promise.all([
+  const [integrations, recentConv, extras] = await Promise.all([
     getIntegrationContext(userId, { daysAhead: 8, emailLimit: 10 }).catch(() => undefined),
     adminClient
       .from('messages')
@@ -36,6 +54,7 @@ export async function composeBrief(
       .in('role', ['user', 'assistant'])
       .order('created_at', { ascending: false })
       .limit(6),
+    getBriefExtras().catch(() => ({ weather: null, headlines: [] as string[] })),
   ]);
 
   const recent = (recentConv.data ?? [])
@@ -58,7 +77,7 @@ export async function composeBrief(
     tier: 'T2',
     proactive: true,
     conversationId,
-    userText: INSTRUCTION[occasion],
+    userText: `${INSTRUCTION[occasion]}\n\n${extrasBlock(extras)}`,
     state,
     maxTokens: 600,
   });

@@ -22,6 +22,23 @@ export function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // On load, show today's brief (if there is one) and let replies continue it.
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    fetch('/api/brief/latest', { headers: { Authorization: `Bearer ${session.access_token}` } })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled || !j.brief?.messages?.length) return;
+        setMessages((cur) =>
+          cur.length ? cur : j.brief.messages.map((m: { role: 'user' | 'assistant'; content: string }) => ({ role: m.role, text: m.content })),
+        );
+        convRef.current = j.brief.conversationId;
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [session]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
