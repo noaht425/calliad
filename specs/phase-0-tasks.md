@@ -20,6 +20,29 @@ rework.
 
 ---
 
+## Build progress (live — updated 2026-08-30)
+
+**Code-complete and `next build`-green** on `noaht425/calliad` (commits `f520f2a` seed,
+`ab76c60` Track A, `06c4390` Tracks B–E):
+
+- ✅ **A** — forked/seeded (private repo, no upstream; full donor on branch `phase-1-reference`),
+  pruned to the skeleton, deps swapped to `@anthropic-ai/sdk@0.122`, planning docs → `planning/`,
+  `.env.local` scaffolded with generated hub + VAPID secrets.
+- ✅ **B** — `supabase/migrations/0001_init.sql` written (not yet applied — needs live DB).
+  `lib/hub/{config,audit}.ts`.
+- ✅ **C** — `lib/router/{tiers,route}.ts`, `lib/brain/{prompt,call}.ts`; persona.md + trimmed
+  profile.md vendored to `content/`.
+- ✅ **D** — `/api/chat` (real SSE brain route), `/api/health`, `/api/admin/killswitch`,
+  `/api/webhook/[source]`.
+- ✅ **E** — `/api/cron/heartbeat` + `vercel.json` cron.
+- ⏳ **F3/F4** — chat panel already streams SSE; kill-switch UI is read-only in settings (curl
+  to set). Revisit against Doug's UI refresh.
+- ⛔ **Blocked on Noah:** real `ANTHROPIC_API_KEY` + Supabase creds in `.env.local`;
+  `supabase link` + apply `0001_init.sql`; then Vercel import + env vars; then **G** (run the
+  §10 acceptance test — nothing has executed end-to-end yet).
+
+---
+
 ## Pre-work — accounts (only Noah can do these; blocks everything)
 
 - [ ] **P1. Anthropic account + key.** Separate from Noah's personal Claude. Generate an API
