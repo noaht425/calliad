@@ -3,6 +3,7 @@ import { adminClient } from '@/lib/supabase.server';
 export interface IntegrationContext {
   events: { title: string; start_at: string; end_at: string | null; all_day: boolean; location: string | null }[];
   emails: { from_addr: string; subject: string; snippet: string | null; received_at: string | null }[];
+  reminders: { title: string; due_at: string | null; list_name: string | null; priority: number | null }[];
 }
 
 /**
@@ -19,7 +20,7 @@ export async function getIntegrationContext(
   const now = new Date();
   const horizon = new Date(now.getTime() + daysAhead * 86400000);
 
-  const [{ data: events }, { data: emails }] = await Promise.all([
+  const [{ data: events }, { data: emails }, { data: reminders }] = await Promise.all([
     adminClient
       .from('calendar_events')
       .select('title, start_at, end_at, all_day, location')
@@ -34,7 +35,16 @@ export async function getIntegrationContext(
       .eq('user_id', userId)
       .order('received_at', { ascending: false })
       .limit(emailLimit),
+    // open reminders: due within the horizon, or no due date at all
+    adminClient
+      .from('reminders')
+      .select('title, due_at, list_name, priority')
+      .eq('user_id', userId)
+      .eq('completed', false)
+      .or(`due_at.is.null,due_at.lte.${horizon.toISOString()}`)
+      .order('due_at', { nullsFirst: false })
+      .limit(25),
   ]);
 
-  return { events: events ?? [], emails: emails ?? [] };
+  return { events: events ?? [], emails: emails ?? [], reminders: reminders ?? [] };
 }

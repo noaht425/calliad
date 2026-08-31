@@ -15,7 +15,7 @@ type KillLevel = 'off' | 'pause_proactive' | 'pause_all';
 interface IntegrationsState {
   gmail: { connected: boolean; email?: string; label?: string; lastScannedAt?: string | null };
   icloud: { connected: boolean; calendars?: string[]; lastSyncedAt?: string | null };
-  counts: { calendar_events: number; schedule_events: number; email_items: number };
+  counts: { calendar_events: number; schedule_events: number; email_items: number; open_reminders: number };
 }
 
 const btn = 'rounded-lg bg-[var(--accent)] text-[var(--on-accent)] text-sm font-medium px-3 py-2 disabled:opacity-40';
@@ -482,7 +482,7 @@ export default function SettingsPage() {
               {busy === 'sync' ? 'Syncing…' : 'Sync now'}
             </button>
             <span className="text-xs text-[var(--text-muted)]">
-              {ints?.counts.calendar_events ?? 0} calendar · {ints?.counts.email_items ?? 0} emails
+              {ints?.counts.calendar_events ?? 0} calendar · {ints?.counts.open_reminders ?? 0} reminders · {ints?.counts.email_items ?? 0} emails
             </span>
           </div>
         )}
