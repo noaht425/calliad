@@ -26,6 +26,10 @@ import { isFlightQuery, isRestaurantQuery, extractFlight, extractRestaurant } fr
 import { flightSearch } from '@/lib/travel/flights';
 import { restaurantHandoff } from '@/lib/travel/restaurant';
 import { isLyricQuery, findByLyrics } from '@/lib/tools/song';
+import {
+  analyzeDeck, deckBlock, getCards, cardBlock, fetchDeckFromUrl,
+  looksLikeDecklist, isDeckHelp, isCardQuestion, extractCardNames,
+} from '@/lib/tools/mtg';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -213,10 +217,21 @@ export async function POST(req: NextRequest) {
     learnedFacts(user.id).catch(() => ''),
   ]);
 
+  const deckUrl = text.match(/https?:\/\/(?:www\.)?(?:moxfield\.com\/decks\/[\w-]+|archidekt\.com\/(?:api\/)?decks\/\d+)/)?.[0];
   let toolResult = morphResult;
   if (effectiveMode === 'quiz') {
     const q = await quizTurn(user.id, conversationId, text, modeState).catch(() => null);
     if (q) toolResult = q.toolResult;
+  } else if (looksLikeDecklist(text) || (isDeckHelp(text) && deckUrl)) {
+    const listText = deckUrl ? await fetchDeckFromUrl(deckUrl).catch(() => null) : text;
+    const a = listText ? await analyzeDeck(listText).catch(() => null) : null;
+    toolResult = a
+      ? deckBlock(a) + (isDeckHelp(text) || looksLikeDecklist(text) ? `\n\nNoah's message: ${text.slice(0, 500)}` : '')
+      : `## Deck analysis\nCouldn't read a decklist from that${deckUrl ? ' link' : ''}. Ask Noah to paste the list or a Moxfield/Archidekt URL.`;
+  } else if (isCardQuestion(text)) {
+    const names = extractCardNames(text);
+    const { found } = names.length ? await getCards(names) : { found: [] };
+    toolResult = found.length ? cardBlock(found) : `## Card data\nCouldn't identify which card(s) Noah means — ask him to name them exactly.`;
   } else if (wantsWebFetch) {
     let target = webFetchUrl;
     if (!target) target = (await listItems(user.id).catch(() => []))[0]?.url;

@@ -79,7 +79,23 @@ self-hosted Whisper WebSocket. Batch STT + streamed reply + streamed TTS is the 
     histogram / avg turn / crashes. Bearer `SIM_TOKEN`. Imports `engine` directly so engine
     updates need only a redeploy, no wrapper change.
   - **Waiting on:** Noah deploys it (Fly/Railway/Render) → gives the URL + token.
-  - **Then, Calliad side:** env `MTG_SIM_URL` / `MTG_SIM_TOKEN`, `lib/tools/mtgsim.ts` adapter,
+  - **Then, sim side:** env `MTG_SIM_URL` / `MTG_SIM_TOKEN`, `lib/tools/mtgsim.ts` adapter,
     intent detection ("simulate rocco vs hamza", "run the pod 3000×"), the auth gate (a big run
-    costs compute), toolResult narration. Deckbuilding half ("buff Archelos cheaply") is
-    separate — Scryfall, no sim.
+    costs compute), toolResult narration.
+
+### ✅ MTG deck analysis — Scryfall, analysis-first (2026-08-31)
+Decision: the symbolic sim doesn't generalise to arbitrary decklists (304 bespoke per-card
+fields for ~400 cards); a full effect-system rebuild is months. So deck-improvement advice is
+**LLM reasoning over accurate card data**, sim reserved for quantitative questions on its
+modelled decks. No new keys — Scryfall is free.
+- `lib/tools/mtg.ts` — `getCard`/`getCards` (Scryfall `named` fuzzy + `collection` batch, 75/req),
+  `parseDecklist` (counts, set codes, DFC `//`, section headers, Moxfield/Arena/Archidekt
+  exports), `fetchDeckFromUrl` (Archidekt + Moxfield JSON APIs), `analyzeDeck` → curve, land
+  count, avg MV, heuristic role counts (ramp/draw/removal/wipe/counter/tutor/recursion/tokens/
+  counters), off-colour + not-legal flags, price. `deckBlock`/`cardBlock` toolResults carry
+  every card's verbatim oracle text + "reason from this, not memory".
+- `/api/chat` — a pasted decklist (≥15 list-shaped lines) or "analyse my deck" + a
+  Moxfield/Archidekt URL → `analyzeDeck` → T2 strategic analysis; a card-interaction question
+  → `getCards(extractCardNames())` → oracle-text block.
+- Verified against prod: fuzzy lookup, batch resolve, decklist parse, Archidekt fetch, role
+  heuristics.
