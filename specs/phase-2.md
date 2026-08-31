@@ -103,8 +103,13 @@ morphology → spaced repetition → confirmation-gated writes.*
 - Not a browser: no JS, no crawl, no PDF/video. JS-rendered pages and paywalls return a plain
   "couldn't read it".
 
-## ⏭ Next
-- [ ] Tier routing beyond modes — cheap-win Q&A / trivia → T1.
+### ✅ Tier routing for cheap-win Q&A (2026-08-31)
+- `lib/router/route.ts` `isCheapQA()` — generic factual/definitional/quick-calc questions from a
+  clean default conversation route to T1 (cheapest Anthropic model = Haiku today), full persona
+  still applied. Blocks on: first-person/`my`, calendar/course/email/trip context words, a URL,
+  >28 words, or no "what is/who was/how many/define/how do you say" opener. Biased hard toward
+  T2 — a miss costs cents, a wrong downgrade weakens a real answer.
+
 ### ✅ Flight search + restaurant hand-off (no booking)
 - `lib/travel/detect.ts` — intent + T1 param extraction.
 - `lib/travel/flights.ts` — Google Flights + route-aware Alaska search links always;

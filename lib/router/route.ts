@@ -46,6 +46,25 @@ const ENTER_STUDY = /\b(study (plan|help|coach)|help me (study|prep|review) for|
 // morphology is a one-shot, not a sticky mode (stems, no trailing \b — "conjugate"/"declension")
 const MORPH = /(conjugat|declin|\bparse\b[^?]{0,40}\b(form|word|verb|noun)|principal parts|what (case|tense|mood|person|number|gender) is|synopsi[sz])/i;
 
+// ── cheap-win Q&A → T1 ─────────────────────────────────────────────────────
+// Generic factual / definitional / quick-calc questions that need no personal
+// context, memory, or tool. T1 chat = the cheapest Anthropic model (Haiku), full
+// persona still applied. Bias hard toward T2: a miss just costs a few cents, a
+// wrong downgrade answers a real question on a weaker model.
+const CHEAP_QA_START =
+  /^(what('s| is| are| was| were)\b|who('s| is| was| were)\b|where('s| is)\b|when (was|did|is|does)\b|why (is|do|does|are|was)\b|how (do|does|much|many|long|far|old|tall|big|deep)\b|define\b|how do you (say|spell|pronounce)\b|convert \b|what does .{1,40} mean)/i;
+const PERSONAL =
+  /\b(my|me|i|i'?m|i'?ve|i'?d|mine|myself)\b|\bshould i\b|\bhelp me\b|\bremind\b|\bdo i\b|\bdid i\b|\bam i\b|\bcan i\b/i;
+const NEEDS_CONTEXT =
+  /\b(today|tonight|tomorrow|yesterday|this (week|morning|afternoon|evening)|schedule|calendar|class|course|exam|assignment|deadline|trip|flight|email|inbox|loop|nudge|brief|professor|syllabus)\b/i;
+
+function isCheapQA(text: string): boolean {
+  const t = text.trim();
+  if (t.length > 200 || t.split(/\s+/).length > 28) return false;
+  if (/https?:\/\//.test(t)) return false;
+  return CHEAP_QA_START.test(t) && !PERSONAL.test(t) && !NEEDS_CONTEXT.test(t);
+}
+
 export async function route(event: InboundEvent): Promise<RouteDecision> {
   const decision = await decide(event);
   await audit.log(
@@ -95,7 +114,12 @@ async function decide(event: InboundEvent): Promise<RouteDecision> {
     return brain('T2', 'morphology', 'morphology query', { tools: ['morphology'] });
   }
 
-  // 3. otherwise carry the sticky mode
+  // 3. cheap-win generic Q&A → T1 (only from a clean default conversation)
+  if (sticky === 'default' && isCheapQA(text)) {
+    return brain('T1', 'default', 'cheap-win Q&A → T1');
+  }
+
+  // 4. otherwise carry the sticky mode
   return brain('T2', sticky, sticky === 'default' ? 'default chat' : `continuing ${sticky}`);
 }
 
