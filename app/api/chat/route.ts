@@ -43,7 +43,7 @@ import { detectRelationshipMention, relationshipFor, findContacts, contactContex
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
 import { isTidyRequest, scanForTidy, applyTidyItems, type TidyItem } from '@/lib/memory/tidy';
 import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/travel/trips';
-import { isSubscriptionAdd, isSubscriptionQuery, extractSubscription, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
+import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -241,8 +241,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ── silent tier: "I pay $12/mo for X" (one or several) → subscriptions ──
+  // Checked before task-add: "…due on the 6th of every month…" would otherwise
+  // trip the recurring-task detector.
+  if (isSubscriptionAdd(text)) {
+    const subs = await extractSubscriptions(text).catch(() => []);
+    if (subs.length) {
+      const names: string[] = [];
+      for (const s of subs) { await upsertSubscription(user.id, s); names.push(s.name); }
+      const money = (c: number) => (c / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+      const detail = subs.map((s) => `${s.name} ${money(s.amount_cents)}/${s.cadence.replace('ly', '')}${s.next_charge ? ` (next ${s.next_charge})` : ''}`).join(', ');
+      return say(`Tracking ${subs.length === 1 ? '' : `${subs.length}: `}${detail}.`, 'subscription-add');
+    }
+    // couldn't parse any → fall through
+  }
+
   // ── silent tier: add a task → open loop (tagged 'task'), no gate ────────
-  if (isTaskAdd(text)) {
+  if (isTaskAdd(text) && !isSubscriptionAdd(text)) {
     const { title, due_at, recur } = await extractTask(text).catch(() => ({ title: text.trim(), due_at: null, recur: null }));
     if (title) {
       await upsertLoop(user.id, { title, due_at, recur, source: 'manual', tags: ['task'] });
@@ -268,17 +283,6 @@ export async function POST(req: NextRequest) {
       );
     }
     // couldn't pin it down → fall through to the brain
-  }
-
-  // ── silent tier: "I pay $12/mo for Spotify" → subscriptions ────────────
-  if (isSubscriptionAdd(text) && !isTaskAdd(text)) {
-    const sub = await extractSubscription(text).catch(() => null);
-    if (sub) {
-      const how = await upsertSubscription(user.id, sub);
-      const amt = (sub.amount_cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-      return say(`${how === 'added' ? 'Tracking' : 'Updated'} ${sub.name} — ${amt}/${sub.cadence.replace('ly', '')}${sub.next_charge ? `, next ${sub.next_charge}` : ''}.`, 'subscription-add');
-    }
-    // couldn't parse → fall through
   }
 
   // ── silent tier: a reaction to a book/show/film/game → taste_log ────────

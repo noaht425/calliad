@@ -28,33 +28,43 @@ export const isSubscriptionAdd = (t: string) =>
 export const isSubscriptionQuery = (t: string) =>
   /\b(what (subscriptions|am i (paying|subscribed)|do i pay)|my subscriptions|list (my )?subscriptions|how much .{0,30}\b(subscriptions|recurring)|monthly (subscriptions|spend|burn)|recurring (charges|spend))\b/i.test(t);
 
-export async function extractSubscription(text: string, now = new Date()): Promise<{
+export interface SubDraft {
   name: string; amount_cents: number; cadence: Cadence; next_charge: string | null; category: string | null;
-} | null> {
-  if (!t1Available()) return null;
+}
+
+/** One message may describe several recurring charges — pull them all. */
+export async function extractSubscriptions(text: string, now = new Date()): Promise<SubDraft[]> {
+  if (!t1Available()) return [];
   const localNow = now.toLocaleDateString('en-CA', { timeZone: TZ });
   const out = await t1Json<{
-    ok: boolean; name: string | null; amount: number | null; cadence: string | null; next_charge: string | null; category: string | null;
+    items?: { name: string | null; amount: number | null; cadence: string | null; next_charge: string | null; category: string | null }[];
   }>(
-    'extract_subscription',
-    `Noah is logging a recurring charge. Today is ${localNow}.
+    'extract_subscriptions',
+    `Noah is telling Calliad about recurring payments. Today is ${localNow}.
 "${text}"
-Return JSON: {"ok":true|false,"name":"service name","amount":12.99,"cadence":"weekly|monthly|quarterly|yearly","next_charge":"YYYY-MM-DD or null","category":"streaming|software|news|fitness|utilities|other or null"}
-- amount is the number only. "$12/mo" → 12, monthly. "$99 a year" → 99, yearly.
-- next_charge only if a date is stated ("renews the 15th", "next on March 3"); resolve to a real future date. Else null.
-- ok=false if there's no name or no amount.`,
-    { maxOutputTokens: 160 },
+Return JSON: {"items":[{"name":"service","amount":12.99,"cadence":"weekly|monthly|quarterly|yearly","next_charge":"YYYY-MM-DD or null","category":"streaming|software|news|fitness|finance|utilities|other or null"}]}
+- One object per DISTINCT recurring payment. If the message describes several, return several.
+- amount = the number only ("$12/mo" → 12 monthly; "$99 a year" → 99 yearly; "50 dollars a month" → 50 monthly).
+- next_charge only when a day/date is stated ("the 25th", "the 6th of every month", "renews March 3") → resolve to the next real future date. Else null.
+- Skip anything that isn't a recurring payment with a name AND an amount. Empty items array is fine.`,
+    { maxOutputTokens: 400 },
   );
-  if (!out?.ok || !out.name || !out.amount || out.amount <= 0) return null;
-  const cadence = (CADENCES.includes(out.cadence as Cadence) ? out.cadence : 'monthly') as Cadence;
-  const next = out.next_charge && !Number.isNaN(Date.parse(out.next_charge)) ? out.next_charge.slice(0, 10) : null;
-  return {
-    name: out.name.trim().slice(0, 80),
-    amount_cents: Math.round(out.amount * 100),
-    cadence,
-    next_charge: next,
-    category: out.category?.trim() || null,
-  };
+  const seen = new Set<string>();
+  const drafts: SubDraft[] = [];
+  for (const it of out?.items ?? []) {
+    if (!it?.name || !it.amount || it.amount <= 0) continue;
+    const key = it.name.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    drafts.push({
+      name: it.name.trim().slice(0, 80),
+      amount_cents: Math.round(it.amount * 100),
+      cadence: (CADENCES.includes(it.cadence as Cadence) ? it.cadence : 'monthly') as Cadence,
+      next_charge: it.next_charge && !Number.isNaN(Date.parse(it.next_charge)) ? it.next_charge.slice(0, 10) : null,
+      category: it.category?.trim() || null,
+    });
+  }
+  return drafts;
 }
 
 export async function upsertSubscription(

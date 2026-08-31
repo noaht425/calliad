@@ -7,7 +7,7 @@ const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 const CAL_WRITE =
   /\b(add\b.{0,80}?\bto (my |the )?calendar|put\b.{0,80}?\bon (my |the )?calendar|schedule (a|an|the)\b|block off|book (a|an|the)? ?(slot|time|room|appointment)|calendar hold|put a hold|pencil (me )?in)\b/i;
 const TASK_ADD =
-  /\b(add (a )?(task|reminder|to-?do)|remind me to|add to (my )?(to-?do|task list)|put on my to-?do|every (day|morning|night|week|month|weekday|other week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|(daily|weekly|biweekly|monthly)\s*[:—-]\s*\S)/i;
+  /\b(add (a )?(task|reminder|to-?do)|remind me to|add to (my )?(to-?do|task list)|put on my to-?do)\b|(?:^|[,.;:]\s*)every\s+(day|morning|night|week|month|weekday|other\s+week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|(?:^|[,.;:]\s*)(daily|weekly|biweekly|monthly)\s*[:—-]\s*\S/i;
 
 export interface EventDraft {
   title: string;
