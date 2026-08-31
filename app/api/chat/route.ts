@@ -38,6 +38,7 @@ import {
 import { getCommanderRecs, recDiff, recBlock, isEdhrecQuery } from '@/lib/tools/edhrec';
 import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
 import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
+import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock } from '@/lib/tools/beli';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -113,6 +114,18 @@ export async function POST(req: NextRequest) {
   if (medReply === 'not-yet') {
     await recordMed(user.id, false, 'not yet');
     return say('Okay — I’ll check once more later, then leave it.', 'med-reply');
+  }
+
+  // ── a Beli screenshot → extract restaurants into restaurant_prefs ───────
+  if (image && isBeliShare(text)) {
+    const { rows } = await extractBeli(image).catch(() => ({ rows: [] }));
+    if (!rows.length) return say(`I couldn't read a restaurant list off that — try a clearer screenshot of the ranked or want-to-try view.`, 'beli-empty');
+    const { added, updated } = await saveBeliRows(user.id, rows);
+    const top = rows.filter((r) => r.score != null).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 4).map((r) => `${r.name} (${r.score})`);
+    return say(
+      `Got ${added + updated} — ${added} new, ${updated} updated.${top.length ? ` Top of this batch: ${top.join(', ')}.` : ''} Send more screenshots to fill it out.`,
+      'beli-extract',
+    );
   }
   // a pending email draft + anything that isn't yes/no → treat it as a revision
   if (pending?.kind === 'draft_email') {
@@ -302,7 +315,11 @@ export async function POST(req: NextRequest) {
     toolResult = fp ? await flightSearch(fp).catch(() => undefined) : `## Flight search\nCouldn't pin down where/when — ask Noah for the destination and rough dates.`;
   } else if (isRestaurantQuery(text)) {
     const rp = await extractRestaurant(text).catch(() => null);
-    if (rp) toolResult = await restaurantHandoff(rp).catch(() => undefined);
+    const [handoff, prefs] = await Promise.all([
+      rp ? restaurantHandoff(rp).catch(() => undefined) : Promise.resolve(undefined),
+      restaurantPrefsBlock(user.id).catch(() => ''),
+    ]);
+    toolResult = [handoff, prefs].filter(Boolean).join('\n\n') || undefined;
   } else if (isWeatherQuery(text)) {
     toolResult = await runForecast(text).catch(() => undefined);
   } else if (isRecipeQuery(text)) {

@@ -131,6 +131,13 @@ morphology → spaced repetition → confirmation-gated writes.*
 - `lib/travel/restaurant.ts` — OpenTable / Resy / Google / Maps pre-filled links + party/time.
   Programmatic booking is closed (Resy no API, OpenTable partner-only) → hand-off only.
 - `/api/chat` wires both as `toolResult` (T2). No migration. `AMADEUS_*` optional.
+- **Beli restaurant taste (2026-08-31):** Beli has no API, so the flow is screenshot → vision.
+  `0010_restaurant_prefs.sql`; `lib/tools/beli.ts` — `extractBeli(image)` (Sonnet vision →
+  JSON rows: name / city / score 0-10 / cuisine / note / ranked|want), `saveBeliRows` (upsert
+  on `name|city`), `restaurantPrefsBlock` (top-15 rated + highest-avg cuisines + want list).
+  `/api/chat`: an image + "beli" / "my restaurant rankings" → extract + upsert, reply with the
+  batch's top few; the restaurant hand-off toolResult now carries the prefs block so a rec is
+  steered toward what he actually rates. `/api/restaurants` + Settings "Restaurants".
 
 ---
 

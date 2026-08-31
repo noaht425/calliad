@@ -64,6 +64,35 @@ function WeatherLocation({ token }: { token: string }) {
   );
 }
 
+function Restaurants({ token }: { token: string }) {
+  const [items, setItems] = useState<{ id: string; name: string; city: string | null; score: number | null; category: string | null; status: string }[]>([]);
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const load = useCallback(async () => {
+    const r = await fetch('/api/restaurants', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) setItems((await r.json()).items ?? []);
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+  if (!items.length)
+    return <p className="text-sm text-[var(--text-quiet)]">Empty — send Calliad your Beli screenshots in chat (say &ldquo;here&rsquo;s my beli list&rdquo;) and it&rsquo;ll pull them in here.</p>;
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-[var(--text-muted)]">{items.filter((i) => i.status === 'ranked').length} rated · {items.filter((i) => i.status === 'want').length} want-to-try</p>
+      <ul className="text-xs text-[var(--text-muted)] space-y-1 max-h-64 overflow-y-auto">
+        {items.map((i) => (
+          <li key={i.id} className="flex gap-2">
+            <span className="flex-1">
+              {i.name}{i.city ? <span className="text-[var(--text-quiet)]">, {i.city}</span> : null}
+              {i.score != null ? <span className="font-medium"> — {i.score}</span> : <span className="text-[var(--text-quiet)]"> — want</span>}
+              {i.category ? <span className="text-[var(--text-quiet)]"> · {i.category}</span> : null}
+            </span>
+            <button className="underline" onClick={async () => { await fetch(`/api/restaurants?id=${i.id}`, { method: 'DELETE', headers: h }); load(); }}>del</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ThemePicker() {
   const { theme, setTheme } = useTheme();
   return (
@@ -580,6 +609,12 @@ export default function SettingsPage() {
       <section className="mb-8">
         <h2 className={label}>Taste log</h2>
         <TasteLog token={session.access_token} />
+      </section>
+
+      {/* ── Restaurants ────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>Restaurants</h2>
+        <Restaurants token={session.access_token} />
       </section>
 
       {/* ── Quiz deck ───────────────────────────────────────────────── */}
