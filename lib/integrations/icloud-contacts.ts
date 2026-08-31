@@ -133,7 +133,7 @@ export async function findContacts(userId: string, query: string): Promise<Conta
   if (q.length < 2) return [];
   const { data } = await adminClient.from('contacts').select(SEL).eq('user_id', userId);
   const rows = (data ?? []) as Contact[];
-  return rows
+  const scored = rows
     .map((r) => {
       const name = r.name.toLowerCase();
       const first = (r.first_name ?? '').toLowerCase();
@@ -144,9 +144,17 @@ export async function findContacts(userId: string, query: string): Promise<Conta
       return { r, score };
     })
     .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 6)
-    .map((x) => x.r);
+    .sort((a, b) => b.score - a.score);
+
+  // collapse duplicate cards for the same person (common in iCloud) — keep the fullest
+  const byName = new Map<string, { r: Contact; score: number }>();
+  for (const s of scored) {
+    const k = s.r.name.toLowerCase();
+    const prev = byName.get(k);
+    const rich = (c: Contact) => c.emails.length + c.phones.length + (c.relationship ? 3 : 0) + (c.org ? 1 : 0);
+    if (!prev || rich(s.r) > rich(prev.r)) byName.set(k, s);
+  }
+  return [...byName.values()].sort((a, b) => b.score - a.score).slice(0, 6).map((x) => x.r);
 }
 
 export async function setRelationship(userId: string, id: string, relationship: Relationship, note?: string | null): Promise<void> {
@@ -193,19 +201,27 @@ export function detectRelationshipMention(text: string): { term: string; name: s
   return null;
 }
 
-/** A brief block naming any known contacts referenced in the turn (for the brain). */
+/**
+ * A brief block naming any known contacts referenced in the turn (for the brain).
+ * Targeted: a name right after a person-verb ("call/email/meet/ask/tell/with/from
+ * <Name>") or a two-word "First Last". Avoids scanning every capitalised word
+ * against 800+ contacts and lighting up on "Will", "Mark", etc.
+ */
 export async function contactContextLine(userId: string, text: string): Promise<string> {
-  const names = [...new Set([...text.matchAll(/\b[A-Z][a-z]{2,}\b/g)].map((m) => m[0]))]
-    .filter((n) => !/^(The|This|That|What|When|Where|Why|How|And|But|For|You|Noah|Calliad|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|June|July|August|September|October|November|December)$/.test(n))
-    .slice(0, 6);
+  const cands = new Set<string>();
+  for (const m of text.matchAll(/\b(?:call|calling|text|texting|email|emailing|message|messaging|meet|meeting|see|seeing|ask|asking|tell|telling|invite|inviting|visit|visiting|with|from|to|and)\s+([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+)?)/g)) cands.add(m[1]);
+  for (const m of text.matchAll(/\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b/g)) cands.add(m[1]); // First Last
+  const names = [...cands].slice(0, 8);
   if (!names.length) return '';
+
   const hits: string[] = [];
   for (const n of names) {
+    const lc = n.toLowerCase();
     const c = (await findContacts(userId, n))[0];
-    if (c && (c.name.toLowerCase() === n.toLowerCase() || (c.first_name ?? '').toLowerCase() === n.toLowerCase())) {
-      hits.push(`- "${n}" → ${c.name}${c.relationship ? ` (${c.relationship_note || c.relationship})` : ' (relationship not set)'}${c.org ? `, ${c.org}` : ''}`);
+    if (c && (c.name.toLowerCase() === lc || (c.first_name ?? '').toLowerCase() === lc.split(' ')[0])) {
+      hits.push(`- "${n}" → ${c.name}${c.relationship ? ` (${c.relationship_note || c.relationship})` : ''}${c.org ? `, ${c.org}` : ''}`);
     }
   }
   if (!hits.length) return '';
-  return `## Known contacts in this message\n${hits.join('\n')}\nUse the full name and relationship if it helps; don't announce the lookup.`;
+  return `## Contacts in this message\n${hits.join('\n')}\nUse the full name / relationship if it helps; don't announce the lookup.`;
 }
