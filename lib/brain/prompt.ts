@@ -75,6 +75,7 @@ export interface TurnState {
   learned?: string;                 // confirmed profile_facts block
   medStatus?: string;               // today's medication check-in state, if unsettled
   contacts?: string;                // known contacts referenced this turn
+  trips?: string;                   // upcoming trips (for prep-aware answers)
 }
 
 function renderLoops(loops: OpenLoop[], tz: string): string {
@@ -154,6 +155,7 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
   if (state.learned) system.push({ type: 'text', text: state.learned });
   if (state.medStatus) system.push({ type: 'text', text: state.medStatus });
   if (state.contacts) system.push({ type: 'text', text: state.contacts });
+  if (state.trips) system.push({ type: 'text', text: state.trips });
 
   if (state.integrations) {
     system.push({ type: 'text', text: renderIntegrations(state.integrations, state.tz) });

@@ -6,6 +6,7 @@ import { checkSecret } from '@/lib/hub/guard';
 import { sendPush } from '@/lib/hub/push';
 import { composeNudge } from '@/lib/nudge/compose';
 import { medCheckin } from '@/lib/health/meds';
+import { tripPrepNudges, markPrepSent } from '@/lib/travel/trips';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -27,12 +28,21 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: 'quiet hours' });
   }
 
-  // Afternoon medication backstop for every connected user, then the deadline nudge.
+  // Afternoon medication backstop + trip-prep nudges for every connected user,
+  // then the deadline nudge.
   const { data: allSvc } = await adminClient.from('connected_services').select('user_id');
   const medResults: Record<string, unknown>[] = [];
+  const tripResults: Record<string, unknown>[] = [];
   for (const userId of [...new Set((allSvc ?? []).map((r) => r.user_id))]) {
     const m = await medCheckin(userId, { followUp: true }).catch((e) => ({ sent: false, reason: String(e) }));
     medResults.push({ userId, ...m });
+
+    const preps = await tripPrepNudges(userId).catch(() => []);
+    for (const p of preps) {
+      const push = await sendPush(userId, { title: 'Trip prep', body: p.message.slice(0, 300), url: '/', tag: `trip-${p.key}` });
+      await markPrepSent(p.tripId, p.key).catch(() => {});
+      tripResults.push({ userId, key: p.key, pushed: push.sent });
+    }
   }
 
   const { data: users } = await adminClient
@@ -57,8 +67,8 @@ async function handle(req: NextRequest) {
     }
   }
 
-  await audit.log('trigger_fired', 'cron', 'nudge', { at: new Date().toISOString(), results, med: medResults });
-  return NextResponse.json({ ok: true, results, med: medResults });
+  await audit.log('trigger_fired', 'cron', 'nudge', { at: new Date().toISOString(), results, med: medResults, trips: tripResults });
+  return NextResponse.json({ ok: true, results, med: medResults, trips: tripResults });
 }
 
 export const GET = handle;

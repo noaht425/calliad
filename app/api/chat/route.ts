@@ -42,6 +42,7 @@ import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock, isRestaur
 import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine } from '@/lib/integrations/icloud-contacts';
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
 import { isTidyRequest, scanForTidy, applyTidyItems, type TidyItem } from '@/lib/memory/tidy';
+import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/travel/trips';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -251,6 +252,22 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ── silent tier: "I'm going to <place> <dates>" → trip record for prep nudges ──
+  if (isTripPlan(text) && !isTaskAdd(text)) {
+    const t = await extractTrip(text).catch(() => null);
+    if (t) {
+      const trip = await createTrip(user.id, t);
+      const range = t.end_date ? `${fmtDay(t.start_date)}–${fmtDay(t.end_date)}` : fmtDay(t.start_date);
+      return say(
+        trip
+          ? `Noted your trip to ${t.destination}, ${range}. I'll nudge you on prep (bank, mail hold, airport plan, IDP if you'll need one) as it gets closer.`
+          : `Already had that ${t.destination} trip on file.`,
+        'trip-noted',
+      );
+    }
+    // couldn't pin it down → fall through to the brain
+  }
+
   // ── silent tier: a reaction to a book/show/film/game → taste_log ────────
   // Runs before the profile-fact path so "remember I loved X" lands in the
   // taste log (verdict + why), not as a loose profile fact.
@@ -351,13 +368,14 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops, morphResult, learned, contactsLine] = await Promise.all([
+  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
     decision.tools.includes('morphology') ? runMorphology(text).catch(() => undefined) : Promise.resolve(undefined),
     learnedFacts(user.id).catch(() => ''),
     contactContextLine(user.id, text).catch(() => ''),
+    tripsContextLine(user.id).catch(() => ''),
   ]);
 
   const deckUrl = text.match(/https?:\/\/(?:www\.)?archidekt\.com\/(?:api\/)?decks\/\d+/)?.[0];
@@ -440,6 +458,7 @@ export async function POST(req: NextRequest) {
     learned: learned || undefined,
     medStatus: medLine || undefined,
     contacts: contactsLine || undefined,
+    trips: tripsLine || undefined,
   };
   // A tool result means a longer, denser reply is expected (deck analysis, sim
   // narration, web-page answers). 1024 is stingy there — and with adaptive effort
@@ -531,4 +550,8 @@ function streamResponse(conversationId: string, gen: AsyncGenerator<Uint8Array>)
 
 function json(obj: unknown, status: number) {
   return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+function fmtDay(isoDate: string): string {
+  return new Date(`${isoDate}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: TZ });
 }
