@@ -48,7 +48,20 @@ morphology → spaced repetition → confirmation-gated writes.*
   (relative dates vs `TZ_DEFAULT`); yes/no matchers.
 - `/api/chat`: pending action + yes/no → decide; **task/reminder add → silent** (open loop,
   no gate — per the operating rules); **calendar write → propose + one "yes"**.
-- Email "drafts" need no gate (nothing is sent — the brain just composes text).
+
+### ✅ Draft email through the gate (2026-08-31) — compose + hand off, no send
+- `lib/actions/email.ts` — `isEmailDraft` (explicit "draft/write/compose an email", or
+  "email X and tell them …", or "reply to that email"; **not** "remind me to email X" — that's
+  a task and is caught first). `composeEmail(userId, request)`: T1/regex pulls the recipient
+  (falls back to matching a name against `email_items.from_addr`); **T2 writes the body** in
+  Noah's voice, returns `{subject, body}`. `buildMailto()` → a `mailto:` link. `handoffEmail()`
+  is the gate executor for `kind:'draft_email'` — assembles the review block + link, sends
+  nothing (no Gmail write scope, matches the flight/restaurant deep-link pattern).
+- `/api/chat`: draft request → `composeEmail` → `proposeAction(kind:'draft_email', confirm)`
+  with the request stashed in the payload → reply previews the draft. Then **yes** →
+  `decideAction` → `mailto:` hand-off; **anything else while a draft is pending** → treated as
+  a revision (re-compose with "Noah's revision: …", re-propose).
+- Verified against prod: detection, T2 compose (~$0.0017/draft), recipient pull, mailto build.
 
 ## Apply
 `0007_conversation_mode.sql` and `0008_quiz.sql` in the Supabase SQL Editor.
@@ -118,3 +131,15 @@ morphology → spaced repetition → confirmation-gated writes.*
 - `lib/travel/restaurant.ts` — OpenTable / Resy / Google / Maps pre-filled links + party/time.
   Programmatic booking is closed (Resy no API, OpenTable partner-only) → hand-off only.
 - `/api/chat` wires both as `toolResult` (T2). No migration. `AMADEUS_*` optional.
+
+---
+
+## Phase 2 complete (2026-08-31)
+
+Every item on the PLAN.md §9 Phase 2 list is built: router + tiers, the graduated-auth gate,
+confirmation-gated writes (calendar hold, draft email), flight + restaurant hand-off,
+"would I like this?", morphology, Italian tutor, spaced-repetition quiz. Plus off-list:
+profile slicing + learned facts, taste-log write path, web-fetch, cheap-Q&A tier routing,
+and the adoption of Doug's UI refresh. Next: Phase 3 (voice — Stage 1 done — and delegated
+agents). Standing small fixes: Greek class time, weather location, taste-log bail-patterns
+refresh.

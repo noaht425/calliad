@@ -20,6 +20,7 @@ import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo } from '@/lib/actions/detect';
+import { isEmailDraft, composeEmail } from '@/lib/actions/email';
 import { wouldILike } from '@/lib/taste/judge';
 import { isFlightQuery, isRestaurantQuery, extractFlight, extractRestaurant } from '@/lib/travel/detect';
 import { flightSearch } from '@/lib/travel/flights';
@@ -76,6 +77,23 @@ export async function POST(req: NextRequest) {
     const r = await decideAction(user.id, pending.id, isYes(text) ? 'approved' : 'rejected', conversationId);
     return say(r.message, 'action-decided');
   }
+  // a pending email draft + anything that isn't yes/no → treat it as a revision
+  if (pending?.kind === 'draft_email') {
+    await decideAction(user.id, pending.id, 'rejected', conversationId);
+    const prior = String((pending.payload as Record<string, unknown>).request ?? '');
+    const d = await composeEmail(user.id, `${prior}\n\nNoah's revision: ${text}`).catch(() => null);
+    if (!d) return say(`Couldn't revise that one — say it again with a bit more detail.`, 'email-draft-failed');
+    await proposeAction({
+      userId: user.id, kind: 'draft_email', riskTier: 'confirm',
+      summary: `Draft email to ${d.to_email ?? d.to_name ?? '(unspecified)'} — "${d.subject}"`,
+      payload: { to_name: d.to_name, to_email: d.to_email, subject: d.subject, body: d.body, request: `${prior}\n\nNoah's revision: ${text}` },
+      createdBy: conversationId,
+    });
+    return say(
+      `Revised — still nothing sent.\n\n**To:** ${d.to_email ?? d.to_name ?? "(you'll need to add this)"}\n**Subject:** ${d.subject}\n\n${d.body}\n\nSay yes for the link, or keep tweaking.`,
+      'email-draft-revised',
+    );
+  }
 
   // ── silent tier: add a task/reminder → open loop, no gate ───────────────
   if (isTaskAdd(text)) {
@@ -112,6 +130,22 @@ export async function POST(req: NextRequest) {
       payload: { ...ev }, createdBy: conversationId,
     });
     return say(`Put **${ev.title}** on your calendar for **${whenLabel(ev.start_at, ev.all_day)}**${ev.location ? ` (${ev.location})` : ''}? Say yes and I'll add it.`, 'action-proposed');
+  }
+
+  // ── confirm tier: draft an email → compose, show it, wait for yes ───────
+  if (isEmailDraft(text)) {
+    const d = await composeEmail(user.id, text).catch(() => null);
+    if (!d) return say(`I couldn't put that draft together — try again, or give me a bit more to go on.`, 'email-draft-failed');
+    await proposeAction({
+      userId: user.id, kind: 'draft_email', riskTier: 'confirm',
+      summary: `Draft email to ${d.to_email ?? d.to_name ?? '(unspecified)'} — "${d.subject}"`,
+      payload: { to_name: d.to_name, to_email: d.to_email, subject: d.subject, body: d.body, request: text },
+      createdBy: conversationId,
+    });
+    return say(
+      `Here's a draft — nothing's sent yet.\n\n**To:** ${d.to_email ?? d.to_name ?? "(you'll need to add this)"}\n**Subject:** ${d.subject}\n\n${d.body}\n\nSay yes and I'll hand you a link that opens it in your mail app, or tell me what to change.`,
+      'email-draft-proposed',
+    );
   }
 
   // ── inline quiz-item add: "quiz: PROMPT = ANSWER" ("greek quiz: ..." sets lang) ──
