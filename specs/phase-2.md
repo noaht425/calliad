@@ -63,4 +63,11 @@ morphology → spaced repetition → confirmation-gated writes.*
   into every call — biggest remaining cost lever).
 - [ ] Tier routing beyond modes — cheap-win Q&A / trivia → T1.
 - [ ] Web-fetch tool (answer questions *about* a link).
-- [ ] Flight search, restaurant hand-off (later).
+### ✅ Flight search + restaurant hand-off (no booking)
+- `lib/travel/detect.ts` — intent + T1 param extraction.
+- `lib/travel/flights.ts` — Google Flights + route-aware Alaska search links always;
+  indicative Amadeus fares when `AMADEUS_CLIENT_ID/SECRET` set (test inventory, flagged).
+  Brain applies profile prefs (Alaska, NYC-airport routing, aisle, avoid Lufthansa); never books.
+- `lib/travel/restaurant.ts` — OpenTable / Resy / Google / Maps pre-filled links + party/time.
+  Programmatic booking is closed (Resy no API, OpenTable partner-only) → hand-off only.
+- `/api/chat` wires both as `toolResult` (T2). No migration. `AMADEUS_*` optional.
