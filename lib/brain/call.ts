@@ -109,6 +109,13 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
           await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
         }
       }
+      // Clean finish but nothing said — usually the token budget went entirely to
+      // reasoning. Say something honest rather than the generic error.
+      if (!meta.text) {
+        const m = "I ran out of room working through that one — ask me again and point me at the part you care about most.";
+        meta.text = m;
+        yield m;
+      }
     } finally {
       if (usage) {
         meta.costUsd = anthropicCostUsd(model, usage);

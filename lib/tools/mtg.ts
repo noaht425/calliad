@@ -164,7 +164,7 @@ function roles(c: Card): string[] {
     /search your library for .*(basic land|plains|island|swamp|mountain|forest).*(battlefield|play)/.test(t))) out.push('ramp');
   if (/draw (a|one|two|three|four|x|\d+) cards?|draws? cards? equal|draw that many/.test(t)) out.push('draw');
   if (/(destroy|exile) target (creature|permanent|artifact|enchantment|planeswalker|nonland|nonbasic)/.test(t)) out.push('spot removal');
-  if (/(destroy|exile) all |each player sacrifices|(destroy|exile) each (creature|permanent)|creatures get -\d+\/-\d+/.test(t)) out.push('board wipe');
+  if (/(destroy|exile) all (creatures|nonland|permanents)|(destroy|exile) each (creature|permanent)|each player sacrifices (all|.*creature)|all creatures get -\d+\/-\d+|creatures get -\d+\/-\d+ until/.test(t)) out.push('board wipe');
   if (/counter target (spell|ability|activated|triggered)/.test(t)) out.push('counterspell');
   if (nonland && /search your library for a(n)? .*card/.test(t) && !out.includes('ramp')) out.push('tutor');
   if (/return target .*(card|permanent).* from (your|a) graveyard|from your graveyard to (your hand|the battlefield)/.test(t)) out.push('recursion');

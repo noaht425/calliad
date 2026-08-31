@@ -270,6 +270,11 @@ export async function POST(req: NextRequest) {
     profileSections: profileSections(text, effectiveMode),
     learned: learned || undefined,
   };
+  // A tool result means a longer, denser reply is expected (deck analysis, sim
+  // narration, web-page answers). 1024 is stingy there — and with adaptive effort
+  // on, too small a budget can be spent entirely on reasoning, yielding no text.
+  const maxTokens = toolResult ? Math.min(4096, 1500 + Math.ceil(toolResult.length / 8)) : 1200;
+
   const { meta, stream } = await call({
     purpose: 'chat',
     tier: decision.tier,
@@ -277,6 +282,7 @@ export async function POST(req: NextRequest) {
     conversationId,
     userText: text,
     state,
+    maxTokens,
   });
 
   const body$ = async function* () {
