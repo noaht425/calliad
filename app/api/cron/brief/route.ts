@@ -9,6 +9,7 @@ import { syncCalendarEvents } from '@/lib/integrations/icloud-calendar';
 import { syncContacts } from '@/lib/integrations/icloud-contacts';
 import { scanGmailLabel } from '@/lib/integrations/gmail';
 import { medCheckin } from '@/lib/health/meds';
+import { scanForTidy } from '@/lib/memory/tidy';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -61,7 +62,12 @@ async function handle(req: NextRequest) {
       // follow-up call stays the intended second touch — no double reminder.
       const med = await medCheckin(userId, { followUp: false }).catch((e) => ({ sent: false, reason: String(e) }));
 
-      const brief = await composeBrief(userId);
+      const tidyCount = (await scanForTidy(userId).catch(() => [])).length;
+      const addendum = tidyCount
+        ? `Housekeeping: there are ${tidyCount} possible duplicate/stale item${tidyCount === 1 ? '' : 's'} in Noah's lists. End the brief with one short line telling him to say "tidy" to review them.`
+        : undefined;
+
+      const brief = await composeBrief(userId, 'scheduled', { addendum });
       if (brief.deferred) { results.push({ userId, deferred: true, med }); continue; }
       const push = await sendPush(userId, {
         title: 'Morning brief',

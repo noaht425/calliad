@@ -41,6 +41,7 @@ import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
 import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock, isRestaurantTasteQuery, restaurantTasteBlock } from '@/lib/tools/beli';
 import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine } from '@/lib/integrations/icloud-contacts';
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
+import { isTidyRequest, scanForTidy, applyTidyItems, type TidyItem } from '@/lib/memory/tidy';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -138,6 +139,34 @@ export async function POST(req: NextRequest) {
     await adminClient.from('conversations').update({ mode_state: { ...modeState, sweep: undefined } }).eq('id', conversationId);
     const recap = chosen.length ? await commitSweepItems(user.id, chosen) : 'Left it all.';
     return say(recap, 'sweep-commit');
+  }
+
+  // ── tidy: pick response to a pending "fix these?" list ────────────────
+  const pendingTidy = (modeState.tidy as TidyItem[] | undefined) ?? undefined;
+  if (pendingTidy?.length && /^\s*(all|none|no(pe|thing)?|\d+([,\s]+\d+)*|\d+\s*[-–]\s*\d+)\s*$/i.test(text)) {
+    const t = text.trim().toLowerCase();
+    let chosen: TidyItem[] = [];
+    if (t === 'all') chosen = pendingTidy;
+    else if (/^(none|no|nope|nothing)$/.test(t)) chosen = [];
+    else {
+      const rng = t.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+      const idxs = rng
+        ? Array.from({ length: +rng[2] - +rng[1] + 1 }, (_, k) => +rng[1] + k)
+        : t.split(/[,\s]+/).map(Number).filter((n) => Number.isInteger(n));
+      chosen = idxs.map((n) => pendingTidy[n - 1]).filter(Boolean);
+    }
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, tidy: undefined } }).eq('id', conversationId);
+    const recap = chosen.length ? await applyTidyItems(user.id, chosen) : 'Left it as is.';
+    return say(recap, 'tidy-apply');
+  }
+
+  // ── "tidy up / any duplicates" → scan + propose ──────────────────────
+  if (isTidyRequest(text)) {
+    const items = await scanForTidy(user.id).catch(() => []);
+    if (!items.length) return say(`Your lists look clean — nothing to tidy.`, 'tidy-empty');
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, tidy: items } }).eq('id', conversationId);
+    const list = items.map((it, i) => `${i + 1}. ${it.summary}`).join('\n');
+    return say(`Here's what I'd tidy:\n${list}\n\nReply with the numbers to apply (e.g. "1 3"), "all", or "none".`, 'tidy-proposed');
   }
 
   // ── "save anything from this chat" → sweep + propose ──────────────────

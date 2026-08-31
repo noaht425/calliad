@@ -45,6 +45,7 @@ export interface BriefResult {
 export async function composeBrief(
   userId: string,
   occasion: 'scheduled' | 'manual' = 'scheduled',
+  opts: { addendum?: string } = {},
 ): Promise<BriefResult> {
   const now = new Date();
 
@@ -97,7 +98,7 @@ export async function composeBrief(
     tier: 'T2',
     proactive: true,
     conversationId,
-    userText: `${INSTRUCTION[occasion]}\n\n${extrasBlock(extras)}`,
+    userText: `${INSTRUCTION[occasion]}\n\n${extrasBlock(extras)}${opts.addendum ? `\n\n${opts.addendum}` : ''}`,
     state,
     maxTokens: 600,
   });
