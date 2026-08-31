@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
+import { t1Json, t1Available } from '@/lib/llm/gemini';
 
 // "Would I like this?" — pattern L + M. Pull the candidate's metadata, hand the
 // brain the full taste log + Noah's bail patterns as ground truth. NO spoilers.
@@ -18,14 +19,14 @@ const TASTE_MD = (() => {
 
 type Kind = 'book' | 'screen' | 'game' | 'unknown';
 
-function guessKind(q: string): Kind {
+function regexKind(q: string): Kind {
   if (/\b(book|novel|read|author|series of books)\b/i.test(q)) return 'book';
   if (/\b(watch|show|series|film|movie|season|episode)\b/i.test(q)) return 'screen';
   if (/\b(game|play|playthrough|roguelike|rpg)\b/i.test(q)) return 'game';
   return 'unknown';
 }
 
-function extractTitle(q: string): string {
+function regexTitle(q: string): string {
   const quoted = q.match(/["'“](.+?)["'”]/)?.[1];
   if (quoted) return quoted;
   return q
@@ -33,6 +34,22 @@ function extractTitle(q: string): string {
     .replace(/[?.!,]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** T1 pulls the clean work title + kind from natural phrasing; regex is the fallback. */
+async function identify(query: string): Promise<{ title: string; kind: Kind }> {
+  if (t1Available()) {
+    const out = await t1Json<{ title: string; kind: string }>(
+      'taste_identify',
+      `Noah is asking whether he'd like a book / show / film / game. Pull just the WORK he's asking about.\n"${query.slice(0, 600)}"\nReturn {"title":"canonical title only, no 'the netflix show' etc.","kind":"book"|"screen"|"game"|"unknown"}`,
+      { maxOutputTokens: 60 },
+    );
+    if (out?.title?.trim()) {
+      const k = ['book', 'screen', 'game'].includes(out.kind) ? (out.kind as Kind) : 'unknown';
+      return { title: out.title.trim(), kind: k };
+    }
+  }
+  return { title: regexTitle(query), kind: regexKind(query) };
 }
 
 async function bookMeta(title: string): Promise<string | null> {
@@ -72,9 +89,8 @@ async function screenMeta(title: string): Promise<string | null> {
 }
 
 export async function wouldILike(userId: string, query: string): Promise<string | undefined> {
-  const title = extractTitle(query);
+  const { title, kind } = await identify(query);
   if (!title || title.length < 2) return undefined;
-  const kind = guessKind(query);
 
   const [{ data: log }, meta] = await Promise.all([
     adminClient.from('taste_log').select('title, kind, verdict, why').eq('user_id', userId).order('created_at'),
