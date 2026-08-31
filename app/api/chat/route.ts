@@ -42,6 +42,14 @@ import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock, isRestaur
 import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine } from '@/lib/integrations/icloud-contacts';
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
 import { isTidyRequest, scanForTidy, applyTidyItems, type TidyItem } from '@/lib/memory/tidy';
+import {
+  riddleOfTheDay, isRiddleRequest, isRiddleReveal, extractRiddleGuess, checkRiddle,
+  newSprint, isMathSprintStart, sprintResult,
+  newRootsQuiz, isRootsQuizStart, rootsPrompt, checkRoots,
+  recordScore, bestScore,
+  type RiddleState, type SprintState, type RootsState,
+} from '@/lib/games/play';
+import { RIDDLES } from '@/lib/games/riddles';
 import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/travel/trips';
 import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
 import type { TurnState } from '@/lib/brain/prompt';
@@ -124,6 +132,75 @@ export async function POST(req: NextRequest) {
     return say('Okay — I’ll check once more later, then leave it.', 'med-reply');
   }
 
+  // ── memory games: math sprint (answer flow) ──────────────────────────
+  const sprint = modeState.sprint as SprintState | undefined;
+  if (sprint?.problems?.length) {
+    const patchMode = (extra: Record<string, unknown>) =>
+      adminClient.from('conversations').update({ mode_state: { ...modeState, sprint: undefined, ...extra } }).eq('id', conversationId);
+    if (/^\s*(stop|done|quit|end|exit)\b/i.test(text)) {
+      await patchMode({});
+      const r = sprintResult(sprint);
+      await recordScore(user.id, 'math_sprint', r.score, { ms: r.ms, of: sprint.problems.length });
+      return say(`Stopped — ${r.line}.`, 'sprint-stop');
+    }
+    const num = text.trim().match(/-?\d+(?:\.\d+)?/);
+    if (!num) return say(`Just the number, or "stop". ${sprint.problems[sprint.idx].q} = ?`, 'sprint-reprompt');
+    const cur = sprint.problems[sprint.idx];
+    const right = Math.abs(parseFloat(num[0]) - cur.a) < 1e-6;
+    const next: SprintState = { ...sprint, idx: sprint.idx + 1, correct: sprint.correct + (right ? 1 : 0) };
+    if (next.idx >= next.problems.length) {
+      await adminClient.from('conversations').update({ mode_state: { ...modeState, sprint: undefined } }).eq('id', conversationId);
+      const r = sprintResult(next);
+      await recordScore(user.id, 'math_sprint', r.score, { ms: r.ms, of: next.problems.length });
+      const pb = await bestScore(user.id, 'math_sprint').catch(() => null);
+      const pbLine = pb ? ` Best: ${pb.score}/${next.problems.length}${pb.detail.ms ? ` in ${Math.round(Number(pb.detail.ms) / 1000)}s` : ''}.` : '';
+      return say(`${right ? '✓' : `✗ (${cur.a})`} — that's the set. **${r.line}.**${pbLine}`, 'sprint-done');
+    }
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, sprint: next } }).eq('id', conversationId);
+    return say(`${right ? '✓' : `✗ (${cur.a})`}  ·  ${next.idx + 1}/${next.problems.length}:  ${next.problems[next.idx].q} = ?`, 'sprint-next');
+  }
+
+  // ── memory games: roots quiz (answer flow) ──────────────────────────
+  const rq = modeState.roots as RootsState | undefined;
+  if (rq?.order?.length) {
+    if (/^\s*(stop|done|quit|end|exit)\b/i.test(text)) {
+      await adminClient.from('conversations').update({ mode_state: { ...modeState, roots: undefined } }).eq('id', conversationId);
+      return say(`Stopped — ${rq.correct}/${rq.i} so far.`, 'roots-stop');
+    }
+    const { ok, want } = checkRoots(rq, text);
+    const advanced: RootsState = { ...rq, i: rq.i + 1, correct: rq.correct + (ok ? 1 : 0) };
+    const mark = ok ? '✓' : `✗ (${want})`;
+    if (advanced.i >= 8 || advanced.i >= advanced.order.length) {
+      await adminClient.from('conversations').update({ mode_state: { ...modeState, roots: undefined } }).eq('id', conversationId);
+      await recordScore(user.id, 'roots_quiz', advanced.correct, { of: advanced.i });
+      const pb = await bestScore(user.id, 'roots_quiz').catch(() => null);
+      return say(`${mark} — done. **${advanced.correct}/${advanced.i}.**${pb ? ` Best: ${pb.score}/${pb.detail.of ?? 8}.` : ''}`, 'roots-done');
+    }
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, roots: advanced } }).eq('id', conversationId);
+    const p = rootsPrompt(advanced);
+    return say(`${mark}\n\n${advanced.i + 1}. ${p.text}`, 'roots-next');
+  }
+
+  // ── memory games: riddle guess / reveal ─────────────────────────────
+  const riddleSt = modeState.riddle as RiddleState | undefined;
+  if (riddleSt && !riddleSt.revealed && Date.now() - riddleSt.at < 12 * 3600000) {
+    if (isRiddleReveal(text)) {
+      await adminClient.from('conversations').update({ mode_state: { ...modeState, riddle: { ...riddleSt, revealed: true } } }).eq('id', conversationId);
+      return say(`${RIDDLES[riddleSt.id].a}`, 'riddle-reveal');
+    }
+    const guess = extractRiddleGuess(text);
+    if (guess) {
+      if (checkRiddle(riddleSt.id, guess)) {
+        await adminClient.from('conversations').update({ mode_state: { ...modeState, riddle: { ...riddleSt, revealed: true } } }).eq('id', conversationId);
+        await recordScore(user.id, 'riddle', 1, { id: riddleSt.id });
+        return say(`Got it — ${RIDDLES[riddleSt.id].a}`, 'riddle-solved');
+      }
+      const hint = RIDDLES[riddleSt.id].hint;
+      return say(`Not it.${hint ? ` Hint: ${hint}` : ''} Say "answer" to give up.`, 'riddle-wrong');
+    }
+    // not a guess → fall through to the brain, riddle stays pending
+  }
+
   // ── context sweep: pick response to a pending "worth saving" list ──────
   const pendingSweep = (modeState.sweep as SweepItem[] | undefined) ?? undefined;
   if (pendingSweep?.length && /^\s*(all|none|no(pe|thing)?|\d+([,\s]+\d+)*|\d+\s*[-–]\s*\d+)\s*$/i.test(text)) {
@@ -169,6 +246,26 @@ export async function POST(req: NextRequest) {
     await adminClient.from('conversations').update({ mode_state: { ...modeState, tidy: items } }).eq('id', conversationId);
     const list = items.map((it, i) => `${i + 1}. ${it.summary}`).join('\n');
     return say(`Here's what I'd tidy:\n${list}\n\nReply with the numbers to apply (e.g. "1 3"), "all", or "none".`, 'tidy-proposed');
+  }
+
+  // ── memory games: start ─────────────────────────────────────────────
+  if (isMathSprintStart(text)) {
+    const s = newSprint();
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, sprint: s } }).eq('id', conversationId);
+    return say(`Math sprint — ${s.problems.length} problems, just the number, "stop" to bail.\n\n1/${s.problems.length}:  ${s.problems[0].q} = ?`, 'sprint-start');
+  }
+  if (isRootsQuizStart(text)) {
+    const s = newRootsQuiz();
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, roots: s } }).eq('id', conversationId);
+    return say(`Roots quiz — 8 questions, "stop" to bail.\n\n1. ${rootsPrompt(s).text}`, 'roots-start');
+  }
+  if (isRiddleRequest(text)) {
+    const r = riddleOfTheDay();
+    const existing = modeState.riddle as RiddleState | undefined;
+    // keep today's if already going and unsolved; otherwise (re)seed
+    const st: RiddleState = existing && existing.id === r.id ? existing : { id: r.id, revealed: false, at: Date.now() };
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, riddle: st } }).eq('id', conversationId);
+    return say(st.revealed ? `${r.q}\n\n(You already had this one — ${r.a})` : r.q, 'riddle');
   }
 
   // ── "save anything from this chat" → sweep + propose ──────────────────

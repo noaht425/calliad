@@ -11,6 +11,7 @@ import { scanGmailLabel } from '@/lib/integrations/gmail';
 import { medCheckin } from '@/lib/health/meds';
 import { scanForTidy } from '@/lib/memory/tidy';
 import { upcomingCharges } from '@/lib/money/subscriptions';
+import { riddleOfTheDay } from '@/lib/games/play';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -78,10 +79,17 @@ async function handle(req: NextRequest) {
       if (tidyCount) {
         notes.push(`Housekeeping: ${tidyCount} possible duplicate/stale item${tidyCount === 1 ? '' : 's'} in Noah's lists. End the brief with one short line telling him to say "tidy" to review them.`);
       }
-      const addendum = notes.length ? notes.join('\n\n') : undefined;
+      const riddle = riddleOfTheDay();
+      notes.push(`Riddle of the day — end the brief with exactly this line, verbatim, no answer: Riddle: ${riddle.q}`);
+      const addendum = notes.join('\n\n');
 
       const brief = await composeBrief(userId, 'scheduled', { addendum });
       if (brief.deferred) { results.push({ userId, deferred: true, med }); continue; }
+      // seed the riddle on the brief thread so a guess/reveal there lands
+      await adminClient.from('conversations')
+        .update({ mode_state: { riddle: { id: riddle.id, revealed: false, at: Date.now() } } })
+        .eq('id', brief.conversationId)
+        .then(() => {}, () => {});
       const push = await sendPush(userId, {
         title: 'Morning brief',
         body: brief.text.slice(0, 160),
