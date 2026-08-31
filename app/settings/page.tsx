@@ -158,6 +158,47 @@ function LearnedFacts({ token }: { token: string }) {
   );
 }
 
+function MedLog({ token }: { token: string }) {
+  const [hist, setHist] = useState<{ day: string; taken: boolean; sent_count: number; note: string | null }[]>([]);
+  const [msg, setMsg] = useState<string | null>(null);
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const load = useCallback(async () => {
+    const r = await fetch('/api/med', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) setHist((await r.json()).history ?? []);
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const today = hist.find((d) => d.day === todayStr);
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-[var(--text-muted)]">
+        Today: {today?.taken ? 'taken ✓' : today?.sent_count ? `asked ${today.sent_count}×, not confirmed` : 'not asked yet'}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button className={btn} onClick={async () => { await fetch('/api/med', { method: 'POST', headers: h, body: JSON.stringify({ taken: true }) }); load(); }}>Took it today</button>
+        <button className="text-xs underline text-[var(--text-muted)]" onClick={async () => { await fetch('/api/med', { method: 'POST', headers: h, body: JSON.stringify({ taken: false, note: 'not yet' }) }); load(); }}>not yet</button>
+        <button className="text-xs underline text-[var(--text-muted)]" onClick={async () => { const r = await fetch('/api/med?checkin=1', { headers: { Authorization: `Bearer ${token}` } }); setMsg((await r.json()).reason ?? ''); load(); }}>send check-in now</button>
+      </div>
+      {msg && <p className="text-xs text-[var(--text-quiet)]">{msg}</p>}
+      <div className="flex gap-1">
+        {[...hist].reverse().slice(-14).map((d) => (
+          <span
+            key={d.day}
+            title={`${d.day}: ${d.taken ? 'taken' : d.sent_count ? 'unconfirmed' : 'no data'}`}
+            className="h-4 w-4 rounded-[3px]"
+            style={{ background: d.taken ? 'var(--accent)' : d.sent_count ? 'var(--warm-wash)' : 'var(--neutral-tile)' }}
+          />
+        ))}
+      </div>
+      <p className="text-[11px] text-[var(--text-quiet)]">
+        The 11am check-in needs an external ping to <code>/api/cron/med</code> (Vercel Hobby is capped at 2 crons). The 2pm nudge cron sends a backstop.
+      </p>
+    </div>
+  );
+}
+
 function QuizDeck({ token }: { token: string }) {
   const [c, setC] = useState<{ total: number; due: number }>({ total: 0, due: 0 });
   const [items, setItems] = useState<{ id: string; lang: string; prompt: string; answer: string; box: number }[]>([]);
@@ -573,6 +614,12 @@ export default function SettingsPage() {
             ))}
           </ul>
         )}
+      </section>
+
+      {/* ── Medication ──────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>Medication</h2>
+        <MedLog token={session.access_token} />
       </section>
 
       {/* ── Notifications ────────────────────────────────────────────── */}

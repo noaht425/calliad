@@ -21,6 +21,7 @@ import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo } from '@/lib/actions/detect';
 import { extractTask } from '@/lib/actions/task';
+import { classifyMedReply, recordMed, medContextLine } from '@/lib/health/meds';
 import { isEmailDraft, composeEmail } from '@/lib/actions/email';
 import { wouldILike } from '@/lib/taste/judge';
 import { isFlightQuery, isRestaurantQuery, extractFlight, extractRestaurant } from '@/lib/travel/detect';
@@ -83,11 +84,24 @@ export async function POST(req: NextRequest) {
     return streamResponse(conversationId!, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
   };
 
+  const medLine = await medContextLine(user.id).catch(() => '');
+
   // ── pending action awaiting yes/no ──────────────────────────────────────
   const pending = await pendingFor(conversationId);
   if (pending && (isYes(text) || isNo(text))) {
     const r = await decideAction(user.id, pending.id, isYes(text) ? 'approved' : 'rejected', conversationId);
     return say(r.message, 'action-decided');
+  }
+
+  // ── medication check-in reply ─────────────────────────────────────────
+  const medReply = classifyMedReply(text);
+  if (medReply === 'took' || (!pending && medLine && /^\s*(yes|yep|yeah|yup|ya|done|did|took (them|it))\b/i.test(text))) {
+    await recordMed(user.id, true);
+    return say('Good.', 'med-reply');
+  }
+  if (medReply === 'not-yet') {
+    await recordMed(user.id, false, 'not yet');
+    return say('Okay — I’ll check once more later, then leave it.', 'med-reply');
   }
   // a pending email draft + anything that isn't yes/no → treat it as a revision
   if (pending?.kind === 'draft_email') {
@@ -290,6 +304,7 @@ export async function POST(req: NextRequest) {
     toolResult,
     profileSections: profileSections(text, effectiveMode),
     learned: learned || undefined,
+    medStatus: medLine || undefined,
   };
   // A tool result means a longer, denser reply is expected (deck analysis, sim
   // narration, web-page answers). 1024 is stingy there — and with adaptive effort

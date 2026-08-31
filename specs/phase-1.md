@@ -89,6 +89,20 @@
 - **Cron consolidation** (Hobby caps at 2): `/api/cron/brief` now runs sync → brief at 12:00;
   `/api/cron/nudge` at 18:00. `heartbeat`/`sync` routes kept for manual/external use.
 
+### ✅ Medication check-in (2026-08-31)
+Persona/profile say Calliad should *actively* ask ("did you take your meds?") since Noah never
+ticks the Apple Reminders box — but nothing triggered it. Now:
+- `0009_med_log.sql` — one row per day (`sent_count`, `taken`, `taken_at`, `note`).
+- `lib/health/meds.ts` — `medCheckin({followUp})` (push, ≤2/day, skips once confirmed),
+  `recordMed`, `classifyMedReply` (took / not-yet), `medContextLine` (a per-turn brain line
+  when the check-in's outstanding).
+- `/api/chat` catches "took my meds" / "not yet" / a bare "yes" while a check-in is open →
+  `recordMed`, short reply; otherwise `medStatus` rides in the prompt so the brain can raise
+  it once, gently, in context.
+- `/api/cron/med` (external ping ~11am — Hobby's 2 crons are used) + the 18:00 nudge cron runs
+  a `followUp` backstop. `/api/med` (GET status/history, `?checkin=1` test, POST answer) +
+  Settings "Medication" (14-day dot strip, quick "took it", test check-in).
+
 ### ✅ Syllabus ingestion (pattern C — the anchor engine)
 - `0005_documents.sql` — `documents` (kind/course/raw_text/extracted).
 - `lib/ingest/syllabus.ts` — PDF (native Claude `document` block) or text → Sonnet →

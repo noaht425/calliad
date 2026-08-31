@@ -67,6 +67,7 @@ export interface TurnState {
   toolResult?: string;              // e.g. morphology tool output, fenced by caller
   profileSections?: string[];       // extra profile.md headings relevant to this turn
   learned?: string;                 // confirmed profile_facts block
+  medStatus?: string;               // today's medication check-in state, if unsettled
 }
 
 function renderLoops(loops: OpenLoop[], tz: string): string {
@@ -144,6 +145,7 @@ export function assemble(userText: string, state: TurnState): AssembledPrompt {
   const extra = renderSections(state.profileSections ?? []);
   if (extra) system.push({ type: 'text', text: `## About Noah — relevant to this turn\n\n${extra}` });
   if (state.learned) system.push({ type: 'text', text: state.learned });
+  if (state.medStatus) system.push({ type: 'text', text: state.medStatus });
 
   if (state.integrations) {
     system.push({ type: 'text', text: renderIntegrations(state.integrations, state.tz) });

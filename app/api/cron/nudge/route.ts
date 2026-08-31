@@ -5,6 +5,7 @@ import { config } from '@/lib/hub/config';
 import { checkSecret } from '@/lib/hub/guard';
 import { sendPush } from '@/lib/hub/push';
 import { composeNudge } from '@/lib/nudge/compose';
+import { medCheckin } from '@/lib/health/meds';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -24,6 +25,14 @@ async function handle(req: NextRequest) {
   if (hour >= 1 && hour < 7) {
     await audit.log('trigger_fired', 'cron', 'nudge', { skipped: 'quiet hours' });
     return NextResponse.json({ ok: true, skipped: 'quiet hours' });
+  }
+
+  // Afternoon medication backstop for every connected user, then the deadline nudge.
+  const { data: allSvc } = await adminClient.from('connected_services').select('user_id');
+  const medResults: Record<string, unknown>[] = [];
+  for (const userId of [...new Set((allSvc ?? []).map((r) => r.user_id))]) {
+    const m = await medCheckin(userId, { followUp: true }).catch((e) => ({ sent: false, reason: String(e) }));
+    medResults.push({ userId, ...m });
   }
 
   const { data: users } = await adminClient
@@ -48,8 +57,8 @@ async function handle(req: NextRequest) {
     }
   }
 
-  await audit.log('trigger_fired', 'cron', 'nudge', { at: new Date().toISOString(), results });
-  return NextResponse.json({ ok: true, results });
+  await audit.log('trigger_fired', 'cron', 'nudge', { at: new Date().toISOString(), results, med: medResults });
+  return NextResponse.json({ ok: true, results, med: medResults });
 }
 
 export const GET = handle;
