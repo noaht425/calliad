@@ -18,6 +18,7 @@ export function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [mode, setMode] = useState<string | undefined>();
   const convRef = useRef<string | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -62,6 +63,7 @@ export function Chat() {
               };
               return next;
             }),
+          onDone: (_full, meta) => setMode(meta?.mode && meta.mode !== 'default' ? meta.mode : undefined),
         },
         convRef.current,
       );
@@ -113,6 +115,11 @@ export function Chat() {
       </div>
 
       <div className="shrink-0 border-t border-zinc-100 dark:border-zinc-800 px-4 pt-2 pb-3">
+        {mode && (
+          <div className="mb-1.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+            {mode === 'italian-tutor' ? 'Italian tutor' : mode === 'quiz' ? 'Quiz' : mode === 'study-coach' ? 'Study coach' : mode} · say &ldquo;english&rdquo; to exit
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <textarea
             ref={inputRef}

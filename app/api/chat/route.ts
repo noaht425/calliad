@@ -3,7 +3,7 @@ import { waitUntil } from '@vercel/functions';
 import { randomUUID } from 'node:crypto';
 import { supabase } from '@/lib/supabase';
 import { adminClient } from '@/lib/supabase.server';
-import { route } from '@/lib/router/route';
+import { route, type Mode } from '@/lib/router/route';
 import { call } from '@/lib/brain/call';
 import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
@@ -32,9 +32,11 @@ export async function POST(req: NextRequest) {
 
   // ── conversation ────────────────────────────────────────────────────────
   let conversationId = body.conversationId;
+  let currentMode: Mode = 'default';
   if (conversationId) {
-    const { data } = await adminClient.from('conversations').select('id').eq('id', conversationId).maybeSingle();
+    const { data } = await adminClient.from('conversations').select('id, mode').eq('id', conversationId).maybeSingle();
     if (!data) conversationId = undefined;
+    else currentMode = (data.mode as Mode) ?? 'default';
   }
   if (!conversationId) {
     conversationId = randomUUID();
@@ -66,7 +68,10 @@ export async function POST(req: NextRequest) {
   }
 
   // ── route ───────────────────────────────────────────────────────────────
-  const decision = await route({ source: 'pwa', kind: 'message', text, conversationId });
+  const decision = await route({ source: 'pwa', kind: 'message', text, conversationId, currentMode });
+  if (decision.setMode && decision.setMode !== currentMode) {
+    await adminClient.from('conversations').update({ mode: decision.setMode }).eq('id', conversationId);
+  }
 
   if (decision.handled === 'rule') {
     const reply = decision.directReply ?? '';
@@ -81,12 +86,16 @@ export async function POST(req: NextRequest) {
   }
 
   // ── brain ───────────────────────────────────────────────────────────────
+  const effectiveMode: Mode = decision.setMode ?? decision.mode;
   const [recent, integrations, loops] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
   ]);
-  const state: TurnState = { now: new Date(), tz: TZ, recent, integrations, loops };
+  const state: TurnState = {
+    now: new Date(), tz: TZ, recent, integrations, loops,
+    mode: effectiveMode === 'default' ? undefined : effectiveMode,
+  };
   const { meta, stream } = await call({
     purpose: 'chat',
     tier: decision.tier,
@@ -108,7 +117,7 @@ export async function POST(req: NextRequest) {
     await audit.log('outbound_message', 'calliad', conversationId, {
       text: finalText, surface: 'pwa', tier: meta.tier, model: meta.model, cost_usd: meta.costUsd, capped: meta.capped,
     });
-    yield sse({ done: true, costUsd: meta.costUsd });
+    yield sse({ done: true, costUsd: meta.costUsd, mode: effectiveMode });
     // T1 pass: file any open loop this exchange opened. waitUntil keeps the
     // serverless function alive until it finishes (a bare promise would be reaped).
     waitUntil(

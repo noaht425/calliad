@@ -9,7 +9,7 @@ export async function authHeaders(): Promise<Record<string, string>> {
 
 export interface StreamChatHandlers {
   onDelta: (text: string) => void;
-  onDone?: (full: string) => void;
+  onDone?: (full: string, meta?: { mode?: string }) => void;
   onError?: (err: unknown) => void;
 }
 
@@ -38,6 +38,7 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = '';
   let full = '';
+  let doneMeta: { mode?: string } | undefined;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -52,9 +53,10 @@ export async function streamChat(
         const payload = JSON.parse(line.slice(5).trim());
         if (payload.delta) { full += payload.delta; handlers.onDelta(payload.delta); }
         if (payload.error) handlers.onError?.(new Error(payload.error));
+        if (payload.done) doneMeta = { mode: payload.mode };
       } catch { /* ignore keep-alives / malformed */ }
     }
   }
-  handlers.onDone?.(full);
+  handlers.onDone?.(full, doneMeta);
   return { conversationId: returnedConvId ?? undefined };
 }

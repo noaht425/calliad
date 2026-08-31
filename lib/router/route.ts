@@ -1,8 +1,5 @@
-// Normalized inbound event → RouteDecision. Design: specs/hub-skeleton.md §5.
-//
-// Phase 0 is deliberately dumb: the interface is the contract, the intelligence
-// (intent → tier/mode/tool selection) comes in Phase 2. This version only
-// enforces the kill switch and passes messages through to T2.
+// Normalized inbound event → RouteDecision. Design: specs/hub-skeleton.md §5,
+// system-prompt-assembly.md §5-6.
 
 import { config } from '@/lib/hub/config';
 import { audit } from '@/lib/hub/audit';
@@ -15,12 +12,13 @@ export interface InboundEvent {
   kind: 'message' | 'trigger' | 'webhook';
   text?: string;
   payload?: unknown;
-  job?: string; // for triggers: 'heartbeat' | ...
+  job?: string;
   conversationId?: string;
+  currentMode?: Mode; // sticky mode carried on the conversation
 }
 
 export type Mode =
-  | 'default' | 'study-coach' | 'italian-tutor'
+  | 'default' | 'study-coach' | 'italian-tutor' | 'morphology' | 'quiz'
   | 'careful-engineer' | 'document-extraction' | 'brief';
 
 export interface RouteDecision {
@@ -30,17 +28,23 @@ export interface RouteDecision {
   tools: string[];
   persona: 'full' | 'terse';
   reason: string;
-  /** handled==='rule' + a canned reply to send straight to the surface. */
   directReply?: string;
-  /** a proactive event the kill switch dropped — caller logs + no-ops. */
   dropped?: boolean;
+  /** if set, persist this as the conversation's mode for future turns */
+  setMode?: Mode;
 }
 
 type KillLevel = 'off' | 'pause_proactive' | 'pause_all';
-
 const PAUSED_REPLY = "I'm paused right now, Noah — flip the kill switch back when you want me.";
-
 const isProactive = (e: InboundEvent) => e.kind === 'trigger' || e.kind === 'webhook';
+
+// ── mode-switch phrases ─────────────────────────────────────────────────────
+const ENTER_ITALIAN = /\b(parl(a|iamo) (in )?italiano|in italiano|italian (mode|practice)|practice (my )?italian|let'?s (do|practice) italian|switch to italian)\b/i;
+const EXIT_MODE = /\b(in inglese|back to english|english( please)?|stop( the)? (italian|tutor|quiz|practice)|exit (mode|tutor|quiz)|normal mode|nevermind the (italian|quiz))\b/i;
+const ENTER_QUIZ = /\b(quiz me|test me|flashcards?|review (my |the )?(vocab|words|forms|greek|latin|italian)|drill me|keep me sharp)\b/i;
+const ENTER_STUDY = /\b(study (plan|help|coach)|help me (study|prep|review) for|focus plan)\b/i;
+// morphology is a one-shot, not a sticky mode (stems, no trailing \b — "conjugate"/"declension")
+const MORPH = /(conjugat|declin|\bparse\b[^?]{0,40}\b(form|word|verb|noun)|principal parts|what (case|tense|mood|person|number|gender) is|synopsi[sz])/i;
 
 export async function route(event: InboundEvent): Promise<RouteDecision> {
   const decision = await decide(event);
@@ -55,7 +59,6 @@ export async function route(event: InboundEvent): Promise<RouteDecision> {
 
 async function decide(event: InboundEvent): Promise<RouteDecision> {
   const level = (await config.get('killswitch_level')) as KillLevel;
-
   if (level === 'pause_all') {
     return isProactive(event)
       ? rule('T0', 'killswitch pause_all — proactive event dropped', { dropped: true })
@@ -65,14 +68,49 @@ async function decide(event: InboundEvent): Promise<RouteDecision> {
     return rule('T0', 'killswitch pause_proactive — proactive event dropped', { dropped: true });
   }
 
-  // Phase 0 body — dumb on purpose.
-  if (event.kind === 'message') {
-    return { handled: 'brain', tier: 'T2', mode: 'default', tools: [], persona: 'full', reason: 'phase0 passthrough' };
+  if (event.kind === 'trigger' && event.job === 'heartbeat') return rule('T0', 'heartbeat — audit only');
+  if (event.kind !== 'message') {
+    return rule('T0', `no proactive handling for ${event.kind}${event.job ? ` (${event.job})` : ''}`);
   }
-  if (event.kind === 'trigger' && event.job === 'heartbeat') {
-    return rule('T0', 'heartbeat — audit only');
+
+  const text = event.text ?? '';
+  const sticky: Mode = event.currentMode ?? 'default';
+
+  // 1. explicit mode switches (win over everything)
+  if (EXIT_MODE.test(text)) {
+    return brain('T2', 'default', 'user exited a mode', { setMode: 'default' });
   }
-  return rule('T0', `phase0 — no proactive handling for ${event.kind}${event.job ? ` (${event.job})` : ''}`);
+  if (ENTER_ITALIAN.test(text)) {
+    return brain('T2', 'italian-tutor', 'entering italian-tutor', { setMode: 'italian-tutor' });
+  }
+  if (ENTER_QUIZ.test(text)) {
+    return brain('T2', 'quiz', 'entering quiz', { setMode: 'quiz' });
+  }
+  if (ENTER_STUDY.test(text)) {
+    return brain('T2', 'study-coach', 'entering study-coach', { setMode: 'study-coach' });
+  }
+
+  // 2. one-shot morphology (doesn't change sticky mode)
+  if (MORPH.test(text)) {
+    return brain('T2', 'morphology', 'morphology query', { tools: ['morphology'] });
+  }
+
+  // 3. otherwise carry the sticky mode
+  return brain('T2', sticky, sticky === 'default' ? 'default chat' : `continuing ${sticky}`);
+}
+
+function brain(
+  tier: Tier,
+  mode: Mode,
+  reason: string,
+  extra: Partial<Pick<RouteDecision, 'setMode' | 'tools'>> = {},
+): RouteDecision {
+  return {
+    handled: 'brain', tier, mode,
+    tools: extra.tools ?? [],
+    persona: 'full', reason,
+    ...(extra.setMode ? { setMode: extra.setMode } : {}),
+  };
 }
 
 function rule(

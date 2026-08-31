@@ -7,6 +7,19 @@ import path from 'node:path';
 import type Anthropic from '@anthropic-ai/sdk';
 import type { IntegrationContext } from '@/lib/integrations/context';
 import type { OpenLoop } from '@/lib/memory/loops';
+import type { Mode } from '@/lib/router/route';
+
+// ── Layer 5: mode overlays (short; rendered only when mode != default) ──────
+const MODE_OVERLAY: Partial<Record<Mode, string>> = {
+  'italian-tutor':
+    `## Mode: Italian tutor\nConverse with Noah in Italian at roughly B1 / intermediate (his level). Keep replies natural and not too long. Correct his mistakes briefly as you go — a quick "(si dice X, non Y)" — don't lecture. Localise idioms, never transliterate. Only drop into English if he's clearly stuck or asks. Your persona and dry humour still apply, just in Italian.`,
+  'study-coach':
+    `## Mode: Study coach\nPoint Noah at what to prioritise given weight and time left. Do NOT produce the answers, write the work, or summarise the readings' conclusions — orient him, don't substitute for the studying. Use the Live data (exam dates, weights) and open loops.`,
+  'quiz':
+    `## Mode: Quiz\nActive-recall quizzing over what Noah is actually studying (Latin / Greek / Italian vocab and forms — see profile). Ask one item at a time, wait for his answer, mark it, give the correct form if he missed it, then the next. Keep it moving. No generic trivia — only material tied to his courses.`,
+  morphology:
+    `## Mode: Morphology\nNoah asked for a conjugation, declension, or parse. The morphology tool result (if present) is the source of truth — narrate and format it, don't second-guess it. If no tool result is available, give your best answer but flag that it's unverified.`,
+};
 
 const CONTENT_DIR = path.join(process.cwd(), 'content');
 
@@ -63,6 +76,8 @@ export interface TurnState {
   recent: { role: 'user' | 'assistant'; content: string }[]; // last ~10–20
   integrations?: IntegrationContext; // upcoming calendar + watched-label mail
   loops?: OpenLoop[];                // relevant open loops (working state)
+  mode?: Mode;                       // conversation mode (overlay in layer 5)
+  toolResult?: string;              // e.g. morphology tool output, fenced by caller
 }
 
 function renderLoops(loops: OpenLoop[], tz: string): string {
@@ -143,6 +158,9 @@ export function assemble(userText: string, state: TurnState): AssembledPrompt {
   if (state.loops?.length) {
     system.push({ type: 'text', text: renderLoops(state.loops, state.tz) });
   }
+  const overlay = state.mode && MODE_OVERLAY[state.mode];
+  if (overlay) system.push({ type: 'text', text: overlay });
+  if (state.toolResult) system.push({ type: 'text', text: state.toolResult });
 
   const messages: Anthropic.MessageParam[] = [
     ...state.recent.map((m) => ({ role: m.role, content: m.content })),
