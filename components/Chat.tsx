@@ -5,6 +5,7 @@ import { streamChat } from '@/lib/api';
 import { useVoiceInput } from '@/lib/voice/useVoiceInput';
 import { SentenceSpeaker } from '@/lib/voice/speak';
 import { fileToResizedDataUrl } from '@/lib/image';
+import { useConversationSync } from '@/lib/chat/useConversationSync';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -55,6 +56,10 @@ export function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Cross-device: pull in turns continued on another device (the home chat is
+  // always on screen when mounted, so it's always active).
+  const { markTurnDone } = useConversationSync({ session, sending, active: true, setMessages, convRef });
+
   const runTurn = useCallback(async (text: string, image?: string) => {
     if ((!text.trim() && !image) || sending || !session) return;
     setMessages((m) => [...m, { role: 'user', text, image }, { role: 'assistant', text: '' }]);
@@ -75,6 +80,7 @@ export function Chat() {
             if (ttsRef.current) speakerRef.current!.feed(acc);
           },
           onDone: (full, meta) => {
+            markTurnDone();
             setMode(meta?.mode && ['italian-tutor', 'quiz', 'study-coach'].includes(meta.mode) ? meta.mode : undefined);
             if (ttsRef.current && full) speakerRef.current!.flush(full);
           },
@@ -96,7 +102,7 @@ export function Chat() {
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [sending, session]);
+  }, [sending, session, markTurnDone]);
 
   const send = useCallback(() => {
     const text = input.trim();

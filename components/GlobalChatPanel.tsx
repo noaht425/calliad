@@ -6,6 +6,7 @@ import { streamChat } from '@/lib/api';
 import { useVoiceInput } from '@/lib/voice/useVoiceInput';
 import { SentenceSpeaker } from '@/lib/voice/speak';
 import { fileToResizedDataUrl } from '@/lib/image';
+import { useConversationSync } from '@/lib/chat/useConversationSync';
 
 interface Message { role: 'user' | 'assistant'; text: string; image?: string }
 
@@ -95,6 +96,11 @@ export function GlobalChatPanel() {
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
+  /* Cross-device: while the panel is open, pull in turns from the other device. */
+  const { markTurnDone } = useConversationSync({
+    session, sending, active: chatH > CLOSED, setMessages, convRef,
+  });
+
   /* Seed with today's brief the first time the panel opens. */
   useEffect(() => {
     if (chatH === CLOSED || briefLoaded.current || !session) return;
@@ -153,6 +159,7 @@ export function GlobalChatPanel() {
             if (ttsRef.current) speakerRef.current!.feed(acc);
           },
           onDone: (full, meta) => {
+            markTurnDone();
             setMode(meta?.mode && MODE_LABEL[meta.mode] ? meta.mode : undefined);
             if (ttsRef.current && full) speakerRef.current!.flush(full);
           },
@@ -171,7 +178,7 @@ export function GlobalChatPanel() {
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [sending, session]);
+  }, [sending, session, markTurnDone]);
 
   const send = useCallback(() => {
     const text = input.trim();
