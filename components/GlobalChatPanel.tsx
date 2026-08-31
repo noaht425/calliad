@@ -360,14 +360,23 @@ export function GlobalChatPanel() {
                     ) : null}
                     {(m.text || (m.role === 'assistant' && sending && i === messages.length - 1)) && (
                       <div
+                        role={ttsOn && m.role === 'assistant' && m.text ? 'button' : undefined}
+                        onClick={ttsOn && m.role === 'assistant' && m.text ? () => { primeSpeech(); speakerRef.current!.speakNow(m.text); } : undefined}
+                        title={ttsOn && m.role === 'assistant' && m.text ? 'Tap to read aloud' : undefined}
                         className="whitespace-pre-wrap rounded-2xl px-3 py-2 text-[13.5px] leading-relaxed"
-                        style={
-                          m.role === 'user'
+                        style={{
+                          ...(m.role === 'user'
                             ? { background: 'var(--accent)', color: 'var(--on-accent)' }
-                            : { background: 'var(--surface)', color: 'var(--text-body)', border: '1px solid var(--border)', boxShadow: 'var(--card-glow, none)' }
-                        }
+                            : { background: 'var(--surface)', color: 'var(--text-body)', border: '1px solid var(--border)', boxShadow: 'var(--card-glow, none)' }),
+                          cursor: ttsOn && m.role === 'assistant' && m.text ? 'pointer' : undefined,
+                        }}
                       >
                         {m.text || (sending && i === messages.length - 1 ? <ThinkingDots /> : '')}
+                        {ttsOn && m.role === 'assistant' && m.text && (
+                          <svg className="inline-block w-3 h-3 ml-1.5 -mt-0.5 align-middle" style={{ color: 'var(--accent)', opacity: 0.65 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                          </svg>
+                        )}
                       </div>
                     )}
                   </div>

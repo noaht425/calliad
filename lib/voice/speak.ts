@@ -86,6 +86,12 @@ export class SentenceSpeaker {
     this.spokenLen = fullText.length;
   }
 
+  /** Speak one whole string now, interrupting anything in progress (tap-to-read). */
+  speakNow(text: string) {
+    this.cancel();
+    this.say(text);
+  }
+
   cancel() {
     if (typeof window !== 'undefined') window.speechSynthesis?.cancel();
     this.stopKeepAlive();
