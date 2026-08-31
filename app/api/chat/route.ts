@@ -54,10 +54,18 @@ export async function POST(req: NextRequest) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return json({ error: 'Unauthorized' }, 401);
 
-  let body: { text?: string; conversationId?: string };
+  let body: { text?: string; conversationId?: string; image?: string };
   try { body = await req.json(); } catch { return json({ error: 'Body must be JSON' }, 400); }
-  const text = body.text?.trim();
-  if (!text) return json({ error: 'text required' }, 400);
+
+  // optional attached photo — data URL "data:image/jpeg;base64,…"
+  let image: { media_type: string; data: string } | undefined;
+  const im = body.image?.match(/^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/);
+  if (im) {
+    if (im[2].length > 7_000_000) return json({ error: 'image too large' }, 413); // ~5MB raw
+    image = { media_type: im[1], data: im[2] };
+  }
+  const text = body.text?.trim() ?? '';
+  if (!text && !image) return json({ error: 'text or image required' }, 400);
 
   // ── conversation ────────────────────────────────────────────────────────
   let conversationId = body.conversationId;
@@ -75,8 +83,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  await audit.log('inbound_message', 'noah', conversationId, { text, surface: 'pwa' });
-  await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'user', content: text });
+  const loggedText = text || (image ? '📷 (photo)' : text);
+  await audit.log('inbound_message', 'noah', conversationId, { text: loggedText, hasImage: !!image, surface: 'pwa' });
+  await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'user', content: loggedText });
   await adminClient.from('conversations').update({ last_at: new Date().toISOString() }).eq('id', conversationId);
 
   const say = async (reply: string, reason: string) => {
@@ -317,17 +326,19 @@ export async function POST(req: NextRequest) {
   const webSearch =
     !toolResult && effectiveMode === 'default' &&
     /\b(search (for|the web|online|it up)|look (this |it )?up|look up|google( it)?|find out|latest (on|news|from)|what'?s the latest|any news (on|about)|news (on|about|for)|what'?s (going on|happening|new) (with|in|on)|current (news|events|situation|status)|as of (today|now|this)|up to date|right now\b)/i.test(text);
-  const maxTokens = toolResult || webSearch ? Math.min(4096, 1500 + Math.ceil((toolResult?.length ?? 3000) / 8)) : 1200;
+  const maxTokens = image || toolResult || webSearch ? Math.min(4096, 1500 + Math.ceil((toolResult?.length ?? 3000) / 8)) : 1200;
 
   const { meta, stream } = await call({
     purpose: 'chat',
-    tier: decision.tier,
+    // a photo goes to T2 (vision quality) even if the router picked the cheap tier
+    tier: image && decision.tier === 'T1' ? 'T2' : decision.tier,
     proactive: false,
     conversationId,
     userText: text,
     state,
     maxTokens,
     webSearch,
+    image,
   });
 
   const body$ = async function* () {

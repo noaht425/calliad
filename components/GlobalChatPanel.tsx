@@ -5,8 +5,9 @@ import { useAuth } from '@/lib/auth';
 import { streamChat } from '@/lib/api';
 import { useVoiceInput } from '@/lib/voice/useVoiceInput';
 import { SentenceSpeaker } from '@/lib/voice/speak';
+import { fileToResizedDataUrl } from '@/lib/image';
 
-interface Message { role: 'user' | 'assistant'; text: string }
+interface Message { role: 'user' | 'assistant'; text: string; image?: string }
 
 const CLOSED = 0;
 const PEEK = 68; // composer row only
@@ -46,7 +47,8 @@ function ThinkingDots() {
  * Structure adopted from dougt425/calliad's refresh; wiring is Calliad's own
  * SSE stream (streamChat + sticky conversation + mode chip). Voice notes go
  * through /api/chat/transcribe (Groq Whisper); spoken replies use the browser's
- * built-in TTS. Photo capture is still deferred.
+ * built-in TTS; photos are resized client-side and sent to the brain as an
+ * image block.
  */
 export function GlobalChatPanel() {
   const { session } = useAuth();
@@ -55,6 +57,8 @@ export function GlobalChatPanel() {
   const [chatH, setChatH] = useState(CLOSED);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const imgInputRef = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
   const [mode, setMode] = useState<string | undefined>();
   const [ttsOn, setTtsOn] = useState(false);
@@ -128,9 +132,9 @@ export function GlobalChatPanel() {
   }, []);
 
   /* ─── Send ────────────────────────────────────────────────────────────── */
-  const runTurn = useCallback(async (text: string) => {
-    if (!text.trim() || sending || !session) return;
-    setMessages((m) => [...m, { role: 'user', text }, { role: 'assistant', text: '' }]);
+  const runTurn = useCallback(async (text: string, image?: string) => {
+    if ((!text.trim() && !image) || sending || !session) return;
+    setMessages((m) => [...m, { role: 'user', text, image }, { role: 'assistant', text: '' }]);
     setSending(true);
     setChatH((h) => (h < snapsRef.current[2] ? snapsRef.current[2] : h));
     speakerRef.current!.cancel();
@@ -154,6 +158,7 @@ export function GlobalChatPanel() {
           },
         },
         convRef.current,
+        image,
       );
       convRef.current = conversationId;
     } catch {
@@ -170,11 +175,20 @@ export function GlobalChatPanel() {
 
   const send = useCallback(() => {
     const text = input.trim();
-    if (!text) return;
+    if (!text && !pendingImage) return;
     setInput('');
     if (inputRef.current) inputRef.current.style.height = 'auto';
-    void runTurn(text);
-  }, [input, runTurn]);
+    const img = pendingImage ?? undefined;
+    setPendingImage(null);
+    void runTurn(text, img);
+  }, [input, pendingImage, runTurn]);
+
+  const pickImage = useCallback(async (file: File) => {
+    try {
+      setPendingImage(await fileToResizedDataUrl(file));
+      setChatH((h) => (h < snapsRef.current[2] ? snapsRef.current[2] : h));
+    } catch { /* ignore */ }
+  }, []);
 
   const { state: voiceState, error: voiceError, start: micStart, stop: micStop, supported: micSupported } = useVoiceInput(
     (t) => { setInput(''); void runTurn(t); },
@@ -314,19 +328,36 @@ export function GlobalChatPanel() {
                   {m.role === 'assistant' && (
                     <img src="/icons/icon-192.png" alt="" className="w-5 h-5 rounded-full shrink-0 mt-1 mr-1.5" style={{ objectFit: 'cover' }} />
                   )}
-                  <div
-                    className="max-w-[82%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-[13.5px] leading-relaxed"
-                    style={
-                      m.role === 'user'
-                        ? { background: 'var(--accent)', color: 'var(--on-accent)' }
-                        : { background: 'var(--surface)', color: 'var(--text-body)', border: '1px solid var(--border)', boxShadow: 'var(--card-glow, none)' }
-                    }
-                  >
-                    {m.text || (sending && i === messages.length - 1 ? <ThinkingDots /> : '')}
+                  <div className={`max-w-[82%] flex flex-col gap-1 ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    {m.image && <img src={m.image} alt="attached" className="max-h-48 rounded-2xl border" style={{ borderColor: 'var(--border)' }} />}
+                    {(m.text || (m.role === 'assistant' && sending && i === messages.length - 1)) && (
+                      <div
+                        className="whitespace-pre-wrap rounded-2xl px-3 py-2 text-[13.5px] leading-relaxed"
+                        style={
+                          m.role === 'user'
+                            ? { background: 'var(--accent)', color: 'var(--on-accent)' }
+                            : { background: 'var(--surface)', color: 'var(--text-body)', border: '1px solid var(--border)', boxShadow: 'var(--card-glow, none)' }
+                        }
+                      >
+                        {m.text || (sending && i === messages.length - 1 ? <ThinkingDots /> : '')}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
               <div ref={endRef} />
+            </div>
+          )}
+
+          {pendingImage && (
+            <div className="shrink-0 px-3 pt-1 relative w-fit">
+              <img src={pendingImage} alt="attached" className="h-16 rounded-lg border" style={{ borderColor: 'var(--border)' }} />
+              <button
+                onClick={() => setPendingImage(null)}
+                aria-label="Remove photo"
+                className="absolute top-0 right-1 h-5 w-5 rounded-full flex items-center justify-center text-[11px]"
+                style={{ background: 'var(--text)', color: 'var(--paper)' }}
+              >✕</button>
             </div>
           )}
 
@@ -338,6 +369,24 @@ export function GlobalChatPanel() {
               borderTop: panelExpanded ? '1px solid var(--border-quiet)' : 'none',
             }}
           >
+            <input
+              ref={imgInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickImage(f); e.target.value = ''; }}
+            />
+            <button
+              onClick={() => imgInputRef.current?.click()}
+              disabled={sending}
+              className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center disabled:opacity-40"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+              aria-label="Attach a photo"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+              </svg>
+            </button>
             <textarea
               ref={inputRef}
               value={input}
@@ -360,7 +409,7 @@ export function GlobalChatPanel() {
                 color: 'var(--text)',
               }}
             />
-            {micSupported && !input.trim() && (
+            {micSupported && !input.trim() && !pendingImage && (
               <button
                 onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); songStart(); }}
                 onPointerUp={() => songStop()}
@@ -381,7 +430,7 @@ export function GlobalChatPanel() {
                 </svg>
               </button>
             )}
-            {micSupported && !input.trim() && (
+            {micSupported && !input.trim() && !pendingImage && (
               <button
                 onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); micStart(); }}
                 onPointerUp={() => micStop()}
@@ -406,10 +455,10 @@ export function GlobalChatPanel() {
                 )}
               </button>
             )}
-            {(input.trim() || !micSupported) && (
+            {(input.trim() || pendingImage || !micSupported) && (
               <button
                 onClick={() => send()}
-                disabled={sending || !input.trim()}
+                disabled={sending || (!input.trim() && !pendingImage)}
                 className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-40"
                 style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
                 aria-label="Send"

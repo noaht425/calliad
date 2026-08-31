@@ -118,7 +118,7 @@ export interface AssembledPrompt {
 }
 
 /** `userText` is Noah's message, or (proactive turns, Phase 1+) a synthesized trigger instruction. */
-export function assemble(userText: string, state: TurnState): AssembledPrompt {
+export function assemble(userText: string, state: TurnState, image?: { media_type: string; data: string }): AssembledPrompt {
   const nowLine = `Current time: ${state.now.toLocaleString('en-US', {
     timeZone: state.tz,
     dateStyle: 'full',
@@ -157,9 +157,19 @@ export function assemble(userText: string, state: TurnState): AssembledPrompt {
   if (overlay) system.push({ type: 'text', text: overlay });
   if (state.toolResult) system.push({ type: 'text', text: state.toolResult });
 
+  const lastUser: Anthropic.MessageParam = image
+    ? {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: image.media_type as 'image/jpeg', data: image.data } },
+          { type: 'text', text: userText || 'What is this?' },
+        ],
+      }
+    : { role: 'user', content: userText };
+
   const messages: Anthropic.MessageParam[] = [
     ...state.recent.map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user' as const, content: userText },
+    lastUser,
   ];
 
   return { system, messages };

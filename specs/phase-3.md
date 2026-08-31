@@ -138,3 +138,15 @@ morning brief.
   and an optional place (`weather in Rome…` → geocoded). `isWeatherQuery` needs a weather word
   **and** a window word, so "what's the weather" alone still falls to the brief. Wired as a
   `toolResult` branch. Verified: this week / next 10 days / Seattle weekend / Rome.
+
+### ✅ Photo / vision input (2026-08-31)
+- `lib/image.ts` — `fileToResizedDataUrl`: canvas downscale to ≤1400px long edge, JPEG 0.82
+  (Claude caps vision at 1568px; a raw phone photo is pure token waste). Falls back to the raw
+  file as a data URL if `createImageBitmap` isn't available.
+- `lib/api.ts` `streamChat(text, handlers, conversationId, image?)` — image rides in the JSON body.
+- `/api/chat` parses `data:image/(jpeg|png|webp|gif);base64,…`, 413 over ~5 MB, forces T2 if the
+  router picked T1 (vision quality). `call()` → `assemble()` builds the user turn as
+  `[{image}, {text || "What is this?"}]`.
+- Both chat surfaces: a photo button + resized preview with an ✕, thumbnail shown in the
+  transcript. Send works with an image and no text.
+- Verified against prod: an 800px bird photo → "common kingfisher…" in-voice, $0.003.

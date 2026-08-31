@@ -18,6 +18,7 @@ export interface BrainRequest {
   state: TurnState;
   maxTokens?: number;
   webSearch?: boolean; // let the model run Anthropic's server-side web search this turn
+  image?: { media_type: string; data: string }; // base64, attached to the user turn
 }
 
 export interface BrainMeta {
@@ -72,6 +73,7 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
   const { system, messages } = assemble(
     capped ? `${req.userText}\n\n[system note: monthly spend cap reached — keep this reply brief]` : req.userText,
     req.state,
+    req.image,
   );
 
   const meta: BrainMeta = { model, tier, costUsd: 0, capped, deferred: false, text: '' };

@@ -21,11 +21,12 @@ export async function streamChat(
   text: string,
   handlers: StreamChatHandlers,
   conversationId?: string,
+  image?: string, // data URL
 ): Promise<{ conversationId?: string }> {
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, conversationId }),
+    body: JSON.stringify({ text, conversationId, image }),
   });
   if (!res.ok || !res.body) {
     const err = new Error(`chat failed: ${res.status}`);
