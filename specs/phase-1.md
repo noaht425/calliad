@@ -157,3 +157,16 @@ ticks the Apple Reminders box — but nothing triggered it. Now:
 5. **Deploy**, then in the app → **Settings → Integrations**: Connect Gmail (OAuth), Connect
    iCloud (Apple ID + that app password → pick your calendar), **Sync now**.
 6. Verify: `GET /api/integrations` (with your bearer) shows both connected and non-zero counts.
+
+### ✅ A Bent Fork recipe tool (2026-08-31)
+Noah's own site (`abentfork.com`, Next.js) has no search API but clean JSON-LD Recipe schema
+on every page and a full sitemap.
+- `lib/tools/recipes.ts` — `getIndex()` (sitemap → slug list, 1h cache), `searchRecipes(q)`
+  (token match on slugs, stop-worded), `getRecipe(slugOrUrl)` (fetch page → parse
+  `application/ld+json` Recipe → name / ingredients / steps / prep-cook-total / yield /
+  cuisine). `runRecipe(q)`: one strong match → pull the full recipe; several → list them;
+  none → say it's not one of his, offer general help flagged as not-ABF.
+- `/api/chat` — `isRecipeQuery` ("recipe for X", "how do I make X", "what can I make with X",
+  "substitute for X in Y") → `toolResult`. Block tells the model to give the recipe faithfully
+  and only help *around* it (subs, scaling, technique).
+- Verified: "cacio e pepe" → full recipe; "chicken tikka" → right match first.

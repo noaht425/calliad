@@ -37,6 +37,7 @@ import {
 } from '@/lib/tools/mtgsim';
 import { getCommanderRecs, recDiff, recBlock, isEdhrecQuery } from '@/lib/tools/edhrec';
 import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
+import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -304,6 +305,8 @@ export async function POST(req: NextRequest) {
     if (rp) toolResult = await restaurantHandoff(rp).catch(() => undefined);
   } else if (isWeatherQuery(text)) {
     toolResult = await runForecast(text).catch(() => undefined);
+  } else if (isRecipeQuery(text)) {
+    toolResult = await runRecipe(text).catch(() => undefined);
   } else if (isLyricQuery(text)) {
     toolResult = await findByLyrics(text).catch(() => undefined);
   } else if (/\b(name that song|what song is (this|that|playing)|shazam|identif(y|ies) (this|the) song|what'?s (this|that) song)\b/i.test(text)) {
