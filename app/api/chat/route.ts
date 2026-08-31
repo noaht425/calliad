@@ -16,7 +16,6 @@ import { profileSections, learnedFacts } from '@/lib/brain/profile';
 import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
 import { upsertLoop } from '@/lib/memory/loops';
-import { createReminder } from '@/lib/integrations/icloud-reminders';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
@@ -107,12 +106,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── silent tier: add a task → Apple Reminder (falls back to an open loop) ─
+  // ── silent tier: add a task/reminder → open loop, no gate ───────────────
   if (isTaskAdd(text)) {
     const task = text.replace(/^.*?\b(add (a )?(task|reminder|to-?do)( to)?|remind me to|add to (my )?(to-?do|task list)|put on my to-?do)\b[:,]?\s*/i, '').trim();
     if (task) {
-      const r = await createReminder(user.id, { title: task.slice(0, 200) }).catch(() => null);
-      if (r?.ok) return say(`Added to your Reminders${r.list ? ` (${r.list})` : ''}: ${task}.`, 'reminder-add');
       await upsertLoop(user.id, { title: task.slice(0, 120), source: 'manual', tags: ['task'] });
       return say(`Added: ${task}.`, 'task-add');
     }

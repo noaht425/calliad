@@ -3,7 +3,6 @@ import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { checkSecret } from '@/lib/hub/guard';
 import { syncCalendarEvents } from '@/lib/integrations/icloud-calendar';
-import { syncReminders } from '@/lib/integrations/icloud-reminders';
 import { scanGmailLabel } from '@/lib/integrations/gmail';
 
 export const runtime = 'nodejs';
@@ -28,10 +27,7 @@ async function handle(req: NextRequest) {
   const results: Record<string, unknown>[] = [];
   for (const [userId, svcs] of byUser) {
     const r: Record<string, unknown> = { userId };
-    if (svcs.has('icloud_calendar')) {
-      r.calendar = await syncCalendarEvents(userId).catch((e) => ({ error: String(e) }));
-      r.reminders = await syncReminders(userId).catch((e) => ({ error: String(e) }));
-    }
+    if (svcs.has('icloud_calendar')) r.calendar = await syncCalendarEvents(userId).catch((e) => ({ error: String(e) }));
     if (svcs.has('gmail')) r.gmail = await scanGmailLabel(userId).catch((e) => ({ error: String(e) }));
     results.push(r);
   }

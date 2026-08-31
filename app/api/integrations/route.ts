@@ -3,7 +3,6 @@ import { supabase } from '@/lib/supabase';
 import { adminClient } from '@/lib/supabase.server';
 import { getGmailStatus, scanGmailLabel } from '@/lib/integrations/gmail';
 import { syncCalendarEvents } from '@/lib/integrations/icloud-calendar';
-import { syncReminders } from '@/lib/integrations/icloud-reminders';
 import { materializeSchedule } from '@/lib/integrations/schedule';
 import { getIntegrationContext } from '@/lib/integrations/context';
 
@@ -22,13 +21,12 @@ export async function GET(req: NextRequest) {
   const user = await requireUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const [gmail, icloudSvc, evCount, schedCount, emCount, remCount, ctx] = await Promise.all([
+  const [gmail, icloudSvc, evCount, schedCount, emCount, ctx] = await Promise.all([
     getGmailStatus(user.id),
     adminClient.from('connected_services').select('metadata').eq('user_id', user.id).eq('service', 'icloud_calendar').maybeSingle(),
     adminClient.from('calendar_events').select('id', { count: 'exact', head: true }).eq('user_id', user.id).neq('source', 'schedule'),
     adminClient.from('calendar_events').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('source', 'schedule'),
     adminClient.from('email_items').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
-    adminClient.from('reminders').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('completed', false),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 5 }),
   ]);
 
@@ -47,7 +45,6 @@ export async function GET(req: NextRequest) {
       calendar_events: evCount.count ?? 0,
       schedule_events: schedCount.count ?? 0,
       email_items: emCount.count ?? 0,
-      open_reminders: remCount.count ?? 0,
     },
     preview: ctx,
   });
@@ -60,10 +57,7 @@ export async function POST(req: NextRequest) {
 
   const { what = 'all' } = (await req.json().catch(() => ({}))) as { what?: string };
   const out: Record<string, unknown> = {};
-  if (what === 'calendar' || what === 'all') {
-    out.calendar = await syncCalendarEvents(user.id);
-    out.reminders = await syncReminders(user.id).catch((e) => ({ error: String(e) }));
-  }
+  if (what === 'calendar' || what === 'all') out.calendar = await syncCalendarEvents(user.id);
   if (what === 'gmail' || what === 'all') out.gmail = await scanGmailLabel(user.id);
   if (what === 'schedule') out.schedule = await materializeSchedule(user.id);
   return NextResponse.json({ ok: true, ...out });
@@ -82,7 +76,6 @@ export async function DELETE(req: NextRequest) {
   await adminClient.from('connected_services').delete().eq('user_id', user.id).eq('service', service);
   if (service === 'icloud_calendar') {
     await adminClient.from('calendar_events').delete().eq('user_id', user.id).eq('source', 'icloud');
-    await adminClient.from('reminders').delete().eq('user_id', user.id);
   } else {
     await adminClient.from('email_items').delete().eq('user_id', user.id);
   }

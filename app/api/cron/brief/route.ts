@@ -6,7 +6,6 @@ import { checkSecret } from '@/lib/hub/guard';
 import { sendPush } from '@/lib/hub/push';
 import { composeBrief } from '@/lib/brief/compose';
 import { syncCalendarEvents } from '@/lib/integrations/icloud-calendar';
-import { syncReminders } from '@/lib/integrations/icloud-reminders';
 import { scanGmailLabel } from '@/lib/integrations/gmail';
 
 export const runtime = 'nodejs';
@@ -49,10 +48,7 @@ async function handle(req: NextRequest) {
       // Freshen the calendar/mail first so the brief sees today's state
       // (folded in — Hobby-plan cron limit means we run one morning job).
       const s = svcByUser.get(userId) ?? new Set<string>();
-      if (s.has('icloud_calendar')) {
-        await syncCalendarEvents(userId).catch(() => {});
-        await syncReminders(userId).catch(() => {});
-      }
+      if (s.has('icloud_calendar')) await syncCalendarEvents(userId).catch(() => {});
       if (s.has('gmail')) await scanGmailLabel(userId).catch(() => {});
 
       const brief = await composeBrief(userId);

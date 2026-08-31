@@ -108,16 +108,6 @@ function renderIntegrations(ctx: IntegrationContext, tz: string): string {
   } else {
     lines.push('', 'No recent mail in the watched label.');
   }
-
-  if (ctx.reminders?.length) {
-    lines.push('', 'Open Apple Reminders (checkbox is unreliable — Noah rarely ticks it, so "still open" doesn\'t always mean "not done"):');
-    for (const r of ctx.reminders.slice(0, 20)) {
-      const due = r.due_at
-        ? ` — due ${new Date(r.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz })}`
-        : '';
-      lines.push(`- ${r.title}${due}${r.list_name ? ` [${r.list_name}]` : ''}`);
-    }
-  }
   return lines.join('\n');
 }
 
