@@ -172,15 +172,22 @@ export async function POST(req: NextRequest) {
   }
 
   // ── a Beli screenshot → extract restaurants into restaurant_prefs ───────
-  if (image && isBeliShare(text)) {
-    const { rows } = await extractBeli(image).catch(() => ({ rows: [] }));
-    if (!rows.length) return say(`I couldn't read a restaurant list off that — try a clearer screenshot of the ranked or want-to-try view.`, 'beli-empty');
-    const { added, updated } = await saveBeliRows(user.id, rows);
-    const top = rows.filter((r) => r.score != null).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 4).map((r) => `${r.name} (${r.score})`);
-    return say(
-      `Got ${added + updated} — ${added} new, ${updated} updated.${top.length ? ` Top of this batch: ${top.join(', ')}.` : ''} Send more screenshots to fill it out.`,
-      'beli-extract',
-    );
+  // Explicit ("beli" / "my restaurant rankings") OR a bare screenshot with no
+  // caption — in the bare case, a non-restaurant image just falls through to the
+  // normal vision answer.
+  const beliExplicit = image && isBeliShare(text);
+  if (beliExplicit || (image && !text.trim())) {
+    const { rows } = await extractBeli(image!).catch(() => ({ rows: [] }));
+    if (rows.length) {
+      const { added, updated } = await saveBeliRows(user.id, rows);
+      const top = rows.filter((r) => r.score != null).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 4).map((r) => `${r.name} (${r.score})`);
+      return say(
+        `Got ${added + updated} — ${added} new, ${updated} updated.${top.length ? ` Top of this batch: ${top.join(', ')}.` : ''} Send more screenshots to fill it out.`,
+        'beli-extract',
+      );
+    }
+    if (beliExplicit) return say(`I couldn't read a restaurant list off that — try a clearer screenshot of the ranked or want-to-try view.`, 'beli-empty');
+    // bare screenshot, not a restaurant list → let the vision path handle it
   }
   // a pending email draft + anything that isn't yes/no → treat it as a revision
   if (pending?.kind === 'draft_email') {
