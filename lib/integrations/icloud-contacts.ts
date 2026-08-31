@@ -203,14 +203,29 @@ export function detectRelationshipMention(text: string): { term: string; name: s
 
 /**
  * A brief block naming any known contacts referenced in the turn (for the brain).
- * Targeted: a name right after a person-verb ("call/email/meet/ask/tell/with/from
- * <Name>") or a two-word "First Last". Avoids scanning every capitalised word
- * against 800+ contacts and lighting up on "Will", "Mark", etc.
+ * Targeted: name(s) right after a person-verb ("call/email/meet/wish/with/from
+ * <Name>"), a conjoined list after one ("email Julia and Matthew", "with Ana,
+ * Ben and Cara"), a bare "X and Y" pair anywhere, or a two-word "First Last".
+ * Avoids scanning every capitalised word against 800+ contacts and lighting up
+ * on "Will", "Mark", etc. — every candidate still has to resolve to a real
+ * contact, so day/place pairs ("Monday and Friday") fall out.
  */
+const CC_NAME = `[A-Z][a-z]{2,}(?:\\s+[A-Z][a-z]+)?`;
+const CC_SEP = `(?:\\s*,\\s*|\\s+and\\s+|\\s*&\\s*)`;
+const CC_VERB =
+  'call|calling|text|texting|email|emailing|message|messaging|meet|meeting|see|seeing|ask|asking|tell|telling|invite|inviting|visit|visiting|wish|wishing|thank|thanking|with|from|to';
+
 export async function contactContextLine(userId: string, text: string): Promise<string> {
   const cands = new Set<string>();
-  for (const m of text.matchAll(/\b(?:call|calling|text|texting|email|emailing|message|messaging|meet|meeting|see|seeing|ask|asking|tell|telling|invite|inviting|visit|visiting|with|from|to|and)\s+([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+)?)/g)) cands.add(m[1]);
-  for (const m of text.matchAll(/\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b/g)) cands.add(m[1]); // First Last
+  const add = (list: string) => {
+    for (const p of list.split(new RegExp(CC_SEP))) if (p.trim()) cands.add(p.trim());
+  };
+  // name(s) after a person-verb, including a conjoined list
+  for (const m of text.matchAll(new RegExp(`\\b(?:${CC_VERB})\\s+(${CC_NAME}(?:${CC_SEP}${CC_NAME})*)`, 'g'))) add(m[1]);
+  // a bare "X and Y" / "X, Y and Z" run anywhere (needs a name on both sides)
+  for (const m of text.matchAll(new RegExp(`\\b(${CC_NAME}(?:${CC_SEP}${CC_NAME})+)`, 'g'))) add(m[1]);
+  // standalone "First Last"
+  for (const m of text.matchAll(/\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b/g)) cands.add(m[1]);
   const names = [...cands].slice(0, 8);
   if (!names.length) return '';
 
