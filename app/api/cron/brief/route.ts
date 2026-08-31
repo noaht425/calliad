@@ -8,6 +8,7 @@ import { composeBrief } from '@/lib/brief/compose';
 import { syncCalendarEvents } from '@/lib/integrations/icloud-calendar';
 import { syncContacts } from '@/lib/integrations/icloud-contacts';
 import { scanGmailLabel } from '@/lib/integrations/gmail';
+import { medCheckin } from '@/lib/health/meds';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -55,15 +56,20 @@ async function handle(req: NextRequest) {
       }
       if (s.has('gmail')) await scanGmailLabel(userId).catch(() => {});
 
+      // Morning medication check-in (its own push). medCheckin self-limits to
+      // 2 sends/day and skips if already taken, so the 2pm nudge cron's
+      // follow-up call stays the intended second touch — no double reminder.
+      const med = await medCheckin(userId, { followUp: false }).catch((e) => ({ sent: false, reason: String(e) }));
+
       const brief = await composeBrief(userId);
-      if (brief.deferred) { results.push({ userId, deferred: true }); continue; }
+      if (brief.deferred) { results.push({ userId, deferred: true, med }); continue; }
       const push = await sendPush(userId, {
         title: 'Morning brief',
         body: brief.text.slice(0, 160),
         url: '/',
         tag: 'brief',
       });
-      results.push({ userId, costUsd: brief.costUsd, pushed: push.sent });
+      results.push({ userId, costUsd: brief.costUsd, pushed: push.sent, med });
     } catch (err) {
       console.error('[cron/brief]', userId, err);
       await audit.log('error', 'system', 'brief', { userId, message: String(err) });
