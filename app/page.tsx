@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { BottomNav } from '@/components/BottomNav';
 import { PageShell } from '@/components/PageLayout';
+import { TodayCard } from '@/components/TodayCard';
 import { Chat } from '@/components/Chat';
 
 export default function HomePage() {
@@ -18,7 +19,8 @@ export default function HomePage() {
 
   return (
     <PageShell>
-      {/* Chat owns the space between the top and the 86px fixed BottomNav. */}
+      <TodayCard />
+      {/* Chat fills the rest, above the 86px fixed BottomNav. */}
       <div className="flex-1 min-h-0" style={{ paddingBottom: 'calc(86px + env(safe-area-inset-bottom, 0px))' }}>
         <Chat />
       </div>
