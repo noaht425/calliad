@@ -68,14 +68,22 @@ export async function runSimulation(decks: string[], games: number): Promise<str
     }
     const { job_id } = (await kick.json()) as { job_id: string };
 
-    // poll until done or ~50s (a 1500-game run is ~40s on 2 shared CPUs)
+    // poll until done or ~50s (a 1500-game run is ~40s on 2 shared CPUs).
+    // Tolerate transient poll failures — a scaled-out sim host can briefly
+    // route a poll to a replica that hasn't seen this job.
     let result: SimResult | null = null;
     let lastProgress = '';
+    let misses = 0;
     while (Date.now() - started < 52_000) {
       await new Promise((res) => setTimeout(res, 3000));
-      const p = await fetch(`${BASE}/jobs/${job_id}`, { headers: H(), signal: AbortSignal.timeout(10_000) });
-      if (!p.ok) break;
-      const j = (await p.json()) as { status: string; progress?: { done: number; total: number }; result?: SimResult; error?: string };
+      let j: { status?: string; progress?: { done: number; total: number }; result?: SimResult; error?: string };
+      try {
+        const p = await fetch(`${BASE}/jobs/${job_id}`, { headers: H(), signal: AbortSignal.timeout(10_000) });
+        if (!p.ok) { if (++misses > 6) break; continue; }
+        j = await p.json();
+      } catch { if (++misses > 6) break; continue; }
+      if (!j.status) { if (++misses > 6) break; continue; }
+      misses = 0;
       if (j.progress) lastProgress = `${j.progress.done}/${j.progress.total}`;
       if (j.status === 'done' && j.result) { result = j.result; break; }
       if (j.status === 'error') return `## Sim\nThe run failed: ${j.error}`;
