@@ -2,6 +2,7 @@ import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { createCalendarEvent } from '@/lib/integrations/icloud-calendar-write';
 import { handoffEmail } from '@/lib/actions/email';
+import { setRelationship, type Relationship } from '@/lib/integrations/icloud-contacts';
 
 // Graduated-authorization gate. Every world-changing action is proposed as a
 // pending row; friction scales with risk_tier:
@@ -9,7 +10,7 @@ import { handoffEmail } from '@/lib/actions/email';
 //   confirm           → one "yes"
 //   named_consequence → Noah must restate the consequence (fees, irreversible)
 
-export type ActionKind = 'create_event' | 'draft_email'; // extend: book, merge_pr, ...
+export type ActionKind = 'create_event' | 'draft_email' | 'set_relationship'; // extend: book, merge_pr, ...
 export type RiskTier = 'silent' | 'confirm' | 'named_consequence';
 
 export interface PendingAction {
@@ -90,6 +91,9 @@ export async function decideAction(
         : { ok: false, message: `Couldn't write to your calendar: ${r.error}` };
     } else if (action.kind === 'draft_email') {
       result = handoffEmail(payload);
+    } else if (action.kind === 'set_relationship') {
+      await setRelationship(userId, String(payload.contactId), payload.to as Relationship, (payload.note as string | null) ?? null);
+      result = { ok: true, message: `Updated — ${payload.name} is ${payload.to}${payload.note ? ` (${payload.note})` : ''} now.` };
     } else {
       result = { ok: false, message: `Don't know how to run "${action.kind}" yet.` };
     }

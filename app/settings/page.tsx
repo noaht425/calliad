@@ -15,7 +15,7 @@ type KillLevel = 'off' | 'pause_proactive' | 'pause_all';
 interface IntegrationsState {
   gmail: { connected: boolean; email?: string; label?: string; lastScannedAt?: string | null };
   icloud: { connected: boolean; calendars?: string[]; lastSyncedAt?: string | null };
-  counts: { calendar_events: number; schedule_events: number; email_items: number };
+  counts: { calendar_events: number; schedule_events: number; email_items: number; contacts: number };
 }
 
 const btn = 'rounded-lg bg-[var(--accent)] text-[var(--on-accent)] text-sm font-medium px-3 py-2 disabled:opacity-40';
@@ -60,6 +60,54 @@ function WeatherLocation({ token }: { token: string }) {
         </button>
       </div>
       {msg && <p className="text-xs text-[var(--text-muted)]">{msg}</p>}
+    </div>
+  );
+}
+
+function Contacts({ token }: { token: string }) {
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState<{ id: string; name: string; org: string | null; relationship: string | null; relationship_note: string | null }[]>([]);
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const search = useCallback(async (query: string) => {
+    const url = query.trim() ? `/api/contacts?q=${encodeURIComponent(query)}` : '/api/contacts?filed=1';
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) setItems((await r.json()).items ?? []);
+  }, [token]);
+  useEffect(() => { search(''); }, [search]);
+
+  const setRel = async (id: string, relationship: string | null, note?: string) => {
+    await fetch('/api/contacts', { method: 'PATCH', headers: h, body: JSON.stringify({ id, relationship, note }) });
+    search(q);
+  };
+
+  return (
+    <div className="space-y-3">
+      <input
+        className={field}
+        placeholder="search contacts…"
+        value={q}
+        onChange={(e) => { setQ(e.target.value); search(e.target.value); }}
+      />
+      <p className="text-xs text-[var(--text-quiet)]">{q.trim() ? 'matches' : 'contacts with a relationship set'}</p>
+      <ul className="text-xs text-[var(--text-muted)] space-y-1.5 max-h-72 overflow-y-auto">
+        {items.map((c) => (
+          <li key={c.id} className="flex items-center gap-2">
+            <span className="flex-1 min-w-0">{c.name}{c.org ? <span className="text-[var(--text-quiet)]"> · {c.org}</span> : null}</span>
+            <select
+              className="bg-transparent border border-[var(--border)] rounded px-1 py-0.5 text-[11px]"
+              value={c.relationship ?? ''}
+              onChange={(e) => setRel(c.id, e.target.value || null, c.relationship_note ?? undefined)}
+            >
+              <option value="">—</option>
+              <option value="family">family</option>
+              <option value="friend">friend</option>
+              <option value="colleague">colleague</option>
+              <option value="acquaintance">acquaintance</option>
+            </select>
+          </li>
+        ))}
+        {!items.length && <li className="text-[var(--text-quiet)]">{q.trim() ? 'no match' : 'none filed yet — Calliad asks as people come up in chat'}</li>}
+      </ul>
     </div>
   );
 }
@@ -552,7 +600,7 @@ export default function SettingsPage() {
               {busy === 'sync' ? 'Syncing…' : 'Sync now'}
             </button>
             <span className="text-xs text-[var(--text-muted)]">
-              {ints?.counts.calendar_events ?? 0} calendar · {ints?.counts.email_items ?? 0} emails
+              {ints?.counts.calendar_events ?? 0} calendar · {ints?.counts.contacts ?? 0} contacts · {ints?.counts.email_items ?? 0} emails
             </span>
           </div>
         )}
@@ -609,6 +657,12 @@ export default function SettingsPage() {
       <section className="mb-8">
         <h2 className={label}>Taste log</h2>
         <TasteLog token={session.access_token} />
+      </section>
+
+      {/* ── Contacts ──────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>Contacts</h2>
+        <Contacts token={session.access_token} />
       </section>
 
       {/* ── Restaurants ────────────────────────────────────────────── */}

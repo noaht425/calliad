@@ -170,3 +170,19 @@ on every page and a full sitemap.
   "substitute for X in Y") → `toolResult`. Block tells the model to give the recipe faithfully
   and only help *around* it (subs, scaling, technique).
 - Verified: "cacio e pepe" → full recipe; "chicken tikka" → right match first.
+
+### ✅ Contacts (iCloud CardDAV) + relationship-aware disambiguation (2026-08-31)
+Inspired by Doug's build. Same Apple ID / app-password as the calendar.
+- `0011_contacts.sql` — vCard fields refreshed each sync; `relationship`
+  (family/friend/colleague/acquaintance) + `relationship_note` are Calliad-owned and preserved.
+- `lib/integrations/icloud-contacts.ts` — `syncContacts` (CardDAV `fetchVCards`, parse N/FN/
+  EMAIL/TEL/ORG/BDAY/NOTE, group cards → `groups[]`, prune vanished), `findContacts` (fuzzy),
+  `setRelationship`, `contactContextLine` (names in a turn → "'Jessica' → Jessica Brine (niece)"
+  for the brain), `detectRelationshipMention` ("my niece Jessica" → `{term, name}`, case-safe),
+  `relationshipFor` (kinship term → bucket).
+- `/api/chat` — a relationship mention with one exact contact whose stored relationship differs
+  → `proposeAction(set_relationship, confirm)` → "Did you mean **Jessica Brine**? You've got
+  her as … — set her as family (niece)?" → yes → gate executor writes it. Ambiguous → asks
+  which. `contactContextLine` rides in the prompt every turn.
+- Syncs with the calendar (cron sync + brief cron + Settings). `/api/contacts` (search / PATCH
+  relationship) + Settings "Contacts" (search, per-row relationship dropdown).

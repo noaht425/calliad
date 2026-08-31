@@ -39,6 +39,7 @@ import { getCommanderRecs, recDiff, recBlock, isEdhrecQuery } from '@/lib/tools/
 import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
 import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
 import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock } from '@/lib/tools/beli';
+import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine } from '@/lib/integrations/icloud-contacts';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -114,6 +115,31 @@ export async function POST(req: NextRequest) {
   if (medReply === 'not-yet') {
     await recordMed(user.id, false, 'not yet');
     return say('Okay — I’ll check once more later, then leave it.', 'med-reply');
+  }
+
+  // ── "my niece Jessica" → resolve + offer to fix her relationship ───────
+  const relMention = detectRelationshipMention(text);
+  if (relMention && !isTaskAdd(text)) {
+    const want = relationshipFor(relMention.term);
+    const matches = await findContacts(user.id, relMention.name).catch(() => []);
+    const exact = matches.filter(
+      (c) => c.name.toLowerCase() === relMention.name.toLowerCase() || (c.first_name ?? '').toLowerCase() === relMention.name.toLowerCase().split(' ')[0],
+    );
+    if (want && exact.length === 1 && exact[0].relationship !== want) {
+      const c = exact[0];
+      await proposeAction({
+        userId: user.id, kind: 'set_relationship', riskTier: 'confirm',
+        summary: `Set ${c.name} as ${want} (${relMention.term.toLowerCase()})`,
+        payload: { contactId: c.id, name: c.name, from: c.relationship, to: want, note: relMention.term.toLowerCase() },
+        createdBy: conversationId,
+      });
+      const cur = c.relationship ? `You've got them as ${c.relationship_note || c.relationship}` : 'They aren’t filed under a relationship';
+      return say(`Did you mean **${c.name}**? ${cur}. Say yes and I’ll set them as ${want} (${relMention.term.toLowerCase()}).`, 'relationship-proposed');
+    }
+    if (want && exact.length > 1) {
+      return say(`A few matches for ${relMention.name}: ${exact.map((c) => c.name + (c.org ? ` (${c.org})` : '')).join(', ')}. Which one?`, 'relationship-ambiguous');
+    }
+    // 0 matches or already correct → fall through; the brain still gets contact context
   }
 
   // ── a Beli screenshot → extract restaurants into restaurant_prefs ───────
@@ -257,12 +283,13 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops, morphResult, learned] = await Promise.all([
+  const [recent, integrations, loops, morphResult, learned, contactsLine] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
     decision.tools.includes('morphology') ? runMorphology(text).catch(() => undefined) : Promise.resolve(undefined),
     learnedFacts(user.id).catch(() => ''),
+    contactContextLine(user.id, text).catch(() => ''),
   ]);
 
   const deckUrl = text.match(/https?:\/\/(?:www\.)?archidekt\.com\/(?:api\/)?decks\/\d+/)?.[0];
@@ -337,6 +364,7 @@ export async function POST(req: NextRequest) {
     profileSections: profileSections(text, effectiveMode),
     learned: learned || undefined,
     medStatus: medLine || undefined,
+    contacts: contactsLine || undefined,
   };
   // A tool result means a longer, denser reply is expected (deck analysis, sim
   // narration, web-page answers). 1024 is stingy there — and with adaptive effort
