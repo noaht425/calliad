@@ -92,9 +92,30 @@
 - Verified: both exams w/ dates+topics, 3 dated papers + weekly-responses (null date),
   full grading. Deadlines flow into brief + nudge automatically.
 
-### ⏭ Next (Phase 1 tail)
-- [ ] Profile *slice* by intent (currently whole file minus Music) + `profile_facts` propose→confirm.
-- [ ] Frictionless capture (link → reading list); cheap-win Q&A.
+### ✅ Frictionless capture
+- `0006_lists.sql` — `list_items` (kind reading|watch|link, url unique/user).
+- `lib/capture/link.ts` — OG/twitter meta (Chrome UA, full meta parser) + YouTube/Vimeo
+  oEmbed title fallback; kind from host/og:type; T1 neutral descriptor (subject+scope,
+  never the thesis — pattern M) w/ og:description fallback; dedupe on url.
+- `/api/chat` handles a bare/short URL inline (no model call) → captured + confirmed;
+  `detectLoopsFromTurn` told to skip bookmarked links.
+- `/api/capture` (GET/POST/PATCH) — also accepts `x-capture-token` == `CAPTURE_TOKEN`
+  (resolves to `CAPTURE_USER_EMAIL`) for an **iOS Shortcut** (PWA share_target doesn't
+  work on iOS). `/share-target` page kept for Android/other.
+- `/reading` page + BottomNav entry.
+
+### Also this session
+- **Password login** — `/login` does email+password (`signInWithPassword`), code as fallback;
+  "Set password" in Settings (`updateUser`). Supabase free tier can't edit email templates
+  (no SMTP) → magic link can't become a code, and iOS opens the link in Safari whose session
+  never reaches the installed PWA. Password sidesteps both.
+- **Dropped `@ducanh2912/next-pwa`** — its Workbox precache served stale pages after every
+  deploy and its worker overwrote `public/sw.js` (push). App is online-only. Install +
+  share-target from `manifest.json`; `public/sw.js` (push) registered by `PushSetup`.
+
+### ⏭ Next (Phase 1 tail / Phase 2)
+- [ ] Profile *slice* by intent + `profile_facts` propose→confirm.
+- [ ] Cheap-win Q&A (fits with the Phase 2 router).
 
 ## Setup Noah must do (for the integrations to work)
 
