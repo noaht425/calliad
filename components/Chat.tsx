@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { streamChat } from '@/lib/api';
 import { useVoiceInput } from '@/lib/voice/useVoiceInput';
+import { SentenceSpeaker } from '@/lib/voice/speak';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -20,6 +21,11 @@ export function Chat() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [mode, setMode] = useState<string | undefined>();
+  const [ttsOn, setTtsOn] = useState(false);
+  const ttsRef = useRef(false);
+  ttsRef.current = ttsOn;
+  const speakerRef = useRef<SentenceSpeaker>(null);
+  if (!speakerRef.current) speakerRef.current = new SentenceSpeaker();
   const convRef = useRef<string | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -49,21 +55,25 @@ export function Chat() {
     if (!text.trim() || sending || !session) return;
     setMessages((m) => [...m, { role: 'user', text }, { role: 'assistant', text: '' }]);
     setSending(true);
+    speakerRef.current!.cancel();
+    let acc = '';
     try {
       const { conversationId } = await streamChat(
         text,
         {
-          onDelta: (d) =>
+          onDelta: (d) => {
+            acc += d;
             setMessages((m) => {
               const next = [...m];
-              next[next.length - 1] = {
-                role: 'assistant',
-                text: next[next.length - 1].text + d,
-              };
+              next[next.length - 1] = { role: 'assistant', text: next[next.length - 1].text + d };
               return next;
-            }),
-          onDone: (_full, meta) =>
-            setMode(meta?.mode && ['italian-tutor', 'quiz', 'study-coach'].includes(meta.mode) ? meta.mode : undefined),
+            });
+            if (ttsRef.current) speakerRef.current!.feed(acc);
+          },
+          onDone: (full, meta) => {
+            setMode(meta?.mode && ['italian-tutor', 'quiz', 'study-coach'].includes(meta.mode) ? meta.mode : undefined);
+            if (ttsRef.current && full) speakerRef.current!.flush(full);
+          },
         },
         convRef.current,
       );
@@ -90,7 +100,7 @@ export function Chat() {
     void runTurn(text);
   }, [input, runTurn]);
 
-  const { state: voiceState, error: voiceError, toggle: toggleMic, supported: micSupported } = useVoiceInput(
+  const { state: voiceState, error: voiceError, start: micStart, stop: micStop, supported: micSupported } = useVoiceInput(
     (t) => { setInput(''); void runTurn(t); },
     convRef.current,
   );
@@ -129,14 +139,16 @@ export function Chat() {
 
       <div className="shrink-0 px-4 pt-2 pb-3" style={{ borderTop: '1px solid var(--border-quiet)' }}>
         {(mode || voiceState !== 'idle' || voiceError) && (
-          <div className="mb-1.5 text-[11px]" style={{ color: voiceState === 'recording' || voiceError ? '#EF4444' : 'var(--text-muted)' }}>
-            {voiceError
-              ? voiceError
-              : voiceState === 'recording'
-                ? '● Recording… tap the square to stop'
-                : voiceState === 'transcribing'
-                  ? 'Transcribing…'
-                  : `${mode === 'italian-tutor' ? 'Italian tutor' : mode === 'quiz' ? 'Quiz' : mode === 'study-coach' ? 'Study coach' : mode} · say “english” to exit`}
+          <div className="mb-1.5 flex items-center justify-between text-[11px]" style={{ color: voiceState === 'recording' || voiceError ? '#EF4444' : 'var(--text-muted)' }}>
+            <span>
+              {voiceError
+                ? voiceError
+                : voiceState === 'recording'
+                  ? '● Recording… release to send'
+                  : voiceState === 'transcribing'
+                    ? 'Transcribing…'
+                    : `${mode === 'italian-tutor' ? 'Italian tutor' : mode === 'quiz' ? 'Quiz' : mode === 'study-coach' ? 'Study coach' : mode} · say “english” to exit`}
+            </span>
           </div>
         )}
         <div className="flex items-end gap-2">
@@ -152,15 +164,32 @@ export function Chat() {
           />
           {micSupported && !input.trim() && (
             <button
-              onClick={toggleMic}
+              onClick={() => { speakerRef.current!.cancel(); setTtsOn((v) => !v); }}
+              className="shrink-0 h-9 w-9 rounded-xl flex items-center justify-center transition-colors"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: ttsOn ? 'var(--accent)' : 'var(--text-quiet)' }}
+              aria-label={ttsOn ? 'Spoken replies on' : 'Spoken replies off'}
+              title={ttsOn ? 'Spoken replies on' : 'Spoken replies off'}
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                {ttsOn ? (<><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></>) : (<line x1="23" y1="9" x2="17" y2="15" />)}
+              </svg>
+            </button>
+          )}
+          {micSupported && !input.trim() && (
+            <button
+              onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); micStart(); }}
+              onPointerUp={() => micStop()}
+              onPointerLeave={() => voiceState === 'recording' && micStop()}
+              onPointerCancel={() => micStop()}
               disabled={voiceState === 'transcribing' || sending}
-              className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-all ${voiceState === 'recording' ? 'animate-pulse' : ''}`}
+              className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-all select-none touch-none ${voiceState === 'recording' ? 'animate-pulse scale-110' : ''}`}
               style={
                 voiceState === 'recording'
                   ? { background: '#EF4444', color: '#fff' }
                   : { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }
               }
-              aria-label={voiceState === 'recording' ? 'Stop recording' : 'Record a voice note'}
+              aria-label={voiceState === 'recording' ? 'Release to send' : 'Hold to talk'}
             >
               {voiceState === 'recording' ? (
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>

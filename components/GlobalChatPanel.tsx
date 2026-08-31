@@ -4,17 +4,9 @@ import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { streamChat } from '@/lib/api';
 import { useVoiceInput } from '@/lib/voice/useVoiceInput';
+import { SentenceSpeaker } from '@/lib/voice/speak';
 
 interface Message { role: 'user' | 'assistant'; text: string }
-
-/** Speak a reply with the browser's built-in TTS — free, on-device, no API. */
-function speak(text: string) {
-  if (typeof window === 'undefined' || !window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text.slice(0, 1500));
-  u.rate = 1.05;
-  window.speechSynthesis.speak(u);
-}
 
 const CLOSED = 0;
 const PEEK = 68; // composer row only
@@ -68,6 +60,8 @@ export function GlobalChatPanel() {
   const [ttsOn, setTtsOn] = useState(false);
   const ttsRef = useRef(false);
   ttsRef.current = ttsOn;
+  const speakerRef = useRef<SentenceSpeaker>(null);
+  if (!speakerRef.current) speakerRef.current = new SentenceSpeaker();
 
   const snapsRef = useRef<[number, number, number, number]>([CLOSED, PEEK, 300, 560]);
   const dragRef = useRef({ active: false, startY: 0, startH: 0 });
@@ -139,19 +133,24 @@ export function GlobalChatPanel() {
     setMessages((m) => [...m, { role: 'user', text }, { role: 'assistant', text: '' }]);
     setSending(true);
     setChatH((h) => (h < snapsRef.current[2] ? snapsRef.current[2] : h));
+    speakerRef.current!.cancel();
+    let acc = '';
     try {
       const { conversationId } = await streamChat(
         text,
         {
-          onDelta: (d) =>
+          onDelta: (d) => {
+            acc += d;
             setMessages((m) => {
               const next = [...m];
               next[next.length - 1] = { role: 'assistant', text: next[next.length - 1].text + d };
               return next;
-            }),
+            });
+            if (ttsRef.current) speakerRef.current!.feed(acc);
+          },
           onDone: (full, meta) => {
             setMode(meta?.mode && MODE_LABEL[meta.mode] ? meta.mode : undefined);
-            if (ttsRef.current && full) speak(full);
+            if (ttsRef.current && full) speakerRef.current!.flush(full);
           },
         },
         convRef.current,
@@ -177,7 +176,7 @@ export function GlobalChatPanel() {
     void runTurn(text);
   }, [input, runTurn]);
 
-  const { state: voiceState, error: voiceError, toggle: toggleMic, supported: micSupported } = useVoiceInput(
+  const { state: voiceState, error: voiceError, start: micStart, stop: micStop, supported: micSupported } = useVoiceInput(
     (t) => { setInput(''); void runTurn(t); },
     convRef.current,
   );
@@ -250,7 +249,7 @@ export function GlobalChatPanel() {
                   {voiceError ? (
                     <span className="text-[11px]" style={{ color: '#EF4444' }}>{voiceError}</span>
                   ) : voiceState === 'recording' ? (
-                    <span className="text-[11px] font-medium animate-pulse" style={{ color: '#EF4444' }}>● Recording…</span>
+                    <span className="text-[11px] font-medium animate-pulse" style={{ color: '#EF4444' }}>● Recording… release to send</span>
                   ) : voiceState === 'transcribing' ? (
                     <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Transcribing…</span>
                   ) : mode ? (
@@ -261,7 +260,7 @@ export function GlobalChatPanel() {
                 </div>
                 <div className="absolute right-4 flex items-center gap-3">
                   <button
-                    onClick={() => { window.speechSynthesis?.cancel(); setTtsOn((v) => !v); }}
+                    onClick={() => { speakerRef.current!.cancel(); setTtsOn((v) => !v); }}
                     className="transition-colors"
                     style={{ color: ttsOn ? 'var(--accent)' : 'var(--text-quiet)' }}
                     title={ttsOn ? 'Spoken replies on' : 'Spoken replies off'}
@@ -350,15 +349,18 @@ export function GlobalChatPanel() {
             />
             {micSupported && !input.trim() && (
               <button
-                onClick={toggleMic}
+                onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); micStart(); }}
+                onPointerUp={() => micStop()}
+                onPointerLeave={() => voiceState === 'recording' && micStop()}
+                onPointerCancel={() => micStop()}
                 disabled={voiceState === 'transcribing' || sending}
-                className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all disabled:opacity-40 ${voiceState === 'recording' ? 'animate-pulse' : ''}`}
+                className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all disabled:opacity-40 select-none touch-none ${voiceState === 'recording' ? 'animate-pulse scale-110' : ''}`}
                 style={
                   voiceState === 'recording'
                     ? { background: '#EF4444', color: '#fff' }
                     : { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }
                 }
-                aria-label={voiceState === 'recording' ? 'Stop recording' : 'Record a voice note'}
+                aria-label={voiceState === 'recording' ? 'Release to send' : 'Hold to talk'}
               >
                 {voiceState === 'recording' ? (
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
