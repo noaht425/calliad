@@ -398,17 +398,21 @@ export async function POST(req: NextRequest) {
   // A tool result means a longer, denser reply is expected (deck analysis, sim
   // narration, web-page answers). 1024 is stingy there — and with adaptive effort
   // on, too small a budget can be spent entirely on reasoning, yielding no text.
-  // "look this up / latest on / news about X" (and only when no other tool already
-  // answered the turn) → let the model run Anthropic's web search.
+  // A turn that turns on current/outside info → let the model run Anthropic's web
+  // search. Broad on purpose: a keyword list like "latest on / news about" keeps
+  // missing real phrasings ("look to see if there's any new games coming out",
+  // "ran some updates, can you check now?"). Only fires when no other tool already
+  // answered the turn.
   const webSearch =
     !toolResult && effectiveMode === 'default' &&
-    /\b(search (for|the web|online|it up)|look (this |it )?up|look up|google( it)?|find out|latest (on|news|from)|what'?s the latest|any news (on|about)|news (on|about|for)|what'?s (going on|happening|new) (with|in|on)|current (news|events|situation|status)|as of (today|now|this)|up to date|right now\b)/i.test(text);
-  const maxTokens = image || toolResult || webSearch ? Math.min(4096, 1500 + Math.ceil((toolResult?.length ?? 3000) / 8)) : 1200;
+    /\b(search\b|google\b|look (it |this )?up|looking (it |this )?up|look (to see|into)|(go )?(find out|find me|check online)|can you (find|check|look)(?! (my|the calendar|your|at))|latest (on|news|from|version|release)|newest\b|most recent\b|what'?s the latest|any (news|updates?) (on|about|for)|news (on|about|for)|what'?s (going on|happening|new) (with|in|on)(?! my\b)|(coming|come) out\b|just (came out|released|announced|dropped)|recently (released|announced|came out|launched|added)|new releases?|as of (today|now|this)|up[ -]to[- ]date|right now\b|check (again|now)|try (again|now)|now try\b)/i.test(text);
+  const maxTokens = image || toolResult ? Math.min(4096, 1500 + Math.ceil((toolResult?.length ?? 3000) / 8)) : webSearch ? 2000 : 1200;
 
   const { meta, stream } = await call({
     purpose: 'chat',
-    // a photo goes to T2 (vision quality) even if the router picked the cheap tier
-    tier: image && decision.tier === 'T1' ? 'T2' : decision.tier,
+    // a photo goes to T2 for vision quality; a search-shaped turn goes to T2
+    // because haiku (the T1 chat model) can't run the 2026 web-search tool
+    tier: (image || webSearch) && decision.tier === 'T1' ? 'T2' : decision.tier,
     proactive: false,
     conversationId,
     userText: text,

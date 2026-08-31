@@ -94,7 +94,9 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
           if (effort) params.output_config = { effort };
           // Anthropic-hosted web search — runs inline, no client tool loop. Only
           // when the router flagged a search-shaped turn (cost is per-search).
-          if (req.webSearch && MODEL_PRICING[model]) {
+          // web_search_20260209 is Sonnet/Opus only — haiku (spend-cap downgrade)
+          // 400s on it, so skip there and let the model answer without it.
+          if (req.webSearch && (model === 'claude-sonnet-5' || model === 'claude-opus-5')) {
             params.tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }];
           }
           const s = anthropic.messages.stream(params);
