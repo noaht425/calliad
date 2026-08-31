@@ -16,6 +16,7 @@ import { addItem as addQuizItem } from '@/lib/quiz/items';
 import { upsertLoop } from '@/lib/memory/loops';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo } from '@/lib/actions/detect';
+import { wouldILike } from '@/lib/taste/judge';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -150,6 +151,8 @@ export async function POST(req: NextRequest) {
   if (effectiveMode === 'quiz') {
     const q = await quizTurn(user.id, conversationId, text, modeState).catch(() => null);
     if (q) toolResult = q.toolResult;
+  } else if (/\b(would i (like|enjoy|hate|bounce off)|should i (watch|read|play|start|bother with)|do you think i'?d (like|enjoy)|worth (watching|reading|playing)|think i'?d (like|enjoy))\b/i.test(text)) {
+    toolResult = (await wouldILike(user.id, text).catch(() => undefined)) ?? toolResult;
   }
 
   const state: TurnState = {

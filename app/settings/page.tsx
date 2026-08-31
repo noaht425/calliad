@@ -19,6 +19,44 @@ interface IntegrationsState {
 const btn = 'rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium px-3 py-2 disabled:opacity-40';
 const field = 'w-full rounded-lg border border-zinc-200 dark:border-zinc-800 bg-transparent px-3 py-2 text-sm';
 
+function TasteLog({ token }: { token: string }) {
+  const [items, setItems] = useState<{ id: string; title: string; kind: string; verdict: string; why: string | null }[]>([]);
+  const [t, setT] = useState(''); const [v, setV] = useState('liked'); const [k, setK] = useState('screen'); const [w, setW] = useState('');
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const load = useCallback(async () => {
+    const r = await fetch('/api/taste', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) setItems((await r.json()).items ?? []);
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">{items.length} entries. Ask &ldquo;would I like X?&rdquo; in chat.</p>
+      <div className="flex flex-wrap gap-2">
+        <input className={field + ' flex-1 min-w-[8rem]'} placeholder="title" value={t} onChange={(e) => setT(e.target.value)} />
+        <select className={field + ' w-auto'} value={k} onChange={(e) => setK(e.target.value)}>
+          <option value="screen">screen</option><option value="book">book</option><option value="game">game</option><option value="other">other</option>
+        </select>
+        <select className={field + ' w-auto'} value={v} onChange={(e) => setV(e.target.value)}>
+          <option>loved</option><option>liked</option><option>fine</option><option>bailed</option><option>hated</option>
+        </select>
+        <input className={field + ' flex-1 min-w-[8rem]'} placeholder="why (optional)" value={w} onChange={(e) => setW(e.target.value)} />
+        <button className={btn} disabled={!t} onClick={async () => {
+          await fetch('/api/taste', { method: 'POST', headers: h, body: JSON.stringify({ title: t, kind: k, verdict: v, why: w || null }) });
+          setT(''); setW(''); load();
+        }}>Add</button>
+      </div>
+      <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 max-h-48 overflow-y-auto">
+        {items.slice(0, 40).map((i) => (
+          <li key={i.id} className="flex gap-2">
+            <span className="flex-1">{i.title} [{i.kind}] — <span className="font-medium">{i.verdict}</span></span>
+            <button className="underline" onClick={async () => { await fetch(`/api/taste?id=${i.id}`, { method: 'DELETE', headers: h }); load(); }}>del</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function QuizDeck({ token }: { token: string }) {
   const [c, setC] = useState<{ total: number; due: number }>({ total: 0, due: 0 });
   const [items, setItems] = useState<{ id: string; lang: string; prompt: string; answer: string; box: number }[]>([]);
@@ -374,6 +412,12 @@ export default function SettingsPage() {
             ))}
           </ul>
         )}
+      </section>
+
+      {/* ── Taste log ───────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Taste log</h2>
+        <TasteLog token={session.access_token} />
       </section>
 
       {/* ── Quiz deck ───────────────────────────────────────────────── */}
