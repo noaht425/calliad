@@ -58,9 +58,20 @@ morphology → spaced repetition → confirmation-gated writes.*
 - `/api/chat` detects "would I like / should I watch|read|play"; `/api/taste` + Settings manager.
 - **Optional:** `TMDB_API_KEY` (themoviedb.org) for film/show metadata.
 
+### ✅ Profile slicing + learned facts
+- `lib/brain/profile.ts` — `content/profile.md` split by `## ` heading. Always-in CORE
+  (Identity / Health / Daily rhythm / Working style) stays inside the cached breakpoint;
+  `profileSections(text, mode)` intent-matches the rest and they ride along fresh per turn.
+  Cuts the cached-prefix and the fresh profile payload roughly in half on a typical turn.
+- `prompt.ts` — `PROFILE_CORE` replaces the whole-file slice; "About Noah — relevant to
+  this turn" + "Learned about Noah" blocks appended *after* both cache breakpoints.
+- `profile_facts` — "remember that I…" / "fyi I prefer…" in chat → T1 extract →
+  `confirmed` fact (silent tier, no gate, since Noah asked). `learnedFacts()` folds them
+  back into the prompt. `/api/facts` (GET/POST/PATCH/DELETE) + Settings "Learned about you"
+  panel to keep/correct/delete. No migration (`profile_facts` shipped in 0003).
+- Brief + nudge seed `profileSections()` with their own intent strings.
+
 ## ⏭ Next
-- [ ] Profile *slice* by intent + `profile_facts` propose→confirm (whole profile.md still goes
-  into every call — biggest remaining cost lever).
 - [ ] Tier routing beyond modes — cheap-win Q&A / trivia → T1.
 - [ ] Web-fetch tool (answer questions *about* a link).
 ### ✅ Flight search + restaurant hand-off (no booking)
