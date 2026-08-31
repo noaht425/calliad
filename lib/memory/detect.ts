@@ -32,6 +32,7 @@ Return JSON only:
 Rules:
 - 0 loops is normal and common. Return {"loops":[]} unless there's something concrete.
 - No loop for a question Calliad already answered, or a fact Noah just stated with nothing pending.
+- No loop for a link/article/video Noah saved or bookmarked — that's handled elsewhere.
 - due_hint only when a date is actually determinable.`;
 
   const out = await t1Json<Detected>('detect_loops', prompt, { conversationId, maxOutputTokens: 400 });

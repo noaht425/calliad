@@ -47,10 +47,13 @@ export async function POST(req: NextRequest) {
   await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'user', content: text });
   await adminClient.from('conversations').update({ last_at: new Date().toISOString() }).eq('id', conversationId);
 
-  // ── frictionless capture: bare URL, or a URL + an explicit "save" phrase ──
+  // ── frictionless capture: one URL, not a question, little other text ──
   const urls = text.match(/https?:\/\/[^\s<>"')]+/g);
-  const saveIntent = /\b(save|add|bookmark|keep|file|read later|watch later|reading list|watch list)\b/i.test(text);
-  if (urls && (text.trim() === urls[0] || (saveIntent && urls.length === 1))) {
+  const withoutUrls = text.replace(/https?:\/\/[^\s<>"')]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const looksLikeQuestion = /\?\s*$/.test(text) || /^(what|who|why|how|when|where|is|are|should|can|could|do|does|tell me|explain|summar)\b/i.test(withoutUrls);
+  const isCapture =
+    urls?.length === 1 && !looksLikeQuestion && withoutUrls.split(' ').filter(Boolean).length <= 10;
+  if (urls && isCapture) {
     const r = await captureLink(user.id, urls[0], { source: 'chat' });
     const reply = r.ok
       ? r.deduped
