@@ -97,12 +97,16 @@ export function newRootsQuiz(): RootsState {
 export function rootsPrompt(s: RootsState): { text: string; form: RootForm } {
   const r = ROOTS[s.order[s.i]];
   const form: RootForm = (['word', 'gloss', 'reverse'] as RootForm[])[s.i % 3];
-  if (form === 'gloss') return { text: `What does the ${r.lang} root **${r.root}** mean?`, form };
+  const multi = /[/]/.test(r.root);
+  if (form === 'gloss') return { text: `What does the ${r.lang} root **${r.root}**${multi ? ' (one root, two forms)' : ''} mean?`, form };
   if (form === 'reverse') {
     const ex = r.english.slice(0, 3).join(', ');
-    return { text: `Which ${r.lang} root do **${ex}** share?`, form };
+    return { text: `Which single ${r.lang} root do **${ex}** all come from?`, form };
   }
-  return { text: `**${r.root}** (${r.lang}) — "${r.gloss}". Name an English word from it.`, form };
+  return {
+    text: `**${r.root}** (${r.lang}) — "${r.gloss}"${multi ? ' — one root, spelled two ways' : ''}. Give one English word built on it.`,
+    form,
+  };
 }
 export function checkRoots(s: RootsState, guess: string): { ok: boolean; want: string } {
   const r = ROOTS[s.order[s.i]];
@@ -113,8 +117,9 @@ export function checkRoots(s: RootsState, guess: string): { ok: boolean; want: s
     return { ok: glossWords.some((w) => g.includes(w)), want: r.gloss };
   }
   if (form === 'reverse') {
-    const target = norm(r.root.split('/')[0]);
-    return { ok: g.includes(target) || target.includes(g.replace(/\s/g, '')), want: r.root };
+    const forms = r.root.split('/').map((p) => norm(p)).filter(Boolean);
+    const gc = g.replace(/\s/g, '');
+    return { ok: forms.some((f) => g.includes(f) || (gc.length >= 2 && f.includes(gc))), want: r.root };
   }
   const ok = r.english.some((w) => g.includes(norm(w))) ||
     (g.length >= r.root.replace(/[^a-z]/gi, '').length + 2 && g.replace(/\s/g, '').includes(norm(r.root.split(/[ /]/)[0].replace(/[^a-z]/gi, ''))));
