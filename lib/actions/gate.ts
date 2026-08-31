@@ -1,6 +1,6 @@
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
-import { createCalendarEvent } from '@/lib/integrations/icloud-calendar-write';
+import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/integrations/icloud-calendar-write';
 import { handoffEmail } from '@/lib/actions/email';
 import { setRelationship, type Relationship } from '@/lib/integrations/icloud-contacts';
 
@@ -10,7 +10,7 @@ import { setRelationship, type Relationship } from '@/lib/integrations/icloud-co
 //   confirm           → one "yes"
 //   named_consequence → Noah must restate the consequence (fees, irreversible)
 
-export type ActionKind = 'create_event' | 'draft_email' | 'set_relationship'; // extend: book, merge_pr, ...
+export type ActionKind = 'create_event' | 'update_event' | 'delete_event' | 'draft_email' | 'set_relationship'; // extend: book, merge_pr, ...
 export type RiskTier = 'silent' | 'confirm' | 'named_consequence';
 
 export interface PendingAction {
@@ -89,6 +89,21 @@ export async function decideAction(
       result = r.ok
         ? { ok: true, message: `Done — it's on your calendar.` }
         : { ok: false, message: `Couldn't write to your calendar: ${r.error}` };
+    } else if (action.kind === 'update_event') {
+      const r = await updateCalendarEvent(userId, String(payload.uid), {
+        title: (payload.new_title as string | null) ?? undefined,
+        start_at: (payload.new_start as string | null) ?? undefined,
+        end_at: payload.new_end !== undefined ? (payload.new_end as string | null) : undefined,
+        location: payload.new_location !== undefined ? (payload.new_location as string | null) : undefined,
+      });
+      result = r.ok
+        ? { ok: true, message: `Done — calendar updated.` }
+        : { ok: false, message: `Couldn't update it: ${r.error}` };
+    } else if (action.kind === 'delete_event') {
+      const r = await deleteCalendarEvent(userId, String(payload.uid));
+      result = r.ok
+        ? { ok: true, message: `Done — removed from your calendar.` }
+        : { ok: false, message: `Couldn't remove it: ${r.error}` };
     } else if (action.kind === 'draft_email') {
       result = handoffEmail(payload);
     } else if (action.kind === 'set_relationship') {

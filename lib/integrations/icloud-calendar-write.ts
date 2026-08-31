@@ -79,6 +79,120 @@ function buildVCalendar(uid: string, event: CalendarEventInput): string {
   return lines.join('\r\n');
 }
 
+// Find the CalDAV object URL + etag for an event by its iCal UID. Native
+// iCloud events don't live at `${calendarUrl}${uid}.ics`, so we have to look.
+async function resolveObject(
+  conn: NonNullable<Awaited<ReturnType<typeof getICloudConnection>>>,
+  calendarUrl: string,
+  uid: string,
+): Promise<{ url: string; etag?: string } | null> {
+  try {
+    const objects = await conn.client.fetchCalendarObjects({
+      calendar: { url: calendarUrl } as never,
+      timeRange: {
+        start: new Date(Date.now() - 400 * 86400000).toISOString(),
+        end: new Date(Date.now() + 400 * 86400000).toISOString(),
+      },
+      expand: false,
+    });
+    const needle = new RegExp(`UID:\\s*${uid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+    for (const o of objects) {
+      if (o.data && needle.test(String(o.data))) return { url: o.url, etag: o.etag };
+    }
+  } catch (err) {
+    console.error('[icloud-calendar-write] resolveObject error:', err);
+  }
+  return null;
+}
+
+export interface CalendarChange {
+  title?: string;
+  start_at?: string;
+  end_at?: string | null;
+  all_day?: boolean;
+  location?: string | null;
+  description?: string | null;
+}
+
+export async function updateCalendarEvent(
+  userId: string,
+  uid: string,
+  change: CalendarChange,
+): Promise<CalendarWriteResult> {
+  try {
+    const conn = await getICloudConnection(userId);
+    if (!conn) return { ok: false, error: 'iCloud Calendar not connected' };
+
+    const { data: row } = await adminClient
+      .from('calendar_events')
+      .select('calendar_url, calendar_name, title, start_at, end_at, all_day, location, description')
+      .eq('user_id', userId)
+      .eq('uid', uid)
+      .maybeSingle();
+    if (!row) return { ok: false, error: 'event not found' };
+
+    const calendarUrl: string = row.calendar_url ?? conn.calendars[0].url;
+    const target = await resolveObject(conn, calendarUrl, uid);
+    if (!target) return { ok: false, error: 'could not locate the event on the server' };
+
+    const merged: CalendarEventInput = {
+      title: change.title ?? row.title ?? 'Untitled',
+      start_at: change.start_at ?? row.start_at,
+      end_at: change.end_at !== undefined ? change.end_at : row.end_at,
+      all_day: change.all_day ?? row.all_day ?? false,
+      location: change.location !== undefined ? change.location : row.location,
+      description: change.description !== undefined ? change.description : row.description,
+    };
+    const ical = buildVCalendar(uid, merged);
+
+    await conn.client.updateCalendarObject({
+      calendarObject: { url: target.url, data: ical, etag: target.etag },
+    });
+
+    await adminClient.from('calendar_events').update({
+      title: merged.title,
+      start_at: merged.start_at,
+      end_at: merged.end_at,
+      all_day: merged.all_day,
+      location: merged.location ?? null,
+      description: merged.description ?? null,
+      raw_ical: ical,
+      updated_at: new Date().toISOString(),
+    }).eq('user_id', userId).eq('uid', uid);
+
+    syncCalendarEvents(userId).catch(() => {});
+    return { ok: true, uid };
+  } catch (err) {
+    console.error('[icloud-calendar-write] updateCalendarEvent error:', err);
+    return { ok: false, error: String(err) };
+  }
+}
+
+export async function deleteCalendarEvent(userId: string, uid: string): Promise<CalendarWriteResult> {
+  try {
+    const conn = await getICloudConnection(userId);
+    if (!conn) return { ok: false, error: 'iCloud Calendar not connected' };
+
+    const { data: row } = await adminClient
+      .from('calendar_events')
+      .select('calendar_url')
+      .eq('user_id', userId)
+      .eq('uid', uid)
+      .maybeSingle();
+    const calendarUrl: string = row?.calendar_url ?? conn.calendars[0].url;
+
+    const target = await resolveObject(conn, calendarUrl, uid);
+    if (!target) return { ok: false, error: 'could not locate the event on the server' };
+
+    await conn.client.deleteCalendarObject({ calendarObject: { url: target.url, etag: target.etag } });
+    await adminClient.from('calendar_events').delete().eq('user_id', userId).eq('uid', uid);
+    return { ok: true, uid };
+  } catch (err) {
+    console.error('[icloud-calendar-write] deleteCalendarEvent error:', err);
+    return { ok: false, error: String(err) };
+  }
+}
+
 export async function createCalendarEvent(
   userId: string,
   event: CalendarEventInput,

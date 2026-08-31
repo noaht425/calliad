@@ -19,7 +19,7 @@ import { upsertLoop, RECUR_LABEL } from '@/lib/memory/loops';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
-import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo } from '@/lib/actions/detect';
+import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo, isCalendarChange, extractCalendarChange, findEventByHint } from '@/lib/actions/detect';
 import { extractTask } from '@/lib/actions/task';
 import { classifyMedReply, recordMed, medContextLine } from '@/lib/health/meds';
 import { isEmailDraft, composeEmail } from '@/lib/actions/email';
@@ -283,6 +283,39 @@ export async function POST(req: NextRequest) {
     const saved = await saveFactFromText(user.id, text).catch(() => null);
     if (saved) return say(`Got it — I'll remember that: ${saved}`, 'fact-saved');
     // nothing concrete to store → fall through to the brain
+  }
+
+  // ── confirm / named-consequence: change or cancel a calendar event ──────
+  if (isCalendarChange(text) && !isCalendarWrite(text)) {
+    const ch = await extractCalendarChange(text).catch(() => null);
+    if (!ch) return say(`Which event do you mean — name it and the day?`, 'cal-change-underspecified');
+    const found = await findEventByHint(user.id, ch.match).catch(() => ({ none: true as const }));
+    if ('none' in found) return say(`I don't see "${ch.match}" on your synced calendar. Try naming it the way it reads there.`, 'cal-change-nomatch');
+    if ('ambiguous' in found) {
+      const opts = found.ambiguous.map((e) => `${e.title} — ${whenLabel(e.start_at)}`).join('; ');
+      return say(`A few could match: ${opts}. Which one?`, 'cal-change-ambiguous');
+    }
+    const e = found.hit;
+    if (ch.op === 'delete') {
+      await proposeAction({
+        userId: user.id, kind: 'delete_event', riskTier: 'named_consequence',
+        summary: `Delete "${e.title}" (${whenLabel(e.start_at)}) from your calendar`,
+        payload: { uid: e.uid, title: e.title, start_at: e.start_at }, createdBy: conversationId,
+      });
+      return say(`Remove **${e.title}** (${whenLabel(e.start_at)}) from your calendar? If it has other guests this cancels for them too — reply **yes, delete it** to confirm.`, 'action-proposed');
+    }
+    const bits: string[] = [];
+    if (ch.new_start) bits.push(`→ ${whenLabel(ch.new_start)}`);
+    if (ch.new_title) bits.push(`renamed to "${ch.new_title}"`);
+    if (ch.new_location !== null && ch.new_location !== undefined) bits.push(`at ${ch.new_location}`);
+    if (!bits.length) return say(`What's the change to **${e.title}** (${whenLabel(e.start_at)})?`, 'cal-change-underspecified');
+    await proposeAction({
+      userId: user.id, kind: 'update_event', riskTier: 'confirm',
+      summary: `Update "${e.title}": ${bits.join(', ')}`,
+      payload: { uid: e.uid, new_title: ch.new_title, new_start: ch.new_start, new_end: ch.new_end, new_location: ch.new_location },
+      createdBy: conversationId,
+    });
+    return say(`Update **${e.title}** (${whenLabel(e.start_at)}) — ${bits.join(', ')}? Say yes and I'll change it.`, 'action-proposed');
   }
 
   // ── confirm tier: calendar write → propose, wait for yes ────────────────
