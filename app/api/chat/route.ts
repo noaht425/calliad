@@ -17,6 +17,9 @@ import { upsertLoop } from '@/lib/memory/loops';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo } from '@/lib/actions/detect';
 import { wouldILike } from '@/lib/taste/judge';
+import { isFlightQuery, isRestaurantQuery, extractFlight, extractRestaurant } from '@/lib/travel/detect';
+import { flightSearch } from '@/lib/travel/flights';
+import { restaurantHandoff } from '@/lib/travel/restaurant';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -153,6 +156,12 @@ export async function POST(req: NextRequest) {
     if (q) toolResult = q.toolResult;
   } else if (/\b(would i (like|enjoy|hate|bounce off)|should i (watch|read|play|start|bother with)|do you think i'?d (like|enjoy)|worth (watching|reading|playing)|think i'?d (like|enjoy))\b/i.test(text)) {
     toolResult = (await wouldILike(user.id, text).catch(() => undefined)) ?? toolResult;
+  } else if (isFlightQuery(text)) {
+    const fp = await extractFlight(text).catch(() => null);
+    toolResult = fp ? await flightSearch(fp).catch(() => undefined) : `## Flight search\nCouldn't pin down where/when — ask Noah for the destination and rough dates.`;
+  } else if (isRestaurantQuery(text)) {
+    const rp = await extractRestaurant(text).catch(() => null);
+    if (rp) toolResult = await restaurantHandoff(rp).catch(() => undefined);
   }
 
   const state: TurnState = {
