@@ -67,8 +67,16 @@
   `setLoopStatus`; `detectLoopsFromTurn` runs a cheap T1 pass after each chat turn and
   files open loops (fire-and-forget from `/api/chat`).
 - Open loops rendered into the brain ("Open loops" block) + the brief.
-- `/api/loops` (GET / POST manual / PATCH done|dropped) + Settings list.
+- `/api/loops` (GET / POST manual / PATCH done|dropped|due_at) + Settings list.
 - Prompt cache TTL bumped 5m → **1h** (bursty usage shares one ~$0.03 prefix write).
+- **Tasks UI (2026-08-31):** a real `/tasks` page (4th nav tab) over the same
+  `open_loops` store — add box, grouped Overdue / Today / This week / Later / No
+  date, tap-circle to complete, +1d / +1w / today / tomorrow to (re)schedule,
+  drop. Syllabus deadlines show here too. Chat "add a task" now runs
+  `lib/actions/task.ts::extractTask` (T1) for a clean title + a due date when one
+  is stated ("call the dentist tomorrow" → dated; "buy printer ink" → not).
+  (Apple Reminders was tried and reverted — Apple blocks CalDAV reads of
+  "upgraded" lists; see the reverted commit.)
 
 ### ✅ Nudge v1
 - `0004_nudges.sql` — `open_loops.last_nudged_at`.

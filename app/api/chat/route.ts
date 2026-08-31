@@ -20,6 +20,7 @@ import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo } from '@/lib/actions/detect';
+import { extractTask } from '@/lib/actions/task';
 import { isEmailDraft, composeEmail } from '@/lib/actions/email';
 import { wouldILike } from '@/lib/taste/judge';
 import { isFlightQuery, isRestaurantQuery, extractFlight, extractRestaurant } from '@/lib/travel/detect';
@@ -106,12 +107,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── silent tier: add a task/reminder → open loop, no gate ───────────────
+  // ── silent tier: add a task → open loop (tagged 'task'), no gate ────────
   if (isTaskAdd(text)) {
-    const task = text.replace(/^.*?\b(add (a )?(task|reminder|to-?do)( to)?|remind me to|add to (my )?(to-?do|task list)|put on my to-?do)\b[:,]?\s*/i, '').trim();
-    if (task) {
-      await upsertLoop(user.id, { title: task.slice(0, 120), source: 'manual', tags: ['task'] });
-      return say(`Added: ${task}.`, 'task-add');
+    const { title, due_at } = await extractTask(text).catch(() => ({ title: text.trim(), due_at: null }));
+    if (title) {
+      await upsertLoop(user.id, { title, due_at, source: 'manual', tags: ['task'] });
+      const whenNote = due_at
+        ? ` — due ${new Date(due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ })}`
+        : '';
+      return say(`Added: ${title}${whenNote}.`, 'task-add');
     }
   }
 

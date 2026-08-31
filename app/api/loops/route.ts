@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { allOpenLoops, upsertLoop, setLoopStatus } from '@/lib/memory/loops';
+import { allOpenLoops, upsertLoop, setLoopStatus, setLoopDue } from '@/lib/memory/loops';
 import { detectLoopsFromTurn } from '@/lib/memory/detect';
 import { t1Available } from '@/lib/llm/gemini';
 
@@ -44,14 +44,20 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true, result: r });
 }
 
-// PATCH { id, status: 'done' | 'dropped' }
+// PATCH { id, status: 'done' | 'dropped' }  or  { id, due_at: ISO | null }
 export async function PATCH(req: NextRequest) {
   const user = await requireUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const b = (await req.json().catch(() => ({}))) as { id?: string; status?: string };
-  if (!b.id || (b.status !== 'done' && b.status !== 'dropped')) {
-    return NextResponse.json({ error: 'id and status (done|dropped) required' }, { status: 400 });
+  const b = (await req.json().catch(() => ({}))) as { id?: string; status?: string; due_at?: string | null };
+  if (!b.id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+  if (b.due_at !== undefined) {
+    await setLoopDue(user.id, b.id, b.due_at);
+    return NextResponse.json({ ok: true });
   }
-  await setLoopStatus(user.id, b.id, b.status);
-  return NextResponse.json({ ok: true });
+  if (b.status === 'done' || b.status === 'dropped') {
+    await setLoopStatus(user.id, b.id, b.status);
+    return NextResponse.json({ ok: true });
+  }
+  return NextResponse.json({ error: 'status (done|dropped) or due_at required' }, { status: 400 });
 }

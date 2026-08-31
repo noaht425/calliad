@@ -10,6 +10,13 @@ function IcToday({ on }: { on: boolean }) {
     </svg>
   );
 }
+function IcTasks({ on }: { on: boolean }) {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={on ? 2.1 : 1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+    </svg>
+  );
+}
 function IcReading({ on }: { on: boolean }) {
   return (
     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={on ? 2.1 : 1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -27,10 +34,11 @@ function IcSettings({ on }: { on: boolean }) {
   );
 }
 
-/* ─── BottomNav — Today / Reading / Settings ─────────────────────────────── */
+/* ─── BottomNav — Today / Tasks / Reading / Settings ─────────────────────── */
 export function BottomNav() {
   const path = usePathname();
   const onHome = path === '/';
+  const onTasks = path.startsWith('/tasks');
   const onReading = path.startsWith('/reading');
   const onSettings = path.startsWith('/settings');
 
@@ -46,6 +54,10 @@ export function BottomNav() {
         <Link href="/" className={tab} style={{ color: color(onHome) }}>
           <IcToday on={onHome} />
           Today
+        </Link>
+        <Link href="/tasks" className={tab} style={{ color: color(onTasks) }}>
+          <IcTasks on={onTasks} />
+          Tasks
         </Link>
         <Link href="/reading" className={tab} style={{ color: color(onReading) }}>
           <IcReading on={onReading} />

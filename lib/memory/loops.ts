@@ -95,6 +95,14 @@ export async function setLoopStatus(userId: string, id: string, status: 'done' |
     .eq('id', id);
 }
 
+export async function setLoopDue(userId: string, id: string, due_at: string | null): Promise<void> {
+  await adminClient
+    .from('open_loops')
+    .update({ due_at, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('id', id);
+}
+
 const isExam = (l: OpenLoop) =>
   l.tags.some((t) => /exam|midterm|final|test|quiz/i.test(t)) || /exam|midterm|final\b|test\b/i.test(l.title);
 
