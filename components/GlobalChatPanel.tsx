@@ -3,8 +3,18 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { streamChat } from '@/lib/api';
+import { useVoiceInput } from '@/lib/voice/useVoiceInput';
 
 interface Message { role: 'user' | 'assistant'; text: string }
+
+/** Speak a reply with the browser's built-in TTS — free, on-device, no API. */
+function speak(text: string) {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.slice(0, 1500));
+  u.rate = 1.05;
+  window.speechSynthesis.speak(u);
+}
 
 const CLOSED = 0;
 const PEEK = 68; // composer row only
@@ -42,8 +52,9 @@ function ThinkingDots() {
  * Draggable split-screen chat — shown on every route except `/` (Today renders
  * <Chat/> inline). Snap points: closed, peek (composer only), half, full.
  * Structure adopted from dougt425/calliad's refresh; wiring is Calliad's own
- * SSE stream (streamChat + sticky conversation + mode chip). Voice/photo are
- * deferred until the STT endpoint lands.
+ * SSE stream (streamChat + sticky conversation + mode chip). Voice notes go
+ * through /api/chat/transcribe (Groq Whisper); spoken replies use the browser's
+ * built-in TTS. Photo capture is still deferred.
  */
 export function GlobalChatPanel() {
   const { session } = useAuth();
@@ -54,6 +65,9 @@ export function GlobalChatPanel() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [mode, setMode] = useState<string | undefined>();
+  const [ttsOn, setTtsOn] = useState(false);
+  const ttsRef = useRef(false);
+  ttsRef.current = ttsOn;
 
   const snapsRef = useRef<[number, number, number, number]>([CLOSED, PEEK, 300, 560]);
   const dragRef = useRef({ active: false, startY: 0, startH: 0 });
@@ -120,11 +134,8 @@ export function GlobalChatPanel() {
   }, []);
 
   /* ─── Send ────────────────────────────────────────────────────────────── */
-  const send = useCallback(async () => {
-    const text = input.trim();
-    if (!text || sending || !session) return;
-    setInput('');
-    if (inputRef.current) inputRef.current.style.height = 'auto';
+  const runTurn = useCallback(async (text: string) => {
+    if (!text.trim() || sending || !session) return;
     setMessages((m) => [...m, { role: 'user', text }, { role: 'assistant', text: '' }]);
     setSending(true);
     setChatH((h) => (h < snapsRef.current[2] ? snapsRef.current[2] : h));
@@ -138,8 +149,10 @@ export function GlobalChatPanel() {
               next[next.length - 1] = { role: 'assistant', text: next[next.length - 1].text + d };
               return next;
             }),
-          onDone: (_full, meta) =>
-            setMode(meta?.mode && MODE_LABEL[meta.mode] ? meta.mode : undefined),
+          onDone: (full, meta) => {
+            setMode(meta?.mode && MODE_LABEL[meta.mode] ? meta.mode : undefined);
+            if (ttsRef.current && full) speak(full);
+          },
         },
         convRef.current,
       );
@@ -154,10 +167,23 @@ export function GlobalChatPanel() {
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [input, sending, session]);
+  }, [sending, session]);
+
+  const send = useCallback(() => {
+    const text = input.trim();
+    if (!text) return;
+    setInput('');
+    if (inputRef.current) inputRef.current.style.height = 'auto';
+    void runTurn(text);
+  }, [input, runTurn]);
+
+  const { state: voiceState, error: voiceError, toggle: toggleMic, supported: micSupported } = useVoiceInput(
+    (t) => { setInput(''); void runTurn(t); },
+    convRef.current,
+  );
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
   if (!session || pathname === '/') return null;
@@ -221,22 +247,45 @@ export function GlobalChatPanel() {
               <>
                 <div className="absolute left-4 flex items-center gap-2" style={{ pointerEvents: 'none' }}>
                   <img src="/icons/icon-192.png" alt="Calliad" className="w-5 h-5 rounded-full shrink-0" style={{ objectFit: 'cover' }} />
-                  {mode && (
+                  {voiceError ? (
+                    <span className="text-[11px]" style={{ color: '#EF4444' }}>{voiceError}</span>
+                  ) : voiceState === 'recording' ? (
+                    <span className="text-[11px] font-medium animate-pulse" style={{ color: '#EF4444' }}>● Recording…</span>
+                  ) : voiceState === 'transcribing' ? (
+                    <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Transcribing…</span>
+                  ) : mode ? (
                     <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
                       {MODE_LABEL[mode]} · say &ldquo;english&rdquo; to exit
                     </span>
-                  )}
+                  ) : null}
                 </div>
-                <button
-                  onClick={() => setChatH(CLOSED)}
-                  className="absolute right-4 transition-colors"
-                  style={{ color: 'var(--text-muted)' }}
-                  title="Close"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
+                <div className="absolute right-4 flex items-center gap-3">
+                  <button
+                    onClick={() => { window.speechSynthesis?.cancel(); setTtsOn((v) => !v); }}
+                    className="transition-colors"
+                    style={{ color: ttsOn ? 'var(--accent)' : 'var(--text-quiet)' }}
+                    title={ttsOn ? 'Spoken replies on' : 'Spoken replies off'}
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                      {ttsOn ? (
+                        <><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></>
+                      ) : (
+                        <line x1="23" y1="9" x2="17" y2="15" />
+                      )}
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => setChatH(CLOSED)}
+                    className="transition-colors"
+                    style={{ color: 'var(--text-muted)' }}
+                    title="Close"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
               </>
             )}
           </div>
@@ -299,17 +348,41 @@ export function GlobalChatPanel() {
                 color: 'var(--text)',
               }}
             />
-            <button
-              onClick={() => void send()}
-              disabled={sending || !input.trim()}
-              className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-40"
-              style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
-              aria-label="Send"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
-              </svg>
-            </button>
+            {micSupported && !input.trim() && (
+              <button
+                onClick={toggleMic}
+                disabled={voiceState === 'transcribing' || sending}
+                className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all disabled:opacity-40 ${voiceState === 'recording' ? 'animate-pulse' : ''}`}
+                style={
+                  voiceState === 'recording'
+                    ? { background: '#EF4444', color: '#fff' }
+                    : { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }
+                }
+                aria-label={voiceState === 'recording' ? 'Stop recording' : 'Record a voice note'}
+              >
+                {voiceState === 'recording' ? (
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                ) : (
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="2" width="6" height="11" rx="3" /><path d="M5 10a7 7 0 0 0 14 0" />
+                    <line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" />
+                  </svg>
+                )}
+              </button>
+            )}
+            {(input.trim() || !micSupported) && (
+              <button
+                onClick={() => send()}
+                disabled={sending || !input.trim()}
+                className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-40"
+                style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
+                aria-label="Send"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
       )}

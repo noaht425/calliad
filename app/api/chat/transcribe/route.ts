@@ -1,0 +1,44 @@
+import { NextRequest } from 'next/server';
+import { supabase } from '@/lib/supabase';
+import { transcribe, sttAvailable } from '@/lib/llm/groq';
+import { audit } from '@/lib/hub/audit';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+const MAX_BYTES = 12 * 1024 * 1024; // ~12 MB — a minute or two of compressed audio
+
+function json(obj: unknown, status: number) {
+  return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+// POST multipart: audio=<file>, conversationId?=<uuid>  →  { transcript }
+export async function POST(req: NextRequest) {
+  const token = req.headers.get('authorization')?.replace('Bearer ', '');
+  if (!token) return json({ error: 'Unauthorized' }, 401);
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user) return json({ error: 'Unauthorized' }, 401);
+
+  if (!sttAvailable()) return json({ error: 'Voice not configured (GROQ_API_KEY unset).' }, 503);
+
+  let form: FormData;
+  try { form = await req.formData(); } catch { return json({ error: 'Expected multipart form data' }, 400); }
+
+  const audio = form.get('audio');
+  const conversationId = (form.get('conversationId') as string) || null;
+  if (!(audio instanceof Blob) || audio.size === 0) return json({ error: 'audio file required' }, 400);
+  if (audio.size > MAX_BYTES) return json({ error: 'Audio too long — keep voice notes under ~2 minutes.' }, 413);
+
+  const name = (audio instanceof File && audio.name) || 'note.m4a';
+
+  try {
+    const { text, durationSec, costUsd } = await transcribe(audio, name, { conversationId });
+    await audit.log('tool_call', 'calliad', conversationId, {
+      tool: 'transcribe', chars: text.length, duration_s: Math.round(durationSec), cost_usd: costUsd,
+    });
+    return json({ transcript: text }, 200);
+  } catch (err) {
+    await audit.log('error', 'system', conversationId, { where: 'transcribe', message: String(err) });
+    return json({ error: 'Transcription failed — try again.' }, 502);
+  }
+}

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { streamChat } from '@/lib/api';
+import { useVoiceInput } from '@/lib/voice/useVoiceInput';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -9,9 +10,9 @@ interface Message {
 }
 
 /**
- * The chat surface — text in, streamed reply out. Phase 0 has no voice/TTS.
- * Fills its parent (which must give it a bounded height). Used inline on `/`
- * and inside GlobalChatPanel elsewhere.
+ * The chat surface — text or voice in, streamed reply out. Voice notes go
+ * through /api/chat/transcribe (Groq Whisper). Fills its parent (which must
+ * give it a bounded height). Used inline on `/` and inside GlobalChatPanel.
  */
 export function Chat() {
   const { session } = useAuth();
@@ -44,10 +45,8 @@ export function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const send = useCallback(async () => {
-    const text = input.trim();
-    if (!text || sending || !session) return;
-    setInput('');
+  const runTurn = useCallback(async (text: string) => {
+    if (!text.trim() || sending || !session) return;
     setMessages((m) => [...m, { role: 'user', text }, { role: 'assistant', text: '' }]);
     setSending(true);
     try {
@@ -82,12 +81,24 @@ export function Chat() {
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [input, sending, session]);
+  }, [sending, session]);
+
+  const send = useCallback(() => {
+    const text = input.trim();
+    if (!text) return;
+    setInput('');
+    void runTurn(text);
+  }, [input, runTurn]);
+
+  const { state: voiceState, error: voiceError, toggle: toggleMic, supported: micSupported } = useVoiceInput(
+    (t) => { setInput(''); void runTurn(t); },
+    convRef.current,
+  );
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      void send();
+      send();
     }
   };
 
@@ -117,9 +128,15 @@ export function Chat() {
       </div>
 
       <div className="shrink-0 px-4 pt-2 pb-3" style={{ borderTop: '1px solid var(--border-quiet)' }}>
-        {mode && (
-          <div className="mb-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            {mode === 'italian-tutor' ? 'Italian tutor' : mode === 'quiz' ? 'Quiz' : mode === 'study-coach' ? 'Study coach' : mode} · say &ldquo;english&rdquo; to exit
+        {(mode || voiceState !== 'idle' || voiceError) && (
+          <div className="mb-1.5 text-[11px]" style={{ color: voiceState === 'recording' || voiceError ? '#EF4444' : 'var(--text-muted)' }}>
+            {voiceError
+              ? voiceError
+              : voiceState === 'recording'
+                ? '● Recording… tap the square to stop'
+                : voiceState === 'transcribing'
+                  ? 'Transcribing…'
+                  : `${mode === 'italian-tutor' ? 'Italian tutor' : mode === 'quiz' ? 'Quiz' : mode === 'study-coach' ? 'Study coach' : mode} · say “english” to exit`}
           </div>
         )}
         <div className="flex items-end gap-2">
@@ -133,18 +150,42 @@ export function Chat() {
             className="flex-1 resize-none rounded-xl px-3 py-2.5 text-sm outline-none"
             style={{ maxHeight: '120px', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
           />
-          <button
-            onClick={() => void send()}
-            disabled={sending || !input.trim()}
-            className="shrink-0 h-9 w-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-opacity"
-            style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
-            aria-label="Send"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          </button>
+          {micSupported && !input.trim() && (
+            <button
+              onClick={toggleMic}
+              disabled={voiceState === 'transcribing' || sending}
+              className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-all ${voiceState === 'recording' ? 'animate-pulse' : ''}`}
+              style={
+                voiceState === 'recording'
+                  ? { background: '#EF4444', color: '#fff' }
+                  : { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }
+              }
+              aria-label={voiceState === 'recording' ? 'Stop recording' : 'Record a voice note'}
+            >
+              {voiceState === 'recording' ? (
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+              ) : (
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="2" width="6" height="11" rx="3" /><path d="M5 10a7 7 0 0 0 14 0" />
+                  <line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" />
+                </svg>
+              )}
+            </button>
+          )}
+          {(input.trim() || !micSupported) && (
+            <button
+              onClick={() => send()}
+              disabled={sending || !input.trim()}
+              className="shrink-0 h-9 w-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-opacity"
+              style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
+              aria-label="Send"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </div>
