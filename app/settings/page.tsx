@@ -19,6 +19,32 @@ interface IntegrationsState {
 const btn = 'rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium px-3 py-2 disabled:opacity-40';
 const field = 'w-full rounded-lg border border-zinc-200 dark:border-zinc-800 bg-transparent px-3 py-2 text-sm';
 
+function SetPassword() {
+  const [pw, setPw] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  return (
+    <div className="space-y-2 max-w-xs">
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">Set a password so you can sign into the home-screen app without the email step.</p>
+      <input className={field} type="password" placeholder="new password (8+ chars)" value={pw} onChange={(e) => setPw(e.target.value)} />
+      <button
+        className={btn}
+        disabled={saving || pw.length < 8}
+        onClick={async () => {
+          setSaving(true); setMsg(null);
+          const { error } = await supabase.auth.updateUser({ password: pw });
+          setSaving(false);
+          setMsg(error ? error.message : 'Password set. Use it on the login screen.');
+          if (!error) setPw('');
+        }}
+      >
+        {saving ? 'Saving…' : 'Set password'}
+      </button>
+      {msg && <p className="text-xs text-zinc-500">{msg}</p>}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { session, loading } = useAuth();
   const router = useRouter();
@@ -368,6 +394,11 @@ export default function SettingsPage() {
         ) : (
           <p className="text-sm text-zinc-400">Unavailable.</p>
         )}
+      </section>
+
+      <section className="mb-6">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Account</h2>
+        <SetPassword />
       </section>
 
       <button
