@@ -238,8 +238,18 @@ export function cardBlock(cards: Card[]): string {
   return lines.join('\n');
 }
 
+const WUBRG: Record<string, string> = { W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' };
+
 export function deckBlock(a: DeckAnalysis): string {
+  const ci = a.colorIdentity;
+  const idName = ci.length ? ci.map((c) => WUBRG[c] ?? c).join('/') : 'colorless';
+  const forbidden = (['W', 'U', 'B', 'R', 'G'] as const).filter((c) => !ci.includes(c)).map((c) => WUBRG[c]);
+
   const L: string[] = ['## Deck analysis (Scryfall data)'];
+  L.push(
+    `**Color identity: {${ci.join('}{') || 'C'}} (${idName}).** Every card you suggest MUST be inside this identity — ` +
+      `no ${forbidden.join('/') || 'off-colour'} cards, and no card whose rules text has a ${forbidden.join('/') || 'off-colour'} mana symbol. Colourless is fine.`,
+  );
   if (a.commander) L.push(`**Commander:** ${a.commander.name} — ${a.commander.type_line} — ${a.commander.color_identity.join('') || 'C'}\n${a.commander.oracle_text}`);
   L.push(
     `\n**${a.totalCards} cards** · identity ${a.colorIdentity.join('') || 'C'} · ${a.lands} lands · ` +
@@ -257,7 +267,7 @@ export function deckBlock(a: DeckAnalysis): string {
   }
   L.push(
     '\n### Instructions',
-    'Analyze as a strong Commander player would. Reason from the rules text above, not memory. Cover, as relevant: mana base and curve health, ramp/draw/interaction/wincon counts against what this deck wants to do, synergy clusters and anti-synergies, combo lines and their redundancy/fragility, clearly weak inclusions and what to cut, and 3–6 concrete adds with why (name real cards in-identity). If Noah asked a specific question, lead with that. Be direct about tradeoffs; no hedging filler.',
+    `Analyze as a strong Commander player would. Reason from the rules text above, not memory. Cover, as relevant: mana base and curve health, ramp/draw/interaction/wincon counts against what this deck wants to do, synergy clusters and anti-synergies, combo lines and their redundancy/fragility, clearly weak inclusions and what to cut, and 3–6 concrete adds with why. Every card you name as an add MUST be legal in this deck's colour identity ({${ci.join('}{') || 'C'}}) — double-check each one; a card with an off-colour identity is a hard error, not a suggestion. If Noah asked a specific question, lead with that. Be direct about tradeoffs; no hedging filler.`,
   );
   return L.join('\n');
 }
