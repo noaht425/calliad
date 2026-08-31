@@ -63,6 +63,8 @@ any that are off. **Negatives + bail patterns added 2026-08-30** (bottom of the 
 | 2022-02 | Pokémon Legends: Arceus | video game | liked | 18h |
 | — | Undertale | video game | liked | 19h; narrative RPG |
 | 2026-06 | Romestead | video game | liked | 27h; Roman-themed builder |
+| 2026-08 | Shameless (US) | show | loved | added by Noah |
+| 2026-08 | Project Hail Mary | book | loved | added by Noah; Andy Weir |
 | 2026-08 | The Magicians (Lev Grossman) | book | bailed | ~⅓ in; interesting, but the way it describes some female characters got weird for him |
 | 2026-08 | [unnamed recent Greek-myth novel, newer author, last few yrs] | book | bailed | spelling errors, and an Athena/Heracles romance that breaks her virgin-goddess characterization |
 | 2026-08 | Percy Jackson (2010–2013 films) | film | hated | "terrible adaptations of the books" |
