@@ -10,7 +10,7 @@ import { useConversationSync } from '@/lib/chat/useConversationSync';
 interface Message {
   role: 'user' | 'assistant';
   text: string;
-  image?: string;
+  images?: string[];
 }
 
 /**
@@ -24,7 +24,7 @@ export function Chat() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [mode, setMode] = useState<string | undefined>();
-  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
   const imgInputRef = useRef<HTMLInputElement>(null);
   const [ttsOn, setTtsOn] = useState(false);
   const ttsRef = useRef(false);
@@ -60,9 +60,9 @@ export function Chat() {
   // always on screen when mounted, so it's always active).
   const { markTurnDone } = useConversationSync({ session, sending, active: true, setMessages, convRef });
 
-  const runTurn = useCallback(async (text: string, image?: string) => {
-    if ((!text.trim() && !image) || sending || !session) return;
-    setMessages((m) => [...m, { role: 'user', text, image }, { role: 'assistant', text: '' }]);
+  const runTurn = useCallback(async (text: string, images: string[] = []) => {
+    if ((!text.trim() && !images.length) || sending || !session) return;
+    setMessages((m) => [...m, { role: 'user', text, images: images.length ? images : undefined }, { role: 'assistant', text: '' }]);
     setSending(true);
     speakerRef.current!.cancel();
     let acc = '';
@@ -86,7 +86,7 @@ export function Chat() {
           },
         },
         convRef.current,
-        image,
+        images,
       );
       convRef.current = conversationId;
     } catch {
@@ -106,18 +106,21 @@ export function Chat() {
 
   const send = useCallback(() => {
     const text = input.trim();
-    if (!text && !pendingImage) return;
+    if (!text && !pendingImages.length) return;
     setInput('');
-    const img = pendingImage ?? undefined;
-    setPendingImage(null);
-    void runTurn(text, img);
-  }, [input, pendingImage, runTurn]);
+    const imgs = pendingImages;
+    setPendingImages([]);
+    void runTurn(text, imgs);
+  }, [input, pendingImages, runTurn]);
 
-  const pickImage = useCallback(async (file: File) => {
-    try {
-      setPendingImage(await fileToResizedDataUrl(file));
-      inputRef.current?.focus();
-    } catch { /* ignore a bad file */ }
+  const pickImages = useCallback(async (files: File[]) => {
+    if (!files.length) return;
+    const resized = (await Promise.all(files.map((f) => fileToResizedDataUrl(f).catch(() => null)))).filter(
+      (x): x is string => !!x,
+    );
+    if (!resized.length) return;
+    setPendingImages((cur) => [...cur, ...resized].slice(0, 8));
+    inputRef.current?.focus();
   }, []);
 
   const { state: voiceState, error: voiceError, start: micStart, stop: micStop, supported: micSupported } = useVoiceInput(
@@ -151,9 +154,13 @@ export function Chat() {
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] ${m.role === 'user' ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
-              {m.image && (
-                <img src={m.image} alt="attached" className="max-h-56 rounded-2xl border" style={{ borderColor: 'var(--border)' }} />
-              )}
+              {m.images?.length ? (
+                <div className="flex flex-wrap gap-1 justify-end">
+                  {m.images.map((src, k) => (
+                    <img key={k} src={src} alt="attached" className="max-h-56 rounded-2xl border" style={{ borderColor: 'var(--border)' }} />
+                  ))}
+                </div>
+              ) : null}
               {(m.text || (m.role === 'assistant' && sending)) && (
                 <div
                   className="whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed"
@@ -190,15 +197,19 @@ export function Chat() {
             </span>
           </div>
         )}
-        {pendingImage && (
-          <div className="mb-2 relative inline-block">
-            <img src={pendingImage} alt="attached" className="h-16 rounded-lg border" style={{ borderColor: 'var(--border)' }} />
-            <button
-              onClick={() => setPendingImage(null)}
-              aria-label="Remove photo"
-              className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full flex items-center justify-center text-[11px]"
-              style={{ background: 'var(--text)', color: 'var(--paper)' }}
-            >✕</button>
+        {pendingImages.length > 0 && (
+          <div className="mb-2 flex gap-2 overflow-x-auto">
+            {pendingImages.map((src, k) => (
+              <div key={k} className="relative shrink-0">
+                <img src={src} alt="attached" className="h-16 rounded-lg border" style={{ borderColor: 'var(--border)' }} />
+                <button
+                  onClick={() => setPendingImages((cur) => cur.filter((_, j) => j !== k))}
+                  aria-label="Remove photo"
+                  className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full flex items-center justify-center text-[11px]"
+                  style={{ background: 'var(--text)', color: 'var(--paper)' }}
+                >✕</button>
+              </div>
+            ))}
           </div>
         )}
         <div className="flex items-end gap-2">
@@ -206,8 +217,9 @@ export function Chat() {
             ref={imgInputRef}
             type="file"
             accept="image/*"
+            multiple
             className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickImage(f); e.target.value = ''; }}
+            onChange={(e) => { void pickImages(Array.from(e.target.files ?? [])); e.target.value = ''; }}
           />
           <button
             onClick={() => imgInputRef.current?.click()}
@@ -230,7 +242,7 @@ export function Chat() {
             className="flex-1 resize-none rounded-xl px-3 py-2.5 text-sm outline-none"
             style={{ maxHeight: '120px', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
           />
-          {micSupported && !input.trim() && !pendingImage && (
+          {micSupported && !input.trim() && !pendingImages.length && (
             <button
               onClick={() => { speakerRef.current!.cancel(); setTtsOn((v) => !v); }}
               className="shrink-0 h-9 w-9 rounded-xl flex items-center justify-center transition-colors"
@@ -244,7 +256,7 @@ export function Chat() {
               </svg>
             </button>
           )}
-          {micSupported && !input.trim() && !pendingImage && (
+          {micSupported && !input.trim() && !pendingImages.length && (
             <button
               onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); songStart(); }}
               onPointerUp={() => songStop()}
@@ -265,7 +277,7 @@ export function Chat() {
               </svg>
             </button>
           )}
-          {micSupported && !input.trim() && !pendingImage && (
+          {micSupported && !input.trim() && !pendingImages.length && (
             <button
               onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); micStart(); }}
               onPointerUp={() => micStop()}
@@ -290,10 +302,10 @@ export function Chat() {
               )}
             </button>
           )}
-          {(input.trim() || pendingImage || !micSupported) && (
+          {(input.trim() || pendingImages.length || !micSupported) && (
             <button
               onClick={() => send()}
-              disabled={sending || (!input.trim() && !pendingImage)}
+              disabled={sending || (!input.trim() && !pendingImages.length)}
               className="shrink-0 h-9 w-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-opacity"
               style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
               aria-label="Send"

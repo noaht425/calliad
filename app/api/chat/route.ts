@@ -38,7 +38,7 @@ import {
 import { getCommanderRecs, recDiff, recBlock, isEdhrecQuery } from '@/lib/tools/edhrec';
 import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
 import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
-import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock } from '@/lib/tools/beli';
+import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock, isRestaurantTasteQuery, restaurantTasteBlock } from '@/lib/tools/beli';
 import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine } from '@/lib/integrations/icloud-contacts';
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
 import type { TurnState } from '@/lib/brain/prompt';
@@ -58,18 +58,21 @@ export async function POST(req: NextRequest) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return json({ error: 'Unauthorized' }, 401);
 
-  let body: { text?: string; conversationId?: string; image?: string };
+  let body: { text?: string; conversationId?: string; image?: string; images?: string[] };
   try { body = await req.json(); } catch { return json({ error: 'Body must be JSON' }, 400); }
 
-  // optional attached photo — data URL "data:image/jpeg;base64,…"
-  let image: { media_type: string; data: string } | undefined;
-  const im = body.image?.match(/^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/);
-  if (im) {
-    if (im[2].length > 7_000_000) return json({ error: 'image too large' }, 413); // ~5MB raw
-    image = { media_type: im[1], data: im[2] };
+  // optional attached photos — data URLs "data:image/jpeg;base64,…". Accept the
+  // legacy single `image` too. Cap at 8 shots and ~5MB raw each.
+  const rawImages = [...(body.images ?? []), ...(body.image ? [body.image] : [])].slice(0, 8);
+  const images: { media_type: string; data: string }[] = [];
+  for (const s of rawImages) {
+    const m = s.match(/^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/);
+    if (!m) continue;
+    if (m[2].length > 7_000_000) return json({ error: 'image too large' }, 413);
+    images.push({ media_type: m[1], data: m[2] });
   }
   const text = body.text?.trim() ?? '';
-  if (!text && !image) return json({ error: 'text or image required' }, 400);
+  if (!text && !images.length) return json({ error: 'text or image required' }, 400);
 
   // ── conversation ────────────────────────────────────────────────────────
   let conversationId = body.conversationId;
@@ -87,8 +90,8 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const loggedText = text || (image ? '📷 (photo)' : text);
-  await audit.log('inbound_message', 'noah', conversationId, { text: loggedText, hasImage: !!image, surface: 'pwa' });
+  const loggedText = text || (images.length ? `📷 (${images.length === 1 ? 'photo' : `${images.length} photos`})` : text);
+  await audit.log('inbound_message', 'noah', conversationId, { text: loggedText, images: images.length, surface: 'pwa' });
   await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'user', content: loggedText });
   await adminClient.from('conversations').update({ last_at: new Date().toISOString() }).eq('id', conversationId);
 
@@ -175,9 +178,9 @@ export async function POST(req: NextRequest) {
   // Explicit ("beli" / "my restaurant rankings") OR a bare screenshot with no
   // caption — in the bare case, a non-restaurant image just falls through to the
   // normal vision answer.
-  const beliExplicit = image && isBeliShare(text);
-  if (beliExplicit || (image && !text.trim())) {
-    const { rows } = await extractBeli(image!).catch(() => ({ rows: [] }));
+  const beliExplicit = images.length > 0 && isBeliShare(text);
+  if (beliExplicit || (images.length > 0 && !text.trim())) {
+    const { rows } = await extractBeli(images).catch(() => ({ rows: [] }));
     if (rows.length) {
       const { added, updated } = await saveBeliRows(user.id, rows);
       const top = rows.filter((r) => r.score != null).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 4).map((r) => `${r.name} (${r.score})`);
@@ -186,8 +189,8 @@ export async function POST(req: NextRequest) {
         'beli-extract',
       );
     }
-    if (beliExplicit) return say(`I couldn't read a restaurant list off that — try a clearer screenshot of the ranked or want-to-try view.`, 'beli-empty');
-    // bare screenshot, not a restaurant list → let the vision path handle it
+    if (beliExplicit) return say(`I couldn't read a restaurant list off ${images.length > 1 ? 'those' : 'that'} — try a clearer screenshot of the ranked or want-to-try view.`, 'beli-empty');
+    // bare screenshot(s), not a restaurant list → let the vision path handle it
   }
   // a pending email draft + anything that isn't yes/no → treat it as a revision
   if (pending?.kind === 'draft_email') {
@@ -371,8 +374,15 @@ export async function POST(req: NextRequest) {
     toolResult = target
       ? await runWebFetch(target, text).catch(() => undefined)
       : `## Web fetch\nNoah asked about a saved link but his reading list is empty.`;
-  } else if (/\b(would i (like|enjoy|hate|bounce off)|should i (watch|read|play|start|bother with)|do you think i'?d (like|enjoy)|worth (watching|reading|playing)|think i'?d (like|enjoy))\b/i.test(text)) {
-    toolResult = (await wouldILike(user.id, text).catch(() => undefined)) ?? toolResult;
+  } else if (isRestaurantTasteQuery(text)) {
+    toolResult = await restaurantTasteBlock(user.id, text).catch(() => undefined);
+  } else if (/\b(would i (like|enjoy|hate|bounce off)|should i (watch|read|play|start|bother with|eat at|go to)|do you think i'?d (like|enjoy)|worth (watching|reading|playing|a visit|going to)|think i'?d (like|enjoy)|what did i (rate|think of|give)|have i (been (to|there)|tried|eaten at)|my (score|rating) (for|of|on))\b/i.test(text)) {
+    // restaurant first (covers "would I like <place>" / "what did I rate <place>"),
+    // then books / screen / games
+    toolResult =
+      (await restaurantTasteBlock(user.id, text).catch(() => undefined)) ??
+      (await wouldILike(user.id, text).catch(() => undefined)) ??
+      toolResult;
   } else if (isFlightQuery(text)) {
     const fp = await extractFlight(text).catch(() => null);
     toolResult = fp ? await flightSearch(fp).catch(() => undefined) : `## Flight search\nCouldn't pin down where/when — ask Noah for the destination and rough dates.`;
@@ -413,20 +423,20 @@ export async function POST(req: NextRequest) {
   const webSearch =
     !toolResult && effectiveMode === 'default' &&
     /\b(search\b|google\b|look (it |this )?up|looking (it |this )?up|look (to see|into)|(go )?(find out|find me|check online)|can you (find|check|look)(?! (my|the calendar|your|at))|latest (on|news|from|version|release)|newest\b|most recent\b|what'?s the latest|any (news|updates?) (on|about|for)|news (on|about|for)|what'?s (going on|happening|new) (with|in|on)(?! my\b)|(coming|come) out\b|just (came out|released|announced|dropped)|recently (released|announced|came out|launched|added)|new releases?|as of (today|now|this)|up[ -]to[- ]date|right now\b|check (again|now)|try (again|now)|now try\b)/i.test(text);
-  const maxTokens = image || toolResult ? Math.min(4096, 1500 + Math.ceil((toolResult?.length ?? 3000) / 8)) : webSearch ? 2000 : 1200;
+  const maxTokens = images.length || toolResult ? Math.min(4096, 1500 + Math.ceil((toolResult?.length ?? 3000) / 8)) : webSearch ? 2000 : 1200;
 
   const { meta, stream } = await call({
     purpose: 'chat',
     // a photo goes to T2 for vision quality; a search-shaped turn goes to T2
     // because haiku (the T1 chat model) can't run the 2026 web-search tool
-    tier: (image || webSearch) && decision.tier === 'T1' ? 'T2' : decision.tier,
+    tier: (images.length > 0 || webSearch) && decision.tier === 'T1' ? 'T2' : decision.tier,
     proactive: false,
     conversationId,
     userText: text,
     state,
     maxTokens,
     webSearch,
-    image,
+    images,
   });
 
   const body$ = async function* () {

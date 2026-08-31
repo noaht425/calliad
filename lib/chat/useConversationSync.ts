@@ -5,7 +5,7 @@ import type { Session } from '@supabase/supabase-js';
 export interface SyncMessage {
   role: 'user' | 'assistant';
   text: string;
-  image?: string;
+  images?: string[];
 }
 
 interface Opts {
@@ -80,7 +80,7 @@ export function useConversationSync({
         // carry local photo thumbnails across when the lists line up 1:1
         if (cur.length === server.length) {
           return server.map((s, i) =>
-            s.role === 'user' && PHOTO.test(s.text) && cur[i]?.image ? { ...s, image: cur[i].image } : s,
+            s.role === 'user' && PHOTO.test(s.text) && cur[i]?.images?.length ? { ...s, images: cur[i].images } : s,
           );
         }
         return server;
