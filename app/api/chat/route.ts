@@ -36,6 +36,7 @@ import {
   runSimulation, runTranscript, parseSimRequest, isSimRequest, isTranscriptRequest,
 } from '@/lib/tools/mtgsim';
 import { getCommanderRecs, recDiff, recBlock, isEdhrecQuery } from '@/lib/tools/edhrec';
+import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -292,6 +293,8 @@ export async function POST(req: NextRequest) {
   } else if (isRestaurantQuery(text)) {
     const rp = await extractRestaurant(text).catch(() => null);
     if (rp) toolResult = await restaurantHandoff(rp).catch(() => undefined);
+  } else if (isWeatherQuery(text)) {
+    toolResult = await runForecast(text).catch(() => undefined);
   } else if (isLyricQuery(text)) {
     toolResult = await findByLyrics(text).catch(() => undefined);
   } else if (/\b(name that song|what song is (this|that|playing)|shazam|identif(y|ies) (this|the) song|what'?s (this|that) song)\b/i.test(text)) {
@@ -309,7 +312,12 @@ export async function POST(req: NextRequest) {
   // A tool result means a longer, denser reply is expected (deck analysis, sim
   // narration, web-page answers). 1024 is stingy there — and with adaptive effort
   // on, too small a budget can be spent entirely on reasoning, yielding no text.
-  const maxTokens = toolResult ? Math.min(4096, 1500 + Math.ceil(toolResult.length / 8)) : 1200;
+  // "look this up / latest on / news about X" (and only when no other tool already
+  // answered the turn) → let the model run Anthropic's web search.
+  const webSearch =
+    !toolResult && effectiveMode === 'default' &&
+    /\b(search (for|the web|online|it up)|look (this |it )?up|look up|google( it)?|find out|latest (on|news|from)|what'?s the latest|any news (on|about)|news (on|about|for)|what'?s (going on|happening|new) (with|in|on)|current (news|events|situation|status)|as of (today|now|this)|up to date|right now\b)/i.test(text);
+  const maxTokens = toolResult || webSearch ? Math.min(4096, 1500 + Math.ceil((toolResult?.length ?? 3000) / 8)) : 1200;
 
   const { meta, stream } = await call({
     purpose: 'chat',
@@ -319,6 +327,7 @@ export async function POST(req: NextRequest) {
     userText: text,
     state,
     maxTokens,
+    webSearch,
   });
 
   const body$ = async function* () {

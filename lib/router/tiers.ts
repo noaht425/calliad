@@ -35,7 +35,10 @@ export interface UsageLike {
   output_tokens: number;
   cache_read_input_tokens?: number | null;
   cache_creation_input_tokens?: number | null;
+  server_tool_use?: { web_search_requests?: number | null } | null;
 }
+
+const WEB_SEARCH_USD = 0.01; // Anthropic bills $10 / 1000 web searches
 
 /** Cost of one Anthropic call in USD. */
 export function anthropicCostUsd(
@@ -54,6 +57,7 @@ export function anthropicCostUsd(
     (usage.input_tokens * p.input) / m +
     ((usage.cache_read_input_tokens ?? 0) * p.cacheRead) / m +
     ((usage.cache_creation_input_tokens ?? 0) * writeRate) / m +
-    (usage.output_tokens * p.output) / m
+    (usage.output_tokens * p.output) / m +
+    (usage.server_tool_use?.web_search_requests ?? 0) * WEB_SEARCH_USD
   );
 }

@@ -17,6 +17,7 @@ export interface BrainRequest {
   userText: string;
   state: TurnState;
   maxTokens?: number;
+  webSearch?: boolean; // let the model run Anthropic's server-side web search this turn
 }
 
 export interface BrainMeta {
@@ -89,6 +90,11 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
           };
           const effort = EFFORT_MODELS[model];
           if (effort) params.output_config = { effort };
+          // Anthropic-hosted web search — runs inline, no client tool loop. Only
+          // when the router flagged a search-shaped turn (cost is per-search).
+          if (req.webSearch && MODEL_PRICING[model]) {
+            params.tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }];
+          }
           const s = anthropic.messages.stream(params);
           for await (const ev of s) {
             if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {

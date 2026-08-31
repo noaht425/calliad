@@ -123,3 +123,18 @@ modelled decks. No new keys — Scryfall is free.
 `/api/chat` scales `max_tokens` to the toolResult size (`1500 + len/8`, cap 4096; 1200
 otherwise) — a flat 1024 let adaptive-effort reasoning eat the whole budget and return no
 text. `call()` now says so honestly instead of the generic error.
+
+### ✅ Reach into the world — web search + multi-day weather (2026-08-31)
+Calliad had no way to search — only fetch a URL Noah gave it, and news/weather only in the
+morning brief.
+- **Web search:** `call()` gains `webSearch?: boolean` → adds Anthropic's server-side
+  `web_search_20260209` tool (`max_uses: 5`, runs inline, no client loop). `/api/chat` sets it
+  when the turn has no other tool result, is default mode, and matches search phrasing
+  ("look this up", "latest on X", "news about X", "what's happening with X", "as of today").
+  `anthropicCostUsd` now adds `$0.01 × web_search_requests` (≈$0.06 for a search turn).
+  Verified: "latest on the US Open" → real current results.
+- **Weather window:** `lib/tools/weather.ts` `runForecast(text)` — Open-Meteo daily up to 16
+  days (the forecast horizon; "next month" gets 16 + a note), `parseWindow` pulls the day count
+  and an optional place (`weather in Rome…` → geocoded). `isWeatherQuery` needs a weather word
+  **and** a window word, so "what's the weather" alone still falls to the brief. Wired as a
+  `toolResult` branch. Verified: this week / next 10 days / Seattle weekend / Rome.
