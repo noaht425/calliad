@@ -63,8 +63,12 @@ self-hosted Whisper WebSocket. Batch STT + streamed reply + streamed TTS is the 
 - `/api/chat` — a typed lyric fragment ("what's the song that goes '…'") → `findByLyrics` as a
   `toolResult`; a bare "name that song" with no audio → a hint to use the ♪ button.
 - **Needs:** `AUDD_API_TOKEN` (audd.io). Free tier for testing, ~$5/mo for regular use.
-- **Delegated coding** — "add X to project Y" → Claude Code on a branch → tests → diff for
-  review → explicit merge approval. A sandboxed runner + GitHub integration + guardrails; its
-  own project, not a session.
+- **Delegated coding** — **deferred 2026-08-31.** "add X to project Y" → Claude Code on a
+  branch → tests → diff → explicit merge. Vercel can't run it; needs an external runner. When
+  revived: **GitHub Actions dispatch** is the pick — Calliad fires `workflow_dispatch` on the
+  target repo, the workflow runs Claude Code and opens a PR (the PR is the diff, merging is the
+  approval). Setup cost: a GitHub token in Calliad's env + a reusable workflow +
+  `ANTHROPIC_API_KEY` secret in each target repo. Fallbacks: Anthropic Managed Agents (billed
+  beta), or a standalone Agent-SDK worker (Phase 4 infra).
 - **MTG sim front-end** — NL → sim invocation → run + interpret. Blocked on bringing the sim
-  (from Cowork) into the repo.
+  (from Cowork) into the repo — its invocation interface is unknown.
