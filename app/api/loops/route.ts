@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { allOpenLoops, upsertLoop, setLoopStatus, setLoopDue } from '@/lib/memory/loops';
-import { detectLoopsFromTurn } from '@/lib/memory/detect';
+import { detectFromTurn } from '@/lib/memory/detect';
 import { t1Available } from '@/lib/llm/gemini';
 
 export const runtime = 'nodejs';
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
 
   if (b.probe?.trim()) {
     const before = (await allOpenLoops(user.id)).length;
-    await detectLoopsFromTurn(user.id, b.probe.trim(), '(diagnostic run)', null);
+    await detectFromTurn(user.id, b.probe.trim(), '(diagnostic run)', null);
     const after = await allOpenLoops(user.id);
     return NextResponse.json({
       ok: true,

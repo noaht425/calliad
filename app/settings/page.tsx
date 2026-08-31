@@ -260,7 +260,7 @@ function LearnedFacts({ token }: { token: string }) {
   }, [token]);
   useEffect(() => { load(); }, [load]);
   if (!items.length)
-    return <p className="text-sm text-[var(--text-quiet)]">None yet — say &ldquo;remember that I…&rdquo; in chat and it lands here.</p>;
+    return <p className="text-sm text-[var(--text-quiet)]">None yet — just mention things in chat (&ldquo;I&rsquo;m allergic to shellfish&rdquo;, &ldquo;I study best late at night&rdquo;) and Calliad files them here to keep or drop. Saying &ldquo;remember that&hellip;&rdquo; still works too.</p>;
   return (
     <ul className="text-xs text-[var(--text-muted)] space-y-1 max-h-56 overflow-y-auto">
       {items.map((i) => (

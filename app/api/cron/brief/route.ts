@@ -64,10 +64,13 @@ async function handle(req: NextRequest) {
       // follow-up call stays the intended second touch — no double reminder.
       const med = await medCheckin(userId, { followUp: false }).catch((e) => ({ sent: false, reason: String(e) }));
 
-      const [tidyCount, calChanges, charges] = await Promise.all([
+      const [tidyCount, calChanges, charges, pendingFacts] = await Promise.all([
         scanForTidy(userId).then((x) => x.length).catch(() => 0),
         recentCalendarChanges(userId).catch(() => [] as string[]),
         upcomingCharges(userId).catch(() => [] as string[]),
+        adminClient.from('profile_facts').select('id', { count: 'exact', head: true })
+          .eq('user_id', userId).eq('confirmed', false).eq('source', 'chat')
+          .then((r) => r.count ?? 0, () => 0),
       ]);
       const notes: string[] = [];
       if (calChanges.length) {
@@ -78,6 +81,9 @@ async function handle(req: NextRequest) {
       }
       if (tidyCount) {
         notes.push(`Housekeeping: ${tidyCount} possible duplicate/stale item${tidyCount === 1 ? '' : 's'} in Noah's lists. End the brief with one short line telling him to say "tidy" to review them.`);
+      }
+      if (pendingFacts) {
+        notes.push(`I've picked up ${pendingFacts} thing${pendingFacts === 1 ? '' : 's'} about Noah from recent chats that he hasn't confirmed. One short line: Settings → "Learned about me" to keep or drop them.`);
       }
       const riddle = riddleOfTheDay();
       notes.push(`Riddle of the day — end the brief with exactly this line, verbatim, no answer: Riddle: ${riddle.q}`);

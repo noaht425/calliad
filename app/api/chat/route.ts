@@ -8,7 +8,7 @@ import { call } from '@/lib/brain/call';
 import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
 import { relevantLoops } from '@/lib/memory/loops';
-import { detectLoopsFromTurn } from '@/lib/memory/detect';
+import { detectFromTurn } from '@/lib/memory/detect';
 import { captureLink, listItems } from '@/lib/capture/link';
 import { runWebFetch } from '@/lib/tools/webfetch';
 import { runMorphology } from '@/lib/tools/morphology';
@@ -654,7 +654,7 @@ export async function POST(req: NextRequest) {
     // T1 pass: file any open loop this exchange opened. waitUntil keeps the
     // serverless function alive until it finishes (a bare promise would be reaped).
     waitUntil(
-      detectLoopsFromTurn(user.id, text, finalText, conversationId).catch((e) =>
+      detectFromTurn(user.id, text, finalText, conversationId).catch((e) =>
         console.error('[chat] loop detect', e),
       ),
     );
