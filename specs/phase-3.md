@@ -106,3 +106,20 @@ modelled decks. No new keys — Scryfall is free.
   → `getCards(extractCardNames())` → oracle-text block.
 - Verified against prod: fuzzy lookup, batch resolve, decklist parse, Archidekt fetch, role
   heuristics.
+
+### ✅ EDHREC-backed suggestions (2026-08-31)
+- `lib/tools/edhrec.ts` — unofficial `json.edhrec.com/pages/commanders/{slug}.json` (no key).
+  `commanderSlug`, `getCommanderRecs` (merges all card lists → `{name, pct, synergy, category}`),
+  `recDiff(deck, recs)` → staples-you're-missing (≥35% inclusion), highest-synergy-misses
+  (synergy ≥0.25), and nonland list cards EDHREC doesn't surface for the commander.
+- Folded into the deck-analysis toolResult whenever a commander resolves; also standalone
+  ("what am I missing for Atraxa", "edhrec …" → `isEdhrecQuery` → `extractCardNames`[0] → recs).
+  The block tells the model inclusion % is popularity not mandate, synergy is the stronger add
+  signal.
+- Verified: Juri aristocrats list → correctly flagged missing Mayhem Devil (75%) / Pitiless
+  Plunderer / Ashnod's Altar and the bolted-on haste-beatdown cards as not-EDHREC-Juri.
+
+### Fix — empty reply on tool-heavy turns
+`/api/chat` scales `max_tokens` to the toolResult size (`1500 + len/8`, cap 4096; 1200
+otherwise) — a flat 1024 let adaptive-effort reasoning eat the whole budget and return no
+text. `call()` now says so honestly instead of the generic error.

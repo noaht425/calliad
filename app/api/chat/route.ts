@@ -33,6 +33,7 @@ import {
 import {
   runSimulation, runTranscript, parseSimRequest, isSimRequest, isTranscriptRequest,
 } from '@/lib/tools/mtgsim';
+import { getCommanderRecs, recDiff, recBlock, isEdhrecQuery } from '@/lib/tools/edhrec';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -230,9 +231,22 @@ export async function POST(req: NextRequest) {
   } else if (looksLikeDecklist(text) || (isDeckHelp(text) && deckUrl)) {
     const listText = deckUrl ? await fetchDeckFromUrl(deckUrl).catch(() => null) : text;
     const a = listText ? await analyzeDeck(listText).catch(() => null) : null;
-    toolResult = a
-      ? deckBlock(a) + (isDeckHelp(text) || looksLikeDecklist(text) ? `\n\nNoah's message: ${text.slice(0, 500)}` : '')
-      : `## Deck analysis\nCouldn't read a decklist from that${deckUrl ? ' link' : ''}. Ask Noah to paste the list or a Moxfield/Archidekt URL.`;
+    if (a) {
+      let block = deckBlock(a) + `\n\nNoah's message: ${text.slice(0, 500)}`;
+      if (a.commander) {
+        const recs = await getCommanderRecs(a.commander.name).catch(() => null);
+        if (recs) block += '\n\n' + recBlock(recs, recDiff(a, recs));
+      }
+      toolResult = block;
+    } else {
+      toolResult = `## Deck analysis\nCouldn't read a decklist from that${deckUrl ? ' link' : ''}. Ask Noah to paste the list or a Moxfield/Archidekt URL.`;
+    }
+  } else if (isEdhrecQuery(text)) {
+    const name = extractCardNames(text)[0];
+    const recs = name ? await getCommanderRecs(name).catch(() => null) : null;
+    toolResult = recs
+      ? recBlock(recs)
+      : `## EDHREC\nCouldn't tell which commander Noah means${name ? ` ("${name}" — not found on EDHREC)` : ''}. Ask him to name it.`;
   } else if (isCardQuestion(text)) {
     const names = extractCardNames(text);
     const { found } = names.length ? await getCards(names) : { found: [] };
