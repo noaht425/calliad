@@ -5,6 +5,7 @@ import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
 import { getBriefExtras } from '@/lib/brief/extras';
 import { relevantLoops } from '@/lib/memory/loops';
+import { profileSections, learnedFacts } from '@/lib/brain/profile';
 import type { TurnState } from '@/lib/brain/prompt';
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
@@ -76,7 +77,11 @@ export async function composeBrief(
       }]
     : [];
 
-  const state: TurnState = { now, tz: TZ, recent, integrations, loops };
+  const state: TurnState = {
+    now, tz: TZ, recent, integrations, loops,
+    profileSections: profileSections('schedule deadlines assignments birthday work timesheet study', 'brief'),
+    learned: (await learnedFacts(userId).catch(() => '')) || undefined,
+  };
 
   const conversationId = randomUUID();
   await adminClient.from('conversations').insert({

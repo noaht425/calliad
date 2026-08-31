@@ -57,6 +57,37 @@ function TasteLog({ token }: { token: string }) {
   );
 }
 
+function LearnedFacts({ token }: { token: string }) {
+  const [items, setItems] = useState<{ id: string; section: string; key: string; value: string; confirmed: boolean; source: string }[]>([]);
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const load = useCallback(async () => {
+    const r = await fetch('/api/facts', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) setItems((await r.json()).items ?? []);
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+  if (!items.length)
+    return <p className="text-sm text-zinc-400">None yet — say &ldquo;remember that I…&rdquo; in chat and it lands here.</p>;
+  return (
+    <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 max-h-56 overflow-y-auto">
+      {items.map((i) => (
+        <li key={i.id} className="flex gap-2">
+          <span className="flex-1">
+            <span className="text-zinc-400">{i.section}/</span>{i.key}: {i.value}
+            {!i.confirmed && <span className="text-amber-600"> · unconfirmed</span>}
+          </span>
+          {!i.confirmed && (
+            <button className="underline" onClick={async () => {
+              await fetch('/api/facts', { method: 'PATCH', headers: h, body: JSON.stringify({ id: i.id, confirmed: true }) });
+              load();
+            }}>keep</button>
+          )}
+          <button className="underline" onClick={async () => { await fetch(`/api/facts?id=${i.id}`, { method: 'DELETE', headers: h }); load(); }}>del</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function QuizDeck({ token }: { token: string }) {
   const [c, setC] = useState<{ total: number; due: number }>({ total: 0, due: 0 });
   const [items, setItems] = useState<{ id: string; lang: string; prompt: string; answer: string; box: number }[]>([]);
@@ -412,6 +443,12 @@ export default function SettingsPage() {
             ))}
           </ul>
         )}
+      </section>
+
+      {/* ── Learned facts ──────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Learned about you</h2>
+        <LearnedFacts token={session.access_token} />
       </section>
 
       {/* ── Taste log ───────────────────────────────────────────────── */}

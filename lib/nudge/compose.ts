@@ -50,7 +50,11 @@ export async function composeNudge(userId: string, opts: { force?: boolean } = {
     title: `Nudge: ${loop.title}`.slice(0, 80),
   });
 
-  const state: TurnState = { now, tz: TZ, recent: [], integrations, loops: [loop] };
+  const { profileSections } = await import('@/lib/brain/profile');
+  const state: TurnState = {
+    now, tz: TZ, recent: [], integrations, loops: [loop],
+    profileSections: profileSections('assignment exam due study deadline', 'study-coach'),
+  };
   const { meta, stream } = await call({
     purpose: 'brief', tier: 'T2', proactive: true, conversationId, userText: instruction, state, maxTokens: 400,
   });

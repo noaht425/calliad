@@ -11,9 +11,11 @@ import { relevantLoops } from '@/lib/memory/loops';
 import { detectLoopsFromTurn } from '@/lib/memory/detect';
 import { captureLink } from '@/lib/capture/link';
 import { runMorphology } from '@/lib/tools/morphology';
+import { profileSections, learnedFacts } from '@/lib/brain/profile';
 import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
 import { upsertLoop } from '@/lib/memory/loops';
+import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo } from '@/lib/actions/detect';
 import { wouldILike } from '@/lib/taste/judge';
@@ -82,6 +84,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ── silent tier: "remember that I…" → confirmed profile_fact, no gate ────
+  if (isExplicitRemember(text) && !isCalendarWrite(text)) {
+    const saved = await saveFactFromText(user.id, text).catch(() => null);
+    if (saved) return say(`Got it — I'll remember that: ${saved}`, 'fact-saved');
+    // nothing concrete to store → fall through to the brain
+  }
+
   // ── confirm tier: calendar write → propose, wait for yes ────────────────
   if (isCalendarWrite(text)) {
     const ev = await extractEvent(text).catch(() => null);
@@ -143,11 +152,12 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops, morphResult] = await Promise.all([
+  const [recent, integrations, loops, morphResult, learned] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
     decision.tools.includes('morphology') ? runMorphology(text).catch(() => undefined) : Promise.resolve(undefined),
+    learnedFacts(user.id).catch(() => ''),
   ]);
 
   let toolResult = morphResult;
@@ -168,6 +178,8 @@ export async function POST(req: NextRequest) {
     now: new Date(), tz: TZ, recent, integrations, loops,
     mode: effectiveMode === 'default' ? undefined : effectiveMode,
     toolResult,
+    profileSections: profileSections(text, effectiveMode),
+    learned: learned || undefined,
   };
   const { meta, stream } = await call({
     purpose: 'chat',

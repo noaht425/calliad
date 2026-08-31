@@ -8,6 +8,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import type { IntegrationContext } from '@/lib/integrations/context';
 import type { OpenLoop } from '@/lib/memory/loops';
 import type { Mode } from '@/lib/router/route';
+import { coreProfile, renderSections } from '@/lib/brain/profile';
 
 // ── Layer 5: mode overlays (short; rendered only when mode != default) ──────
 const MODE_OVERLAY: Partial<Record<Mode, string>> = {
@@ -52,22 +53,8 @@ const OPERATING_RULES = `
 - Tiers. Lower tiers keep replies shorter and tool use more consolidated.
 `.trim();
 
-// ── Layer 3: profile slice (Phase 0 = whole file minus Music deep-dive + inputs refs) ──
-function loadProfileSlice(): string {
-  const raw = fs.readFileSync(path.join(CONTENT_DIR, 'profile.md'), 'utf8');
-  return raw
-    .split(/^## /m)
-    .filter((section, i) => {
-      if (i === 0) return true; // preamble / header
-      const heading = section.split('\n', 1)[0].toLowerCase();
-      if (heading.startsWith('music')) return false;
-      return true;
-    })
-    .join('## ')
-    .replace(/^.*inputs\/.*$/gm, '') // drop stray "see inputs/…" pointer lines
-    .trim();
-}
-const PROFILE_SLICE = loadProfileSlice();
+// ── Layer 3: profile CORE (cached). Per-turn relevant sections ride in layer 4. ──
+const PROFILE_CORE = coreProfile();
 
 // ── Layer 4: current state, per turn ────────────────────────────────────────
 export interface TurnState {
@@ -78,6 +65,8 @@ export interface TurnState {
   loops?: OpenLoop[];                // relevant open loops (working state)
   mode?: Mode;                       // conversation mode (overlay in layer 5)
   toolResult?: string;              // e.g. morphology tool output, fenced by caller
+  profileSections?: string[];       // extra profile.md headings relevant to this turn
+  learned?: string;                 // confirmed profile_facts block
 }
 
 function renderLoops(loops: OpenLoop[], tz: string): string {
@@ -142,15 +131,19 @@ export function assemble(userText: string, state: TurnState): AssembledPrompt {
       text: `${PERSONA}\n\n${OPERATING_RULES}`,
       cache_control: { type: 'ephemeral', ttl: '1h' },
     },
-    // Layer 3 — profile slice, second cache breakpoint (stable within a session).
+    // Layer 3 — profile CORE, second cache breakpoint (stable within a session).
     {
       type: 'text',
-      text: `## About Noah\n\n${PROFILE_SLICE}`,
+      text: `## About Noah (core — always in)\n\n${PROFILE_CORE}`,
       cache_control: { type: 'ephemeral', ttl: '1h' },
     },
     // Layer 4 — fresh every turn, MUST sit after the last breakpoint.
     { type: 'text', text: nowLine },
   ];
+
+  const extra = renderSections(state.profileSections ?? []);
+  if (extra) system.push({ type: 'text', text: `## About Noah — relevant to this turn\n\n${extra}` });
+  if (state.learned) system.push({ type: 'text', text: state.learned });
 
   if (state.integrations) {
     system.push({ type: 'text', text: renderIntegrations(state.integrations, state.tz) });
