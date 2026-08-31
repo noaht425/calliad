@@ -19,6 +19,44 @@ interface IntegrationsState {
 const btn = 'rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium px-3 py-2 disabled:opacity-40';
 const field = 'w-full rounded-lg border border-zinc-200 dark:border-zinc-800 bg-transparent px-3 py-2 text-sm';
 
+function QuizDeck({ token }: { token: string }) {
+  const [c, setC] = useState<{ total: number; due: number }>({ total: 0, due: 0 });
+  const [items, setItems] = useState<{ id: string; lang: string; prompt: string; answer: string; box: number }[]>([]);
+  const [p, setP] = useState(''); const [a, setA] = useState(''); const [lang, setLang] = useState('lat');
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const load = useCallback(async () => {
+    const r = await fetch('/api/quiz', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) { const j = await r.json(); setC({ total: j.total, due: j.due }); setItems(j.items ?? []); }
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">{c.due} due · {c.total} in deck. Say &ldquo;quiz me&rdquo; in chat to review.</p>
+      <div className="flex flex-wrap gap-2">
+        <select className={field + ' w-auto'} value={lang} onChange={(e) => setLang(e.target.value)}>
+          <option value="lat">Latin</option><option value="grc">Greek</option><option value="ita">Italian</option>
+        </select>
+        <input className={field + ' flex-1 min-w-[8rem]'} placeholder="prompt" value={p} onChange={(e) => setP(e.target.value)} />
+        <input className={field + ' flex-1 min-w-[8rem]'} placeholder="answer" value={a} onChange={(e) => setA(e.target.value)} />
+        <button className={btn} disabled={!p || !a} onClick={async () => {
+          await fetch('/api/quiz', { method: 'POST', headers: h, body: JSON.stringify({ lang, prompt: p, answer: a }) });
+          setP(''); setA(''); load();
+        }}>Add</button>
+      </div>
+      {items.length > 0 && (
+        <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 max-h-48 overflow-y-auto">
+          {items.map((i) => (
+            <li key={i.id} className="flex gap-2">
+              <span className="flex-1">[{i.lang}] {i.prompt} → {i.answer} <span className="text-zinc-400">(box {i.box})</span></span>
+              <button className="underline" onClick={async () => { await fetch(`/api/quiz?id=${i.id}`, { method: 'DELETE', headers: h }); load(); }}>del</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function SetPassword() {
   const [pw, setPw] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
@@ -336,6 +374,12 @@ export default function SettingsPage() {
             ))}
           </ul>
         )}
+      </section>
+
+      {/* ── Quiz deck ───────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Quiz deck</h2>
+        <QuizDeck token={session.access_token} />
       </section>
 
       {/* ── Open loops ──────────────────────────────────────────────── */}

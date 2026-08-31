@@ -11,6 +11,8 @@ import { relevantLoops } from '@/lib/memory/loops';
 import { detectLoopsFromTurn } from '@/lib/memory/detect';
 import { captureLink } from '@/lib/capture/link';
 import { runMorphology } from '@/lib/tools/morphology';
+import { quizTurn } from '@/lib/quiz/session';
+import { addItem as addQuizItem } from '@/lib/quiz/items';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -34,10 +36,11 @@ export async function POST(req: NextRequest) {
   // ── conversation ────────────────────────────────────────────────────────
   let conversationId = body.conversationId;
   let currentMode: Mode = 'default';
+  let modeState: Record<string, unknown> = {};
   if (conversationId) {
-    const { data } = await adminClient.from('conversations').select('id, mode').eq('id', conversationId).maybeSingle();
+    const { data } = await adminClient.from('conversations').select('id, mode, mode_state').eq('id', conversationId).maybeSingle();
     if (!data) conversationId = undefined;
-    else currentMode = (data.mode as Mode) ?? 'default';
+    else { currentMode = (data.mode as Mode) ?? 'default'; modeState = (data.mode_state as Record<string, unknown>) ?? {}; }
   }
   if (!conversationId) {
     conversationId = randomUUID();
@@ -49,6 +52,17 @@ export async function POST(req: NextRequest) {
   await audit.log('inbound_message', 'noah', conversationId, { text, surface: 'pwa' });
   await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'user', content: text });
   await adminClient.from('conversations').update({ last_at: new Date().toISOString() }).eq('id', conversationId);
+
+  // ── inline quiz-item add: "quiz: PROMPT = ANSWER" ("greek quiz: ..." sets lang) ──
+  const qm = text.match(/^(?:(latin|greek|italian|lat|grc|ita)\s+)?quiz[:\-]\s*(.+?)\s*=\s*(.+)$/i);
+  if (qm) {
+    const langMap: Record<string, string> = { latin: 'lat', greek: 'grc', italian: 'ita', lat: 'lat', grc: 'grc', ita: 'ita' };
+    const r = await addQuizItem(user.id, { lang: langMap[qm[1]?.toLowerCase() ?? ''] ?? 'lat', prompt: qm[2], answer: qm[3] });
+    const reply = r === 'added' ? `Added to your quiz deck: ${qm[2]} → ${qm[3]}.` : r === 'exists' ? `Already in the deck.` : `Couldn't add that.`;
+    await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply });
+    await audit.log('outbound_message', 'calliad', conversationId, { text: reply, surface: 'pwa', reason: 'quiz-add' });
+    return streamResponse(conversationId, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
+  }
 
   // ── frictionless capture: one URL, not a question, little other text ──
   const urls = text.match(/https?:\/\/[^\s<>"')]+/g);
@@ -88,12 +102,19 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops, toolResult] = await Promise.all([
+  const [recent, integrations, loops, morphResult] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
     decision.tools.includes('morphology') ? runMorphology(text).catch(() => undefined) : Promise.resolve(undefined),
   ]);
+
+  let toolResult = morphResult;
+  if (effectiveMode === 'quiz') {
+    const q = await quizTurn(user.id, conversationId, text, modeState).catch(() => null);
+    if (q) toolResult = q.toolResult;
+  }
+
   const state: TurnState = {
     now: new Date(), tz: TZ, recent, integrations, loops,
     mode: effectiveMode === 'default' ? undefined : effectiveMode,
