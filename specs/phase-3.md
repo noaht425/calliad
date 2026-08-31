@@ -70,5 +70,16 @@ self-hosted Whisper WebSocket. Batch STT + streamed reply + streamed TTS is the 
   approval). Setup cost: a GitHub token in Calliad's env + a reusable workflow +
   `ANTHROPIC_API_KEY` secret in each target repo. Fallbacks: Anthropic Managed Agents (billed
   beta), or a standalone Agent-SDK worker (Phase 4 infra).
-- **MTG sim front-end** — NL → sim invocation → run + interpret. Blocked on bringing the sim
-  (from Cowork) into the repo — its invocation interface is unknown.
+- **MTG sim front-end** — NL → sim invocation → run + interpret.
+  - Sim lives at `~/Desktop/mtg_sim_standalone_3` — pure-Python EDH engine, 7 hand-coded decks
+    (`archelos lightpaws lathril rocco persephone ares hamza`), no arbitrary decklists.
+  - **HTTP wrapper written** (`server.py` + Dockerfile in that folder, `WRAPPER.md` has deploy
+    steps): `POST /transcript` (one verbose game, sync), `POST /simulate` (async job, process
+    pool — ~300 games/2 s, ~5000/40 s) → `GET /jobs/{id}` with win-rates / win-reason
+    histogram / avg turn / crashes. Bearer `SIM_TOKEN`. Imports `engine` directly so engine
+    updates need only a redeploy, no wrapper change.
+  - **Waiting on:** Noah deploys it (Fly/Railway/Render) → gives the URL + token.
+  - **Then, Calliad side:** env `MTG_SIM_URL` / `MTG_SIM_TOKEN`, `lib/tools/mtgsim.ts` adapter,
+    intent detection ("simulate rocco vs hamza", "run the pod 3000×"), the auth gate (a big run
+    costs compute), toolResult narration. Deckbuilding half ("buff Archelos cheaply") is
+    separate — Scryfall, no sim.
