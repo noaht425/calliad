@@ -43,6 +43,7 @@ import { detectRelationshipMention, relationshipFor, findContacts, contactContex
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
 import { isTidyRequest, scanForTidy, applyTidyItems, type TidyItem } from '@/lib/memory/tidy';
 import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/travel/trips';
+import { isSubscriptionAdd, isSubscriptionQuery, extractSubscription, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -269,6 +270,17 @@ export async function POST(req: NextRequest) {
     // couldn't pin it down → fall through to the brain
   }
 
+  // ── silent tier: "I pay $12/mo for Spotify" → subscriptions ────────────
+  if (isSubscriptionAdd(text) && !isTaskAdd(text)) {
+    const sub = await extractSubscription(text).catch(() => null);
+    if (sub) {
+      const how = await upsertSubscription(user.id, sub);
+      const amt = (sub.amount_cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+      return say(`${how === 'added' ? 'Tracking' : 'Updated'} ${sub.name} — ${amt}/${sub.cadence.replace('ly', '')}${sub.next_charge ? `, next ${sub.next_charge}` : ''}.`, 'subscription-add');
+    }
+    // couldn't parse → fall through
+  }
+
   // ── silent tier: a reaction to a book/show/film/game → taste_log ────────
   // Runs before the profile-fact path so "remember I loved X" lands in the
   // taste log (verdict + why), not as a loose profile fact.
@@ -455,6 +467,8 @@ export async function POST(req: NextRequest) {
     toolResult = target
       ? await runWebFetch(target, text).catch(() => undefined)
       : `## Web fetch\nNoah asked about a saved link but his reading list is empty.`;
+  } else if (isSubscriptionQuery(text)) {
+    toolResult = await subscriptionsSummary(user.id).catch(() => undefined);
   } else if (isRestaurantTasteQuery(text)) {
     toolResult = await restaurantTasteBlock(user.id, text).catch(() => undefined);
   } else if (/\b(would i (like|enjoy|hate|bounce off)|should i (watch|read|play|start|bother with|eat at|go to)|do you think i'?d (like|enjoy)|worth (watching|reading|playing|a visit|going to)|think i'?d (like|enjoy)|what did i (rate|think of|give)|have i (been (to|there)|tried|eaten at)|my (score|rating) (for|of|on))\b/i.test(text)) {

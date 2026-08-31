@@ -10,6 +10,7 @@ import { syncContacts } from '@/lib/integrations/icloud-contacts';
 import { scanGmailLabel } from '@/lib/integrations/gmail';
 import { medCheckin } from '@/lib/health/meds';
 import { scanForTidy } from '@/lib/memory/tidy';
+import { upcomingCharges } from '@/lib/money/subscriptions';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -62,13 +63,17 @@ async function handle(req: NextRequest) {
       // follow-up call stays the intended second touch — no double reminder.
       const med = await medCheckin(userId, { followUp: false }).catch((e) => ({ sent: false, reason: String(e) }));
 
-      const [tidyCount, calChanges] = await Promise.all([
+      const [tidyCount, calChanges, charges] = await Promise.all([
         scanForTidy(userId).then((x) => x.length).catch(() => 0),
         recentCalendarChanges(userId).catch(() => [] as string[]),
+        upcomingCharges(userId).catch(() => [] as string[]),
       ]);
       const notes: string[] = [];
       if (calChanges.length) {
         notes.push(`Calendar changed since yesterday: ${calChanges.join('; ')}. Mention the relevant ones near the schedule, briefly.`);
+      }
+      if (charges.length) {
+        notes.push(`Subscriptions renewing in the next few days: ${charges.join('; ')}. One short line if relevant.`);
       }
       if (tidyCount) {
         notes.push(`Housekeeping: ${tidyCount} possible duplicate/stale item${tidyCount === 1 ? '' : 's'} in Noah's lists. End the brief with one short line telling him to say "tidy" to review them.`);

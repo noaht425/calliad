@@ -141,6 +141,53 @@ function Restaurants({ token }: { token: string }) {
   );
 }
 
+function Subscriptions({ token }: { token: string }) {
+  const [items, setItems] = useState<{ id: string; name: string; amount_cents: number; currency: string; cadence: string; next_charge: string | null }[]>([]);
+  const [total, setTotal] = useState(0);
+  const [name, setName] = useState(''); const [amt, setAmt] = useState(''); const [cad, setCad] = useState('monthly');
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const money = (c: number) => (c / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+  const load = useCallback(async () => {
+    const r = await fetch('/api/subscriptions', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) { const j = await r.json(); setItems(j.items ?? []); setTotal(j.monthlyTotalCents ?? 0); }
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+  return (
+    <div className="space-y-2">
+      {items.length > 0 && (
+        <>
+          <p className="text-sm text-[var(--text-muted)]">{items.length} tracked · ~{money(total)}/mo · {money(total * 12)}/yr</p>
+          <ul className="text-xs text-[var(--text-muted)] space-y-1 max-h-64 overflow-y-auto">
+            {items.map((i) => (
+              <li key={i.id} className="flex gap-2">
+                <span className="flex-1">{i.name} <span className="font-medium">{money(i.amount_cents)}</span><span className="text-[var(--text-quiet)]">/{i.cadence.replace('ly', '')}{i.next_charge ? ` · next ${i.next_charge}` : ''}</span></span>
+                <button className="underline" onClick={async () => { await fetch(`/api/subscriptions?id=${i.id}`, { method: 'DELETE', headers: h }); load(); }}>del</button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <div className="flex flex-wrap gap-2 items-center">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className="rounded border px-2 py-1 text-xs" style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }} />
+        <input value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="$" inputMode="decimal" className="w-16 rounded border px-2 py-1 text-xs" style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }} />
+        <select value={cad} onChange={(e) => setCad(e.target.value)} className="rounded border px-2 py-1 text-xs" style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}>
+          <option value="weekly">weekly</option><option value="monthly">monthly</option><option value="quarterly">quarterly</option><option value="yearly">yearly</option>
+        </select>
+        <button
+          className="underline text-xs"
+          onClick={async () => {
+            const a = parseFloat(amt);
+            if (!name.trim() || !a || a <= 0) return;
+            await fetch('/api/subscriptions', { method: 'POST', headers: h, body: JSON.stringify({ name: name.trim(), amount: a, cadence: cad }) });
+            setName(''); setAmt(''); load();
+          }}
+        >add</button>
+      </div>
+      {!items.length && <p className="text-xs text-[var(--text-quiet)]">Or just tell Calliad in chat: &ldquo;I pay $12/mo for Spotify&rdquo;.</p>}
+    </div>
+  );
+}
+
 function ThemePicker() {
   const { theme, setTheme } = useTheme();
   return (
@@ -670,6 +717,12 @@ export default function SettingsPage() {
       <section className="mb-8">
         <h2 className={label}>Restaurants</h2>
         <Restaurants token={session.access_token} />
+      </section>
+
+      {/* ── Subscriptions ─────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>Subscriptions</h2>
+        <Subscriptions token={session.access_token} />
       </section>
 
       {/* ── Quiz deck ───────────────────────────────────────────────── */}
