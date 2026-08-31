@@ -61,6 +61,11 @@ morphology → spaced repetition → confirmation-gated writes.*
   ground truth; NO spoilers, weigh myth-retelling fidelity.
 - `/api/chat` detects "would I like / should I watch|read|play"; `/api/taste` + Settings manager.
 - **Optional:** `TMDB_API_KEY` (themoviedb.org) for film/show metadata.
+- **Write path (2026-08-31):** `lib/taste/capture.ts` — a reaction to a named work in chat
+  ("just finished X, loved it" / "bailed on Y" / "Z was mid") → `isTasteReaction` gate → T1
+  extract `{title, kind, verdict, why}` → upsert `taste_log` (match on title; changed verdict
+  updates in place). Silent tier, runs before the profile-fact path so "remember I loved X"
+  lands here, not in `profile_facts`. Seed markdown now drifts behind the DB by design.
 
 ### ✅ Profile slicing + learned facts
 - `lib/brain/profile.ts` — `content/profile.md` split by `## ` heading. Always-in CORE

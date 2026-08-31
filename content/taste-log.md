@@ -9,6 +9,11 @@ Feeds "would I like this?" (pattern L in PLAN.md).*
 (`inputs/game-playtime-2026-08.md`) — those verdicts are `loved`/`liked` by inference, correct
 any that are off. **Negatives + bail patterns added 2026-08-30** (bottom of the file).
 
+*This table is the seed snapshot. The live source of truth is the `taste_log` table — Calliad
+adds/updates rows from chat ("just finished X, loved it") and the Settings → Taste log panel,
+so the DB drifts ahead of this file. The `## What makes Noah bail` section below is what's
+read at runtime.*
+
 | Date | Title | Type | Verdict | Why |
 |------|-------|------|---------|-----|
 | 2026-08 | Dungeons & Dragons: Honor Among Thieves | film | loved | favorites list; D&D |

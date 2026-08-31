@@ -16,6 +16,7 @@ import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
 import { upsertLoop } from '@/lib/memory/loops';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
+import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo } from '@/lib/actions/detect';
 import { wouldILike } from '@/lib/taste/judge';
@@ -82,6 +83,15 @@ export async function POST(req: NextRequest) {
       await upsertLoop(user.id, { title: task.slice(0, 120), source: 'manual', tags: ['task'] });
       return say(`Added: ${task}.`, 'task-add');
     }
+  }
+
+  // ── silent tier: a reaction to a book/show/film/game → taste_log ────────
+  // Runs before the profile-fact path so "remember I loved X" lands in the
+  // taste log (verdict + why), not as a loose profile fact.
+  if (isTasteReaction(text)) {
+    const logged = await saveTasteFromText(user.id, text).catch(() => null);
+    if (logged) return say(logged, 'taste-logged');
+    // not actually a media reaction → fall through
   }
 
   // ── silent tier: "remember that I…" → confirmed profile_fact, no gate ────
