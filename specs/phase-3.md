@@ -29,9 +29,29 @@ Hold/tap-to-talk in the PWA → STT → the normal brain → streamed text reply
 **Needs:** `GROQ_API_KEY` in `.env.local` + Vercel. Free tier covers personal use
 (turbo ≈ $0.04/hr of audio, and the free tier's minute allowance is generous).
 
-**Not done in Stage 1:** streaming STT/TTS (Stage 2), wake word (Stage 3), photo capture,
-a nicer cloud TTS voice, `speechSynthesis` voice selection.
+## ✅ Stage 2 — hold-to-talk + streaming TTS (2026-08-31)
 
-## ⏭ Next in Phase 3
-- [ ] Stage 2 — live push-to-talk, streamed both directions (~1 s turnaround).
-- [ ] Name-that-song (fingerprint API), delegated coding, MTG sim front-end.
+- **`lib/voice/speak.ts`** — `SentenceSpeaker`: `feed(accSoFar)` on each stream delta speaks
+  any newly-complete sentence; `flush(full)` on done speaks the rest. Speech starts
+  mid-response instead of after it. Browser `speechSynthesis` queues utterances in order.
+- **Chat + GlobalChatPanel** — mic is press-and-hold: `onPointerDown` records, pointer
+  up/leave/cancel stops and sends. Pointer capture so the gesture survives the finger sliding
+  off the button. `Chat.tsx` also gained the TTS toggle (parity with the panel).
+
+**Still open in Stage 2:** true streaming STT for a ~1 s turnaround. Groq's transcription API
+is batch-only; real streaming needs Deepgram / AssemblyAI (paid, free credits) or a
+self-hosted Whisper WebSocket. Batch STT + streamed reply + streamed TTS is the current shape.
+
+## ⏭ Rest of Phase 3 — each needs a decision or an external piece
+
+- **Streaming STT** (finishes Stage 2's latency goal) — pick a provider (Deepgram/AssemblyAI)
+  and accept the recurring cost, or stand up self-hosted Whisper.
+- **Stage 3 — wake word** ("Calliad" / "Cal", on-device) — Picovoice Porcupine (free tier,
+  browser SDK, access key) or openWakeWord. Moderate build; lower value than Stage 2 polish.
+- **Name-that-song** — AudD or ACRCloud fingerprint API (trial then ~$3–5/mo). Small feature,
+  reuses the mic infra. Needs a key.
+- **Delegated coding** — "add X to project Y" → Claude Code on a branch → tests → diff for
+  review → explicit merge approval. A sandboxed runner + GitHub integration + guardrails; its
+  own project, not a session.
+- **MTG sim front-end** — NL → sim invocation → run + interpret. Blocked on bringing the sim
+  (from Cowork) into the repo.
