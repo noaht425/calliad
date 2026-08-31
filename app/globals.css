@@ -1,19 +1,341 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ═══════════════════════════════════════════════════════════════════════════
+   CALLIAD DESIGN SYSTEM — TOKENS
+   Source: design_handoff_calliad-themes/DESIGN_SYSTEM.md §2 + §9
+
+   Rules:
+   - All component CSS/JSX references these tokens; never a literal hex.
+   - A theme block replaces values; component code never changes.
+   - Every token name here is the canonical name from the design system.
+   - Tailwind utilities (bg-paper, text-accent, etc.) are wired below.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Standard (default) ─────────────────────────────────────────────────── */
+:root,
+[data-theme="standard"] {
+  /* Surfaces */
+  --paper:          #F7F5EF;
+  --paper-sheet:    #F2EFE6;
+  --surface:        #FFFFFF;
+  --surface-quiet:  #FBFAF6;
+  --band:           #FAF9F4;
+
+  /* Borders & dividers */
+  --border:         #E5E1D6;
+  --border-sheet:   #E0DBCD;
+  --border-quiet:   #EDEAE0;
+  --border-chip:    #E0DCCF;
+  --divider:        #F0EDE3;
+  --divider-quiet:  #F2F0E8;
+
+  /* Text hierarchy */
+  --text:           #1B1B18;
+  --text-body:      #2B2B24;
+  --text-muted:     #7A786F;
+  --text-tertiary:  #93918A;
+  --text-quiet:     #A3A196;
+  --value-quiet:    #8C8A7F;
+  --tab-off:        #ADAB9F;
+
+  /* Accent — forest green */
+  --accent:         #3F6B4F;
+  --accent-deep:    #2E5039;
+  --accent-wash:    #EAF0E9;
+  --accent-wash-2:  #F1F5F0;
+  --accent-border:  #C9D6C6;
+  --accent-border-soft: #D3DFD1;
+  --accent-rule:    #D7E1D5;
+  --accent-ink:     #4A5A48;
+  --on-accent:      #F7F5EF;
+
+  /* Secondary — warm (people-events only; never interactive) */
+  --warm-wash:      #F3EEE4;
+  --warm-ink:       #9A7A46;
+
+  /* Neutral tile (More sheet, generic items) */
+  --neutral-tile:   #F1F1EC;
+  --neutral-icon:   #7E7D74;
+
+  /* Header (plain paper for Standard) */
+  --header-bg:      #F7F5EF;
+  --header-text:    #1B1B18;
+  --header-day:     #7A786F;
+
+  /* Overlay */
+  --scrim:          rgba(27,27,24,0.28);
+  --shadow-sheet:   0 -8px 28px rgba(27,27,24,0.07);
+  --shadow-more:    0 -8px 28px rgba(27,27,24,0.14);
+
+  /* Display serif: Newsreader for Standard + Italy */
+  --display-font:   var(--font-newsreader);
+
+  /* Legacy — kept for backward compat while old screens exist */
+  --background:     #ffffff;
+  --foreground:     #171717;
 }
 
+/* ─── Italy ──────────────────────────────────────────────────────────────── */
+[data-theme="italy"] {
+  --paper:          #F8F4EA;
+  --paper-sheet:    #F2ECDF;
+  --surface:        #FFFDF8;
+  --surface-quiet:  #F5F0E4;
+  --band:           #F4EEE0;
+
+  --border:         #E7DFCE;
+  --border-sheet:   #DCCFB8;
+  --border-quiet:   #E2D9C6;
+  --border-chip:    #E4DAC6;
+  --divider:        #F1EBDD;
+  --divider-quiet:  #EDE5D5;
+
+  --text:           #1F1B15;
+  --text-body:      #2C261D;
+  --text-muted:     #7C7362;
+  --text-tertiary:  #948B79;
+  --text-quiet:     #A39A87;
+  --value-quiet:    #8A8170;
+  --tab-off:        #A9A08C;
+
+  --accent:         #A24A25;
+  --accent-deep:    #6A3418;
+  --accent-wash:    #F8E9DF;
+  --accent-wash-2:  #F8E9DF;
+  --accent-border:  #E3C3AE;
+  --accent-border-soft: #E8CEBA;
+  --accent-rule:    #DDBFA6;
+  --accent-ink:     #6A3418;
+  --on-accent:      #FFFDF8;
+
+  --warm-wash:      #ECEFDD;
+  --warm-ink:       #5A6733;
+
+  --neutral-tile:   #F0EBE0;
+  --neutral-icon:   #7C7462;
+
+  --header-bg:      #F8F4EA;
+  --header-text:    #1F1B15;
+  --header-day:     #7C7362;
+
+  --scrim:          rgba(31,27,21,0.28);
+  --shadow-sheet:   0 -8px 28px rgba(31,27,21,0.07);
+  --shadow-more:    0 -8px 28px rgba(31,27,21,0.14);
+
+  --display-font:   var(--font-newsreader);
+}
+
+/* ─── Workshop (the dark theme) ──────────────────────────────────────────── */
+[data-theme="workshop"] {
+  --paper:          #17181A;
+  --paper-sheet:    #1E2024;
+  --surface:        #23262B;
+  --surface-quiet:  #1A1C20;
+  --band:           #1C1E22;
+
+  --border:         #33373E;
+  --border-sheet:   #2D3138;
+  --border-quiet:   #2B2F35;
+  --border-chip:    #3A3F46;
+  --divider:        #2B2F35;
+  --divider-quiet:  #272B31;
+
+  --text:           #F1F0ED;
+  --text-body:      #DEDDD8;
+  --text-muted:     #9AA0A7;
+  --text-tertiary:  #9AA0A7;
+  --text-quiet:     #7E848B;
+  --value-quiet:    #D9A521; /* gold — grey disappears at 11px on graphite */
+  --tab-off:        #7E848B;
+
+  --accent:         #D9552F;
+  --accent-deep:    #C04420;
+  --accent-wash:    #2E1F1B;
+  --accent-wash-2:  #2A1E1A;
+  --accent-border:  #5C3024;
+  --accent-border-soft: #5C3024;
+  --accent-rule:    #4A2820;
+  --accent-ink:     #F0C08A;
+  --on-accent:      #17181A;
+
+  --warm-wash:      #2A2520;
+  --warm-ink:       #D9A521;
+
+  --neutral-tile:   #2D3038;
+  --neutral-icon:   #7E848B;
+
+  --header-bg:      #0E0F11;
+  --header-text:    #F1F0ED;
+  --header-day:     #9AA0A7;
+
+  --scrim:          rgba(0,0,0,0.45);
+  --shadow-sheet:   0 -8px 28px rgba(0,0,0,0.20);
+  --shadow-more:    0 -8px 28px rgba(0,0,0,0.30);
+
+  --display-font:   var(--font-bitter);
+
+  /* Workshop is dark — update legacy vars so body background works */
+  --background:     #17181A;
+  --foreground:     #F1F0ED;
+
+  /* Cyan glow for cards / message bubbles — visible at ~18% */
+  --card-glow:      0 0 22px rgba(0, 210, 195, 0.18), 0 0 8px rgba(0, 210, 195, 0.10);
+  --accent:         #E05A30;
+  --accent-deep:    #C84A20;
+  --value-quiet:    #E0AA22; /* brighter gold */
+  --tab-active:     #E0AA22; /* gold active tab */
+}
+
+/* Workshop: solid dark base in all contexts */
+[data-theme="workshop"] body {
+  background-color: #17181A;
+}
+
+/* Workshop: photographic hex background — PWA (home screen) only.
+   Body never scrolls (h-dvh shell), so cover behaves like fixed
+   without needing background-attachment:fixed (broken on iOS PWA).
+   workshop-transparent on the Today page root div lets it show through;
+   all other pages keep their bg-paper surface on top. */
+@media (display-mode: standalone) {
+  [data-theme="workshop"] body {
+    background-image: url('/workshop-bg.webp');
+    background-size: cover;
+    background-position: center top;
+  }
+}
+
+/* Pages that want the body hex to show through must clear their own bg.
+   Scoped so standard/loyalty themes are unaffected. */
+[data-theme="workshop"] .workshop-transparent {
+  background: transparent !important;
+}
+
+/* Workshop: darker nav bar to match header tone */
+[data-theme="workshop"] nav {
+  background-color: #0E0F11 !important;
+  border-top-color: #252830 !important;
+}
+
+/* ─── Loyalty ────────────────────────────────────────────────────────────── */
+[data-theme="loyalty"] {
+  --paper:          #FAF5E8;
+  --paper-sheet:    #F4EDDB;
+  --surface:        #FFFDF5;
+  --surface-quiet:  #F5EFE2;
+  --band:           #F5EFDF;
+
+  --border:         #E8DFC5;
+  --border-sheet:   #DCCFB0;
+  --border-quiet:   #E2D9C3;
+  --border-chip:    #E5DBBE;
+  --divider:        #F2EBD7;
+  --divider-quiet:  #EDE5CF;
+
+  --text:           #211C12;
+  --text-body:      #2E281B;
+  --text-muted:     #6E6452;
+  --text-tertiary:  #8D846D;
+  --text-quiet:     #9C9380;
+  --value-quiet:    #847A62;
+  --tab-off:        #A79E88;
+
+  --accent:         #8A5A12;
+  --accent-deep:    #5C3D0C;
+  --accent-wash:    #F8EBCC;
+  --accent-wash-2:  #F8EBCC;
+  --accent-border:  #DEC68F;
+  --accent-border-soft: #E5D09E;
+  --accent-rule:    #D4BC7E;
+  --accent-ink:     #5C3D0C;
+  --on-accent:      #FAF5E8;
+
+  --warm-wash:      #EBE7DA;
+  --warm-ink:       #4A4438;
+
+  --neutral-tile:   #EDE8DA;
+  --neutral-icon:   #7E7462;
+
+  /* Dark header band — gold title, only theme with a filled header */
+  --header-bg:      #26221A;
+  --header-text:    #EBC978;
+  --header-day:     #B5A882;
+
+  --scrim:          rgba(33,28,18,0.32);
+  --shadow-sheet:   0 -8px 28px rgba(33,28,18,0.08);
+  --shadow-more:    0 -8px 28px rgba(33,28,18,0.16);
+
+  --display-font:   var(--font-bitter);
+}
+
+/* ─── Tailwind theme mapping ─────────────────────────────────────────────── */
+/*
+   Everything below exposes the CSS tokens as Tailwind utility classes.
+   Use bg-paper, text-accent, border-ds-border, etc. in JSX.
+   Never write a literal hex value in a component.
+*/
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background:    var(--background);
+  --color-foreground:    var(--foreground);
+
+  /* Fonts */
+  --font-sans:           var(--font-geist-sans);
+  --font-mono:           var(--font-geist-mono);
+  --font-serif:          var(--font-newsreader);
+  --font-display:        var(--display-font); /* switches per theme */
+
+  /* Surfaces → bg-paper, bg-surface, bg-accent-wash, bg-warm-wash … */
+  --color-paper:         var(--paper);
+  --color-paper-sheet:   var(--paper-sheet);
+  --color-surface:       var(--surface);
+  --color-surface-quiet: var(--surface-quiet);
+  --color-band:          var(--band);
+  --color-accent-wash:   var(--accent-wash);
+  --color-accent-wash-2: var(--accent-wash-2);
+  --color-warm-wash:     var(--warm-wash);
+  --color-neutral-tile:  var(--neutral-tile);
+  --color-header-bg:     var(--header-bg);
+
+  /* Borders → border-border, border-divider, border-chip-border … */
+  --color-border:             var(--border);
+  --color-ds-border:          var(--border);
+  --color-border-sheet:       var(--border-sheet);
+  --color-border-quiet:       var(--border-quiet);
+  --color-chip-border:        var(--border-chip);
+  --color-divider:            var(--divider);
+  --color-divider-quiet:      var(--divider-quiet);
+  --color-accent-border:      var(--accent-border);
+  --color-accent-border-soft: var(--accent-border-soft);
+  --color-accent-rule:        var(--accent-rule);
+
+  /* Text → text-text, text-text-body, text-text-muted … */
+  --color-text:          var(--text);
+  --color-ds-text:       var(--text);
+  --color-text-body:     var(--text-body);
+  --color-text-muted:    var(--text-muted);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-quiet:    var(--text-quiet);
+  --color-value-quiet:   var(--value-quiet);
+  --color-tab-inactive:  var(--tab-off);
+  --color-warm-ink:      var(--warm-ink);
+  --color-neutral-icon:  var(--neutral-icon);
+  --color-header-text:   var(--header-text);
+  --color-header-day:    var(--header-day);
+
+  /* Accent → bg-accent, text-accent, bg-on-accent … */
+  --color-accent:        var(--accent);
+  --color-accent-deep:   var(--accent-deep);
+  --color-accent-ink:    var(--accent-ink);
+  --color-on-accent:     var(--on-accent);
 }
 
+/* ─── Legacy dark mode ───────────────────────────────────────────────────── */
+/*
+   Kept while old screens still use dark: Tailwind variants.
+   Workshop is the intended dark theme; these will be retired
+   screen-by-screen as the redesign lands.
+*/
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --background: #0a0a0a;
     --foreground: #ededed;
   }
@@ -22,5 +344,5 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
