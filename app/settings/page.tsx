@@ -22,6 +22,48 @@ const btn = 'rounded-lg bg-[var(--accent)] text-[var(--on-accent)] text-sm font-
 const field = 'w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2 text-sm';
 const label = 'text-[10px] font-mono uppercase tracking-[0.16em] text-[var(--text-quiet)] mb-3';
 
+function WeatherLocation({ token }: { token: string }) {
+  const [label, setLabel] = useState<string>('…');
+  const [city, setCity] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+  const load = useCallback(async () => {
+    const r = await fetch('/api/weather-location', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) setLabel((await r.json()).label);
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+
+  async function save(body: Record<string, unknown>) {
+    setBusy(true); setMsg(null);
+    const r = await fetch('/api/weather-location', { method: 'POST', headers: h, body: JSON.stringify(body) });
+    const j = await r.json();
+    setBusy(false);
+    if (r.ok) { setLabel(j.label); setCity(''); setMsg(`Set to ${j.label}.`); }
+    else setMsg(j.error ?? 'Failed.');
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-[var(--text-muted)]">Brief weather is for <span className="font-medium text-[var(--text)]">{label}</span>.</p>
+      <div className="flex flex-wrap gap-2">
+        <input className={field + ' flex-1 min-w-[10rem]'} placeholder="city (e.g. Seattle)" value={city}
+          onChange={(e) => setCity(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && city.trim()) save({ city }); }} />
+        <button className={btn} disabled={busy || !city.trim()} onClick={() => save({ city })}>Set</button>
+        <button className="text-xs underline text-[var(--text-muted)]" disabled={busy}
+          onClick={() => navigator.geolocation?.getCurrentPosition(
+            (p) => save({ lat: p.coords.latitude, lon: p.coords.longitude }),
+            () => setMsg('Location permission denied.'),
+          )}>
+          use my location
+        </button>
+      </div>
+      {msg && <p className="text-xs text-[var(--text-muted)]">{msg}</p>}
+    </div>
+  );
+}
+
 function ThemePicker() {
   const { theme, setTheme } = useTheme();
   return (
@@ -346,6 +388,12 @@ export default function SettingsPage() {
       <section className="mb-8">
         <h2 className={label}>Appearance</h2>
         <ThemePicker />
+      </section>
+
+      {/* ── Weather ─────────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>Weather</h2>
+        <WeatherLocation token={session.access_token} />
       </section>
 
       {/* ── Integrations ─────────────────────────────────────────────── */}

@@ -10,6 +10,8 @@ const SEED: Record<string, string> = {
   spend_cap_usd_month: process.env.SPEND_CAP_USD_MONTH ?? '10',
   spend_month: new Date().toISOString().slice(0, 7),
   spend_month_to_date_usd: '0',
+  // Where the brief's weather is for. JSON {lat,lon,label}. Default: Trinity / Hartford.
+  weather_location: JSON.stringify({ lat: 41.7637, lon: -72.6851, label: 'Hartford' }),
 };
 
 export async function getConfig(key: string): Promise<string> {

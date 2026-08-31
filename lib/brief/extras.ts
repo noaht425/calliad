@@ -1,9 +1,8 @@
 // Weather + news headlines for the brief. Both free, no API key. Tolerant of
 // failure — a dead feed just drops that part of the brief.
 
-// "My area" during term = Hartford, CT (Trinity). Swap when Noah's elsewhere, or
-// wire to a profile location field later.
-const LOCATION = { lat: 41.7637, lon: -72.6851, label: 'Hartford' };
+import { getWeatherLocation } from '@/lib/weather/location';
+
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 
 // Reputable, stable, no-key RSS. Order = rough priority.
@@ -31,8 +30,9 @@ const WMO: Record<number, string> = {
 
 async function getWeather(): Promise<BriefExtras['weather']> {
   try {
+    const loc = await getWeatherLocation();
     const url =
-      `https://api.open-meteo.com/v1/forecast?latitude=${LOCATION.lat}&longitude=${LOCATION.lon}` +
+      `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}` +
       `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code` +
       `&temperature_unit=fahrenheit&timezone=${encodeURIComponent(TZ)}&forecast_days=1`;
     const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
@@ -41,7 +41,7 @@ async function getWeather(): Promise<BriefExtras['weather']> {
     const d = j.daily;
     if (!d) return null;
     return {
-      label: LOCATION.label,
+      label: loc.label,
       summary: WMO[d.weather_code[0]] ?? 'mixed',
       highF: Math.round(d.temperature_2m_max[0]),
       lowF: Math.round(d.temperature_2m_min[0]),
