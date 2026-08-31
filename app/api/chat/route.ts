@@ -205,13 +205,16 @@ export async function POST(req: NextRequest) {
 
 // ── helpers ───────────────────────────────────────────────────────────────
 async function recentTurns(conversationId: string, currentText: string) {
+  // Last ~24 messages, chronological. (Must be newest-first + limit, then reverse —
+  // ascending+limit would return the OLDEST 21 and lose the recent thread.)
   const { data } = await adminClient
     .from('messages')
-    .select('role, content')
+    .select('role, content, created_at')
     .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true })
-    .limit(21);
+    .order('created_at', { ascending: false })
+    .limit(24);
   return (data ?? [])
+    .reverse()
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
     // drop the just-inserted current user message — brain.call adds it back as the turn
