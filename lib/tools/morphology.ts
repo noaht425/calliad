@@ -41,16 +41,33 @@ function toArray<T>(x: T | T[] | undefined): T[] {
   return x == null ? [] : Array.isArray(x) ? x : [x];
 }
 
+/**
+ * Morpheus chokes on Latin vowel-length marks: `ferō` comes back with no `Body`,
+ * `amō` comes back empty, while `fero`/`amo` parse fine. Strip macrons/breves
+ * (and any stray combining accent) for Latin. Greek keeps its diacritics —
+ * Morpheus-grc needs the breathings and accents.
+ */
+function normalizeForEngine(word: string, lang: Lang): string {
+  if (lang === 'grc') return word;
+  return word.normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC');
+}
+
 export async function analyzeForm(word: string, lang: Lang): Promise<Analysis[]> {
   const engine = lang === 'grc' ? 'morpheusgrc' : 'morpheuslat';
-  const url = `https://services.perseids.org/bsp/morphologyservice/analysis/word?lang=${lang}&engine=${engine}&word=${encodeURIComponent(word)}`;
+  const q = normalizeForEngine(word, lang);
+  const url = `https://services.perseids.org/bsp/morphologyservice/analysis/word?lang=${lang}&engine=${engine}&word=${encodeURIComponent(q)}`;
   const r = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
   if (!r.ok) throw new Error(`perseids ${r.status}`);
   const j = (await r.json()) as Record<string, unknown>;
 
-  // RDF.Annotation.Body.rest.entry  (entry may be one or many)
-  const body = (((j.RDF as Record<string, unknown>)?.Annotation as Record<string, unknown>)?.Body ?? {}) as Record<string, unknown>;
-  const entries = toArray((((body.rest as Record<string, unknown>)?.entry) as unknown) as Record<string, unknown> | Record<string, unknown>[]);
+  // RDF.Annotation.Body → .rest.entry. Body is a single object for one analysis
+  // but an ARRAY when the form is ambiguous (e.g. `fero` → 2), and entry itself
+  // may be one or many. Flatten both levels.
+  const ann = ((j.RDF as Record<string, unknown>)?.Annotation ?? {}) as Record<string, unknown>;
+  const bodies = toArray(ann.Body as Record<string, unknown> | Record<string, unknown>[] | undefined);
+  const entries = bodies.flatMap((b) =>
+    toArray(((b?.rest as Record<string, unknown>)?.entry) as Record<string, unknown> | Record<string, unknown>[] | undefined),
+  );
 
   const out: Analysis[] = [];
   for (const e of entries) {
@@ -65,7 +82,8 @@ export async function analyzeForm(word: string, lang: Lang): Promise<Analysis[]>
       const declConj = val(dict.decl) ?? val(dict.conj);
       if (declConj) feats.push(lang === 'grc' ? declConj : `${declConj}${val(dict.decl) ? ' decl' : ' conj'}`);
       out.push({
-        lemma: val(dict.hdwd) ?? word,
+        // Morpheus appends a homograph index to Latin lemmas (sum1, edo1) — drop it.
+        lemma: (val(dict.hdwd) ?? word).replace(/(?<=\p{L})\d+$/u, ''),
         pos: val(dict.pofs) ?? '?',
         features: feats,
       });
