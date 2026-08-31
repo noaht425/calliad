@@ -223,13 +223,14 @@ export async function POST(req: NextRequest) {
     learnedFacts(user.id).catch(() => ''),
   ]);
 
-  const deckUrl = text.match(/https?:\/\/(?:www\.)?(?:moxfield\.com\/decks\/[\w-]+|archidekt\.com\/(?:api\/)?decks\/\d+)/)?.[0];
+  const deckUrl = text.match(/https?:\/\/(?:www\.)?archidekt\.com\/(?:api\/)?decks\/\d+/)?.[0];
+  const moxUrl = /https?:\/\/(?:www\.)?moxfield\.com\/decks\/[\w-]+/.test(text);
   let toolResult = morphResult;
   if (effectiveMode === 'quiz') {
     const q = await quizTurn(user.id, conversationId, text, modeState).catch(() => null);
     if (q) toolResult = q.toolResult;
-  } else if (looksLikeDecklist(text) || (isDeckHelp(text) && deckUrl)) {
-    const listText = deckUrl ? await fetchDeckFromUrl(deckUrl).catch(() => null) : text;
+  } else if (looksLikeDecklist(text) || (isDeckHelp(text) && (deckUrl || moxUrl))) {
+    const listText = deckUrl ? await fetchDeckFromUrl(deckUrl).catch(() => null) : looksLikeDecklist(text) ? text : null;
     const a = listText ? await analyzeDeck(listText).catch(() => null) : null;
     if (a) {
       let block = deckBlock(a) + `\n\nNoah's message: ${text.slice(0, 500)}`;
@@ -239,7 +240,9 @@ export async function POST(req: NextRequest) {
       }
       toolResult = block;
     } else {
-      toolResult = `## Deck analysis\nCouldn't read a decklist from that${deckUrl ? ' link' : ''}. Ask Noah to paste the list or a Moxfield/Archidekt URL.`;
+      toolResult = moxUrl
+        ? `## Deck analysis\nMoxfield blocks automated access now, so Noah needs to paste the decklist text (Moxfield: "..." menu → Export → copy), or share an Archidekt link.`
+        : `## Deck analysis\nCouldn't read a decklist from that${deckUrl ? ' link' : ''}. Ask Noah to paste the list or an Archidekt URL.`;
     }
   } else if (isEdhrecQuery(text)) {
     const name = extractCardNames(text)[0];

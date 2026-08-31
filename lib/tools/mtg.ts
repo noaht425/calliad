@@ -124,7 +124,9 @@ function cleanName(s: string): string {
     .trim();
 }
 
-// ── Moxfield / Archidekt URL → decklist text ───────────────────────────────
+// ── deck URL → decklist text ───────────────────────────────────────────────
+// Archidekt only. Moxfield put their API behind Cloudflare (403 to any client
+// without an approved user-agent) — paste the list for those.
 export async function fetchDeckFromUrl(url: string): Promise<string | null> {
   try {
     const arch = url.match(/archidekt\.com\/(?:api\/)?decks\/(\d+)/);
@@ -135,19 +137,6 @@ export async function fetchDeckFromUrl(url: string): Promise<string | null> {
       return (j.cards ?? [])
         .map((c) => `${c.categories?.includes('Commander') ? 'Commander: ' : ''}${c.quantity} ${c.card.oracleCard.name}`)
         .join('\n');
-    }
-    const mox = url.match(/moxfield\.com\/decks\/([\w-]+)/);
-    if (mox) {
-      const r = await fetch(`https://api.moxfield.com/v2/decks/all/${mox[1]}`, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(10000) });
-      if (!r.ok) return null;
-      const j = (await r.json()) as {
-        commanders?: Record<string, { card: { name: string } }>;
-        mainboard?: Record<string, { quantity: number; card: { name: string } }>;
-      };
-      const lines: string[] = [];
-      for (const c of Object.values(j.commanders ?? {})) lines.push(`Commander: ${c.card.name}`);
-      for (const e of Object.values(j.mainboard ?? {})) lines.push(`${e.quantity} ${e.card.name}`);
-      return lines.join('\n');
     }
   } catch { /* fall through */ }
   return null;
