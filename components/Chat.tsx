@@ -92,21 +92,22 @@ export function Chat() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-[#fafaf8] dark:bg-[#0a0a0a]">
+    <div className="flex h-full flex-col" style={{ background: 'var(--paper)' }}>
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
         {messages.length === 0 && (
-          <p className="text-center text-sm text-zinc-400 dark:text-zinc-600 pt-8">
+          <p className="text-center text-sm pt-8" style={{ color: 'var(--text-quiet)' }}>
             Ask Calliad anything.
           </p>
         )}
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed ${
+              className="max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed"
+              style={
                 m.role === 'user'
-                  ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900'
-                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
-              }`}
+                  ? { background: 'var(--accent)', color: 'var(--on-accent)' }
+                  : { background: 'var(--surface)', color: 'var(--text-body)', border: '1px solid var(--border)', boxShadow: 'var(--card-glow, none)' }
+              }
             >
               {m.text || (sending ? '…' : '')}
             </div>
@@ -115,9 +116,9 @@ export function Chat() {
         <div ref={bottomRef} />
       </div>
 
-      <div className="shrink-0 border-t border-zinc-100 dark:border-zinc-800 px-4 pt-2 pb-3">
+      <div className="shrink-0 px-4 pt-2 pb-3" style={{ borderTop: '1px solid var(--border-quiet)' }}>
         {mode && (
-          <div className="mb-1.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+          <div className="mb-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
             {mode === 'italian-tutor' ? 'Italian tutor' : mode === 'quiz' ? 'Quiz' : mode === 'study-coach' ? 'Study coach' : mode} · say &ldquo;english&rdquo; to exit
           </div>
         )}
@@ -129,13 +130,14 @@ export function Chat() {
             onKeyDown={onKeyDown}
             placeholder="Ask Calliad anything…"
             rows={1}
-            className="flex-1 resize-none rounded-xl bg-zinc-100 dark:bg-zinc-800 px-3 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-600"
-            style={{ maxHeight: '120px', overflowY: 'auto' }}
+            className="flex-1 resize-none rounded-xl px-3 py-2.5 text-sm outline-none"
+            style={{ maxHeight: '120px', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
           />
           <button
             onClick={() => void send()}
             disabled={sending || !input.trim()}
-            className="shrink-0 h-9 w-9 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center disabled:opacity-40 transition-opacity"
+            className="shrink-0 h-9 w-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-opacity"
+            style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
             aria-label="Send"
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
