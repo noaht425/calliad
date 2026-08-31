@@ -30,10 +30,15 @@ import {
   analyzeDeck, deckBlock, getCards, cardBlock, fetchDeckFromUrl,
   looksLikeDecklist, isDeckHelp, isCardQuestion, extractCardNames,
 } from '@/lib/tools/mtg';
+import {
+  runSimulation, runTranscript, parseSimRequest, isSimRequest, isTranscriptRequest,
+} from '@/lib/tools/mtgsim';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// a sim run polls the sim service for up to ~50s before the reply streams
+export const maxDuration = 60;
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 const enc = new TextEncoder();
@@ -232,6 +237,12 @@ export async function POST(req: NextRequest) {
     const names = extractCardNames(text);
     const { found } = names.length ? await getCards(names) : { found: [] };
     toolResult = found.length ? cardBlock(found) : `## Card data\nCouldn't identify which card(s) Noah means — ask him to name them exactly.`;
+  } else if (isTranscriptRequest(text)) {
+    const { decks } = parseSimRequest(text);
+    toolResult = await runTranscript(decks).catch(() => undefined);
+  } else if (isSimRequest(text)) {
+    const { decks, games } = parseSimRequest(text);
+    toolResult = await runSimulation(decks, games).catch(() => undefined);
   } else if (wantsWebFetch) {
     let target = webFetchUrl;
     if (!target) target = (await listItems(user.id).catch(() => []))[0]?.url;

@@ -79,9 +79,13 @@ self-hosted Whisper WebSocket. Batch STT + streamed reply + streamed TTS is the 
     histogram / avg turn / crashes. Bearer `SIM_TOKEN`. Imports `engine` directly so engine
     updates need only a redeploy, no wrapper change.
   - **Waiting on:** Noah deploys it (Fly/Railway/Render) → gives the URL + token.
-  - **Then, sim side:** env `MTG_SIM_URL` / `MTG_SIM_TOKEN`, `lib/tools/mtgsim.ts` adapter,
-    intent detection ("simulate rocco vs hamza", "run the pod 3000×"), the auth gate (a big run
-    costs compute), toolResult narration.
+  - **Calliad side built** — `lib/tools/mtgsim.ts`: `parseSimRequest` (deck ids + trial count
+    from free text, "the pod" → rocco/hamza/persephone/ares), `runSimulation` (POST `/simulate`
+    → poll `/jobs/{id}` up to ~50 s; games clamped 100–1500 to fit the request), `runTranscript`
+    (one game, last 60 log lines). Wired into `/api/chat` toolResult chain; `maxDuration = 60`.
+    Dark until `MTG_SIM_URL` / `MTG_SIM_TOKEN` are set. **Pending:** Noah deploys to Fly, gives
+    the URL; then end-to-end test. (No gate — a ≤1500-game run is ~40 s / free-tier compute,
+    not worth friction; revisit if bigger runs ever go through chat.)
 
 ### ✅ MTG deck analysis — Scryfall, analysis-first (2026-08-31)
 Decision: the symbolic sim doesn't generalise to arbitrary decklists (304 bespoke per-card
