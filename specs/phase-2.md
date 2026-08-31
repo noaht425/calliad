@@ -75,6 +75,16 @@ morphology → spaced repetition → confirmation-gated writes.*
   panel to keep/correct/delete. No migration (`profile_facts` shipped in 0003).
 - Brief + nudge seed `profileSections()` with their own intent strings.
 
+### ✅ Adopt Doug's UI refresh (2026-08-31)
+- Second one-time donor pull from `dougt425/calliad` (`6ba0638..1800145`). Full write-up:
+  `specs/reconciliation.md` §8.
+- Foundation taken wholesale: `app/globals.css` token system + 4 themes, `ThemeProvider`,
+  `PageLayout` primitives, Newsreader/Bitter fonts, `workshop-bg.webp`.
+- `BottomNav` + `GlobalChatPanel` rebuilt in the new visual language over Calliad's own
+  wiring (SSE stream, sticky conversation, brief-on-open). Voice/photo deferred to the STT
+  work. Every page reskinned zinc/`dark:` → tokens; Settings → Appearance / theme picker.
+- Skipped Doug's PIM pages, his nudges/push/TMDB re-solves, and schedule-conflict detection.
+
 ## ⏭ Next
 - [ ] Tier routing beyond modes — cheap-win Q&A / trivia → T1.
 - [ ] Web-fetch tool (answer questions *about* a link).

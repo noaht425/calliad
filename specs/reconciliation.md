@@ -461,3 +461,27 @@ Concretely, the copy-and-adapt list (not a dependency, a starting point):
   (`cache_read_input_tokens`, `cache_creation_input_tokens`), not Gemini's.
 - **§10 acceptance test** still valid; step 3's "streams an in-persona reply" needs SSE added
   to `GlobalChatPanel` (Doug's is request/response).
+
+---
+
+## 8. Second donor pull — the UI refresh (2026-08-31)
+
+Doug's repo shipped a design-system refresh (20 commits, `6ba0638..1800145`). Adopted as a
+one-time cherry-pick, same donor model as §5:
+
+- **Took wholesale:** `app/globals.css` token system (~40 CSS custom properties, 4 themes —
+  Standard / Italy / Workshop / Loyalty — + Tailwind `@theme inline` wiring), `ThemeProvider`
+  (localStorage + pre-paint flash-prevention script), `PageLayout` primitives (`PageShell` /
+  `PageHeader` / `PageBody` / `PageSearch` / `IconButton` / `SectionLabel`), Newsreader +
+  Bitter display fonts, `public/workshop-bg.webp`.
+- **Adapted:** `BottomNav` (Doug's 86px token-styled bar, Calliad's 3 tabs, no More sheet);
+  `GlobalChatPanel` (Doug's draggable snap-point split-screen shell + Calliad's SSE wiring —
+  `streamChat`, sticky conversation, brief-on-open, mode chip; **dropped** Doug's photo
+  capture / `/api/chat/transcribe` / `speechSynthesis` TTS until the Groq STT work lands).
+- **Reskinned by hand:** every page (`/`, `/reading`, `/settings`, `/login`, `/privacy`,
+  `/share-target`) — `zinc` + `dark:` utilities swept to tokens; Settings gained an Appearance
+  section with the theme picker. All page logic untouched.
+- **Skipped:** Doug's PIM surface (trips, people, folders, inbox, watchlist, shopping, todos,
+  projects, unsubscribes, birthdays, family, search), his nudges backend / `lib/push.ts` /
+  TMDB rewrite (Calliad already solved these its own way), and `e4db53a` schedule-conflict
+  detection (flagged for a possible later look, not adopted).
