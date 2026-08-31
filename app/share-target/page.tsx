@@ -44,15 +44,15 @@ export default function ShareTargetPage() {
 
   return (
     <main className="min-h-dvh flex flex-col items-center justify-center gap-4 px-8 text-center">
-      <div className="w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center">
-        <span className="text-xs font-bold text-white dark:text-zinc-900">C</span>
+      <div className="w-8 h-8 rounded-full bg-[var(--accent)] flex items-center justify-center">
+        <span className="text-xs font-bold text-[var(--on-accent)]">C</span>
       </div>
-      {state === 'working' && <p className="text-sm text-zinc-500">Saving…</p>}
-      {state === 'nourl' && <p className="text-sm text-zinc-500">No link found in what you shared.</p>}
+      {state === 'working' && <p className="text-sm text-[var(--text-muted)]">Saving…</p>}
+      {state === 'nourl' && <p className="text-sm text-[var(--text-muted)]">No link found in what you shared.</p>}
       {state === 'error' && <p className="text-sm text-red-500 whitespace-pre-wrap">Couldn&apos;t save it: {detail}</p>}
-      {state === 'done' && <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">{detail}</p>}
+      {state === 'done' && <p className="text-sm text-[var(--text-body)] whitespace-pre-wrap">{detail}</p>}
       {state !== 'working' && (
-        <button onClick={() => router.replace('/reading')} className="text-sm underline text-zinc-500">
+        <button onClick={() => router.replace('/reading')} className="text-sm underline text-[var(--text-muted)]">
           Open reading list
         </button>
       )}

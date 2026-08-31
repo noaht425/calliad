@@ -5,6 +5,8 @@ import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { requestPushPermission } from '@/components/PushSetup';
 import { BottomNav } from '@/components/BottomNav';
+import { PageShell, PageHeader, PageBody } from '@/components/PageLayout';
+import { THEMES, useTheme } from '@/components/ThemeProvider';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,8 +18,34 @@ interface IntegrationsState {
   counts: { calendar_events: number; schedule_events: number; email_items: number };
 }
 
-const btn = 'rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium px-3 py-2 disabled:opacity-40';
-const field = 'w-full rounded-lg border border-zinc-200 dark:border-zinc-800 bg-transparent px-3 py-2 text-sm';
+const btn = 'rounded-lg bg-[var(--accent)] text-[var(--on-accent)] text-sm font-medium px-3 py-2 disabled:opacity-40';
+const field = 'w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2 text-sm';
+const label = 'text-[10px] font-mono uppercase tracking-[0.16em] text-[var(--text-quiet)] mb-3';
+
+function ThemePicker() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <div className="flex flex-wrap gap-2">
+      {THEMES.map((t) => (
+        <button
+          key={t.id}
+          onClick={() => setTheme(t.id)}
+          className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors"
+          style={{
+            borderColor: theme === t.id ? 'var(--accent)' : 'var(--border)',
+            background: theme === t.id ? 'var(--accent-wash)' : 'var(--surface)',
+            color: 'var(--text)',
+          }}
+        >
+          <span className="inline-flex h-4 w-4 rounded-full border" style={{ background: t.paper, borderColor: t.accent }}>
+            <span className="m-auto h-1.5 w-1.5 rounded-full" style={{ background: t.accent }} />
+          </span>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function TasteLog({ token }: { token: string }) {
   const [items, setItems] = useState<{ id: string; title: string; kind: string; verdict: string; why: string | null }[]>([]);
@@ -30,7 +58,7 @@ function TasteLog({ token }: { token: string }) {
   useEffect(() => { load(); }, [load]);
   return (
     <div className="space-y-3">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">{items.length} entries. Ask &ldquo;would I like X?&rdquo; in chat.</p>
+      <p className="text-sm text-[var(--text-muted)]">{items.length} entries. Ask &ldquo;would I like X?&rdquo; in chat.</p>
       <div className="flex flex-wrap gap-2">
         <input className={field + ' flex-1 min-w-[8rem]'} placeholder="title" value={t} onChange={(e) => setT(e.target.value)} />
         <select className={field + ' w-auto'} value={k} onChange={(e) => setK(e.target.value)}>
@@ -45,7 +73,7 @@ function TasteLog({ token }: { token: string }) {
           setT(''); setW(''); load();
         }}>Add</button>
       </div>
-      <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 max-h-48 overflow-y-auto">
+      <ul className="text-xs text-[var(--text-muted)] space-y-1 max-h-48 overflow-y-auto">
         {items.slice(0, 40).map((i) => (
           <li key={i.id} className="flex gap-2">
             <span className="flex-1">{i.title} [{i.kind}] — <span className="font-medium">{i.verdict}</span></span>
@@ -66,13 +94,13 @@ function LearnedFacts({ token }: { token: string }) {
   }, [token]);
   useEffect(() => { load(); }, [load]);
   if (!items.length)
-    return <p className="text-sm text-zinc-400">None yet — say &ldquo;remember that I…&rdquo; in chat and it lands here.</p>;
+    return <p className="text-sm text-[var(--text-quiet)]">None yet — say &ldquo;remember that I…&rdquo; in chat and it lands here.</p>;
   return (
-    <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 max-h-56 overflow-y-auto">
+    <ul className="text-xs text-[var(--text-muted)] space-y-1 max-h-56 overflow-y-auto">
       {items.map((i) => (
         <li key={i.id} className="flex gap-2">
           <span className="flex-1">
-            <span className="text-zinc-400">{i.section}/</span>{i.key}: {i.value}
+            <span className="text-[var(--text-quiet)]">{i.section}/</span>{i.key}: {i.value}
             {!i.confirmed && <span className="text-amber-600"> · unconfirmed</span>}
           </span>
           {!i.confirmed && (
@@ -100,7 +128,7 @@ function QuizDeck({ token }: { token: string }) {
   useEffect(() => { load(); }, [load]);
   return (
     <div className="space-y-3">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">{c.due} due · {c.total} in deck. Say &ldquo;quiz me&rdquo; in chat to review.</p>
+      <p className="text-sm text-[var(--text-muted)]">{c.due} due · {c.total} in deck. Say &ldquo;quiz me&rdquo; in chat to review.</p>
       <div className="flex flex-wrap gap-2">
         <select className={field + ' w-auto'} value={lang} onChange={(e) => setLang(e.target.value)}>
           <option value="lat">Latin</option><option value="grc">Greek</option><option value="ita">Italian</option>
@@ -113,10 +141,10 @@ function QuizDeck({ token }: { token: string }) {
         }}>Add</button>
       </div>
       {items.length > 0 && (
-        <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 max-h-48 overflow-y-auto">
+        <ul className="text-xs text-[var(--text-muted)] space-y-1 max-h-48 overflow-y-auto">
           {items.map((i) => (
             <li key={i.id} className="flex gap-2">
-              <span className="flex-1">[{i.lang}] {i.prompt} → {i.answer} <span className="text-zinc-400">(box {i.box})</span></span>
+              <span className="flex-1">[{i.lang}] {i.prompt} → {i.answer} <span className="text-[var(--text-quiet)]">(box {i.box})</span></span>
               <button className="underline" onClick={async () => { await fetch(`/api/quiz?id=${i.id}`, { method: 'DELETE', headers: h }); load(); }}>del</button>
             </li>
           ))}
@@ -132,7 +160,7 @@ function SetPassword() {
   const [saving, setSaving] = useState(false);
   return (
     <div className="space-y-2 max-w-xs">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">Set a password so you can sign into the home-screen app without the email step.</p>
+      <p className="text-sm text-[var(--text-muted)]">Set a password so you can sign into the home-screen app without the email step.</p>
       <input className={field} type="password" placeholder="new password (8+ chars)" value={pw} onChange={(e) => setPw(e.target.value)} />
       <button
         className={btn}
@@ -147,7 +175,7 @@ function SetPassword() {
       >
         {saving ? 'Saving…' : 'Set password'}
       </button>
-      {msg && <p className="text-xs text-zinc-500">{msg}</p>}
+      {msg && <p className="text-xs text-[var(--text-muted)]">{msg}</p>}
     </div>
   );
 }
@@ -309,20 +337,28 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-dvh bg-[#fafaf8] dark:bg-[#0a0a0a] px-4 pt-12 pb-24 max-w-xl mx-auto">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-6">Settings</h1>
+    <PageShell>
+      <PageHeader title="Settings" />
+      <PageBody className="px-4 pt-2">
+        <div className="max-w-xl mx-auto pb-4">
+
+      {/* ── Appearance ──────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>Appearance</h2>
+        <ThemePicker />
+      </section>
 
       {/* ── Integrations ─────────────────────────────────────────────── */}
       <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Integrations</h2>
+        <h2 className={label}>Integrations</h2>
 
         {/* Gmail */}
         <div className="mb-4">
-          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Gmail</p>
+          <p className="text-sm font-medium text-[var(--text-body)]">Gmail</p>
           {gmailParam === 'connected' && <p className="text-xs text-emerald-600">Connected ✓</p>}
           {gmailParam === 'error' && <p className="text-xs text-red-500">Connection failed — try again.</p>}
           {ints?.gmail.connected ? (
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            <p className="text-xs text-[var(--text-muted)]">
               {ints.gmail.email} · label <span className="font-mono">{ints.gmail.label}</span> ·{' '}
               {ints.gmail.lastScannedAt ? `scanned ${new Date(ints.gmail.lastScannedAt).toLocaleString()}` : 'not scanned yet'}
               {' · '}
@@ -337,9 +373,9 @@ export default function SettingsPage() {
 
         {/* iCloud calendar */}
         <div className="mb-4">
-          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">iCloud Calendar</p>
+          <p className="text-sm font-medium text-[var(--text-body)]">iCloud Calendar</p>
           {ints?.icloud.connected ? (
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            <p className="text-xs text-[var(--text-muted)]">
               {(ints.icloud.calendars ?? []).join(', ') || 'no calendars'} ·{' '}
               {ints.icloud.lastSyncedAt ? `synced ${new Date(ints.icloud.lastSyncedAt).toLocaleString()}` : 'not synced yet'}
               {' · '}
@@ -356,7 +392,7 @@ export default function SettingsPage() {
               )}
               {cals && (
                 <div className="space-y-1">
-                  <p className="text-xs text-zinc-500">Pick the calendars to sync:</p>
+                  <p className="text-xs text-[var(--text-muted)]">Pick the calendars to sync:</p>
                   {cals.map((c) => (
                     <label key={c.url} className="flex items-center gap-2 text-sm py-1">
                       <input
@@ -376,15 +412,15 @@ export default function SettingsPage() {
                   </button>
                 </div>
               )}
-              {icloudMsg && <p className="text-xs text-zinc-500">{icloudMsg}</p>}
+              {icloudMsg && <p className="text-xs text-[var(--text-muted)]">{icloudMsg}</p>}
             </div>
           )}
         </div>
 
         {/* Class schedule (materialised from the profile, not a live calendar) */}
         <div className="mb-4">
-          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Class schedule</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm font-medium text-[var(--text-body)]">Class schedule</p>
+          <p className="text-xs text-[var(--text-muted)]">
             {ints?.counts.schedule_events ?? 0} meetings loaded (Fall 2026 term) ·{' '}
             <button className="underline" disabled={busy !== null} onClick={loadSchedule}>
               {busy === 'schedule' ? 'loading…' : 'reload'}
@@ -397,7 +433,7 @@ export default function SettingsPage() {
             <button className={btn} disabled={busy !== null} onClick={syncNow}>
               {busy === 'sync' ? 'Syncing…' : 'Sync now'}
             </button>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            <span className="text-xs text-[var(--text-muted)]">
               {ints?.counts.calendar_events ?? 0} calendar · {ints?.counts.email_items ?? 0} emails
             </span>
           </div>
@@ -413,7 +449,7 @@ export default function SettingsPage() {
         </div>
         <div>
           {briefText && (
-            <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap border-l-2 border-zinc-300 dark:border-zinc-700 pl-3">
+            <p className="mt-2 text-sm text-[var(--text-body)] whitespace-pre-wrap border-l-2 border-[var(--border)] pl-3">
               {briefText}
             </p>
           )}
@@ -422,7 +458,7 @@ export default function SettingsPage() {
 
       {/* ── Syllabi ─────────────────────────────────────────────────── */}
       <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Syllabi</h2>
+        <h2 className={label}>Syllabi</h2>
         <label className={`${btn} inline-block cursor-pointer`}>
           {busy === 'syllabus' ? 'Reading…' : 'Upload a syllabus (PDF)'}
           <input
@@ -433,9 +469,9 @@ export default function SettingsPage() {
             onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadSyllabus(f); e.target.value = ''; }}
           />
         </label>
-        {syllabusMsg && <p className="text-xs text-zinc-500 mt-2">{syllabusMsg}</p>}
+        {syllabusMsg && <p className="text-xs text-[var(--text-muted)] mt-2">{syllabusMsg}</p>}
         {syllabi.length > 0 && (
-          <ul className="mt-3 space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+          <ul className="mt-3 space-y-1 text-sm text-[var(--text-muted)]">
             {syllabi.map((s) => (
               <li key={s.id}>
                 {s.course ?? s.filename} — {(s.extracted?.exams?.length ?? 0)} exams, {(s.extracted?.assignments?.length ?? 0)} assignments
@@ -447,44 +483,44 @@ export default function SettingsPage() {
 
       {/* ── Learned facts ──────────────────────────────────────────── */}
       <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Learned about you</h2>
+        <h2 className={label}>Learned about you</h2>
         <LearnedFacts token={session.access_token} />
       </section>
 
       {/* ── Taste log ───────────────────────────────────────────────── */}
       <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Taste log</h2>
+        <h2 className={label}>Taste log</h2>
         <TasteLog token={session.access_token} />
       </section>
 
       {/* ── Quiz deck ───────────────────────────────────────────────── */}
       <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Quiz deck</h2>
+        <h2 className={label}>Quiz deck</h2>
         <QuizDeck token={session.access_token} />
       </section>
 
       {/* ── Open loops ──────────────────────────────────────────────── */}
       <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Open loops</h2>
+        <h2 className={label}>Open loops</h2>
         <div className="mb-3">
           <button className="text-xs underline" disabled={busy !== null} onClick={testDetection}>
             {busy === 'loopdiag' ? 'testing…' : 'test detection'}
           </button>
-          {loopDiag && <span className="text-xs text-zinc-500 ml-2">{loopDiag}</span>}
+          {loopDiag && <span className="text-xs text-[var(--text-muted)] ml-2">{loopDiag}</span>}
         </div>
         {loops.length === 0 ? (
-          <p className="text-sm text-zinc-400">None — Calliad files these as they come up in chat.</p>
+          <p className="text-sm text-[var(--text-quiet)]">None — Calliad files these as they come up in chat.</p>
         ) : (
           <ul className="space-y-2">
             {loops.map((l) => (
-              <li key={l.id} className="text-sm text-zinc-700 dark:text-zinc-300 flex items-start gap-2">
+              <li key={l.id} className="text-sm text-[var(--text-body)] flex items-start gap-2">
                 <span className="flex-1">
                   {l.title}
-                  {l.due_at && <span className="text-zinc-400"> · due {new Date(l.due_at).toLocaleDateString()}</span>}
-                  {l.body && <span className="block text-xs text-zinc-500">{l.body}</span>}
+                  {l.due_at && <span className="text-[var(--text-quiet)]"> · due {new Date(l.due_at).toLocaleDateString()}</span>}
+                  {l.body && <span className="block text-xs text-[var(--text-muted)]">{l.body}</span>}
                 </span>
                 <button className="text-xs underline shrink-0" onClick={() => closeLoop(l.id, 'done')}>done</button>
-                <button className="text-xs underline shrink-0 text-zinc-400" onClick={() => closeLoop(l.id, 'dropped')}>drop</button>
+                <button className="text-xs underline shrink-0 text-[var(--text-quiet)]" onClick={() => closeLoop(l.id, 'dropped')}>drop</button>
               </li>
             ))}
           </ul>
@@ -493,8 +529,8 @@ export default function SettingsPage() {
 
       {/* ── Notifications ────────────────────────────────────────────── */}
       <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Notifications</h2>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-2">Push permission: <span className="font-medium">{pushState}</span></p>
+        <h2 className={label}>Notifications</h2>
+        <p className="text-sm text-[var(--text-muted)] mb-2">Push permission: <span className="font-medium">{pushState}</span></p>
         {pushState !== 'granted' && (
           <button
             className={btn}
@@ -510,30 +546,32 @@ export default function SettingsPage() {
 
       {/* ── Hub status ───────────────────────────────────────────────── */}
       <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Hub status</h2>
+        <h2 className={label}>Hub status</h2>
         {health ? (
-          <ul className="text-sm text-zinc-600 dark:text-zinc-400 space-y-1">
+          <ul className="text-sm text-[var(--text-muted)] space-y-1">
             <li>Kill switch: <span className="font-medium">{health.killswitch}</span></li>
             <li>Spend this month: <span className="font-medium">${health.spendMonthToDate?.toFixed(4)} / ${health.spendCap}</span></li>
           </ul>
         ) : (
-          <p className="text-sm text-zinc-400">Unavailable.</p>
+          <p className="text-sm text-[var(--text-quiet)]">Unavailable.</p>
         )}
       </section>
 
       <section className="mb-6">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600 mb-3">Account</h2>
+        <h2 className={label}>Account</h2>
         <SetPassword />
       </section>
 
       <button
         onClick={async () => { await supabase.auth.signOut(); router.push('/login'); }}
-        className="text-sm text-zinc-500 dark:text-zinc-400 underline"
+        className="text-sm text-[var(--text-muted)] underline"
       >
         Sign out
       </button>
 
+        </div>
+      </PageBody>
       <BottomNav />
-    </div>
+    </PageShell>
   );
 }

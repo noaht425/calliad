@@ -2,9 +2,9 @@ export const metadata = { title: 'Calliad — Privacy' };
 
 export default function PrivacyPage() {
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16 text-zinc-800 dark:text-zinc-200">
+    <main className="mx-auto max-w-2xl px-6 py-16 text-[var(--text-body)]">
       <h1 className="text-2xl font-semibold mb-2">Privacy Policy</h1>
-      <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-8">Last updated 2026-08-30</p>
+      <p className="text-sm text-[var(--text-muted)] mb-8">Last updated 2026-08-30</p>
 
       <div className="space-y-4 text-sm leading-relaxed">
         <p>

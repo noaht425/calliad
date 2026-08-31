@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { BottomNav } from '@/components/BottomNav';
+import { PageShell } from '@/components/PageLayout';
 import { Chat } from '@/components/Chat';
 
 export default function HomePage() {
@@ -16,10 +17,12 @@ export default function HomePage() {
   if (loading || !session) return null;
 
   return (
-    // BottomNav is position:fixed (~56px). pb-14 keeps the chat input above it.
-    <main className="h-dvh pb-14">
-      <Chat />
+    <PageShell>
+      {/* Chat owns the space between the top and the 86px fixed BottomNav. */}
+      <div className="flex-1 min-h-0" style={{ paddingBottom: 'calc(86px + env(safe-area-inset-bottom, 0px))' }}>
+        <Chat />
+      </div>
       <BottomNav />
-    </main>
+    </PageShell>
   );
 }
