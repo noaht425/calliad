@@ -111,15 +111,27 @@ export async function newRootsQuiz(userId: string): Promise<RootsState> {
   } catch { progress = new Map(); }
 
   const now = Date.now();
-  const scored = ROOTS.map((r, idx) => {
-    const p = progress.get(r.root);
-    const tier = !p ? 3 : p.miss > 0 ? 2 : 1;
-    const ageDays = p ? Math.min(60, (now - p.last) / 86400000) : 60;
-    return { idx, score: tier * 1000 + (p?.miss ?? 0) * 40 + ageDays + Math.random() * 5 };
-  }).sort((a, b) => b.score - a.score);
+  const age = (p?: { last: number }) => (p ? Math.min(120, (now - p.last) / 86400000) : 999);
 
-  const pool = shuffle(scored.slice(0, ROOTS_N * 3).map((x) => x.idx));
-  return { order: pool.slice(0, ROOTS_N * 2), i: 0, correct: 0, form: 'word' };
+  // Review: roots missed before, not drilled in the last ~day (short cooldown).
+  // Take up to 3 per session, worst offenders / longest untouched first.
+  const review = ROOTS
+    .map((r, idx) => ({ idx, p: progress.get(r.root) }))
+    .filter((x) => x.p && x.p.miss > 0 && age(x.p) >= 1)
+    .sort((a, b) => (b.p!.miss - a.p!.miss) || (age(b.p) - age(a.p)) || Math.random() - 0.5)
+    .slice(0, 3)
+    .map((x) => x.idx);
+
+  // New material: unseen first (cycle), then least-recently-seen with no misses.
+  const fresh = ROOTS
+    .map((r, idx) => ({ idx, p: progress.get(r.root) }))
+    .filter((x) => !review.includes(x.idx) && (!x.p || x.p.miss === 0))
+    .sort((a, b) => age(b.p) - age(a.p) || Math.random() - 0.5)
+    .map((x) => x.idx);
+
+  const nNew = ROOTS_N + 2 - review.length; // a couple of spares beyond the 8 asked
+  const order = shuffle([...review, ...fresh.slice(0, Math.max(nNew, 0))]);
+  return { order, i: 0, correct: 0, form: 'word' };
 }
 
 export async function recordRootResult(userId: string, rootStr: string, ok: boolean): Promise<void> {
