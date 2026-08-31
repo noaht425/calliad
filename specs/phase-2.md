@@ -23,6 +23,10 @@ morphology → spaced repetition → confirmation-gated writes.*
   `analyzeForm(word, lat|grc)` → `[{lemma, pos, features}]`; `runMorphology(query)` picks the
   word, detects language, returns a GROUND-TRUTH block. Wired via `decision.tools`. Verified:
   `mercatorem→mercator acc.sg 3rd decl`, Greek `λύουσι→λύω` all analyses.
+- Latin input is de-macronned before the request (`ferō`→`fero`; Morpheus-lat returns nothing
+  for length-marked forms). `Body` is parsed as object *or* array — ambiguous forms (`fero`→2
+  analyses) come back as `Body[]` and were silently dropped before. Homograph index stripped
+  from Latin lemmas (`sum1`→`sum`). Re-verified: `ferō`, `rēgī`, `ferunt`, `sum`, `πόλεως`.
 
 ### ✅ Spaced-repetition quiz (pattern N)
 - `0008` — `quiz_items` (Leitner box/due_at/streak, unique per user+lang+prompt) +
