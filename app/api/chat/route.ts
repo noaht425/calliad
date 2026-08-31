@@ -25,6 +25,7 @@ import { wouldILike } from '@/lib/taste/judge';
 import { isFlightQuery, isRestaurantQuery, extractFlight, extractRestaurant } from '@/lib/travel/detect';
 import { flightSearch } from '@/lib/travel/flights';
 import { restaurantHandoff } from '@/lib/travel/restaurant';
+import { isLyricQuery, findByLyrics } from '@/lib/tools/song';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -230,6 +231,10 @@ export async function POST(req: NextRequest) {
   } else if (isRestaurantQuery(text)) {
     const rp = await extractRestaurant(text).catch(() => null);
     if (rp) toolResult = await restaurantHandoff(rp).catch(() => undefined);
+  } else if (isLyricQuery(text)) {
+    toolResult = await findByLyrics(text).catch(() => undefined);
+  } else if (/\b(name that song|what song is (this|that|playing)|shazam|identif(y|ies) (this|the) song|what'?s (this|that) song)\b/i.test(text)) {
+    toolResult = `## Song ID\nNoah wants to identify a song that's playing but sent no audio. Tell him to hold the ♪ button in the composer while it plays — a few seconds is enough.`;
   }
 
   const state: TurnState = {

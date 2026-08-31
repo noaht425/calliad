@@ -102,7 +102,15 @@ export function Chat() {
 
   const { state: voiceState, error: voiceError, start: micStart, stop: micStop, supported: micSupported } = useVoiceInput(
     (t) => { setInput(''); void runTurn(t); },
-    convRef.current,
+    { conversationId: convRef.current },
+  );
+
+  const { state: songState, start: songStart, stop: songStop } = useVoiceInput(
+    (block) => {
+      speakerRef.current!.cancel();
+      setMessages((m) => [...m, { role: 'assistant', text: block }]);
+    },
+    { endpoint: '/api/song/identify', pick: (j) => j.block as string | undefined },
   );
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -138,8 +146,8 @@ export function Chat() {
       </div>
 
       <div className="shrink-0 px-4 pt-2 pb-3" style={{ borderTop: '1px solid var(--border-quiet)' }}>
-        {(mode || voiceState !== 'idle' || voiceError) && (
-          <div className="mb-1.5 flex items-center justify-between text-[11px]" style={{ color: voiceState === 'recording' || voiceError ? '#EF4444' : 'var(--text-muted)' }}>
+        {(mode || voiceState !== 'idle' || songState !== 'idle' || voiceError) && (
+          <div className="mb-1.5 flex items-center justify-between text-[11px]" style={{ color: voiceState === 'recording' || voiceError ? '#EF4444' : songState === 'recording' ? 'var(--accent)' : 'var(--text-muted)' }}>
             <span>
               {voiceError
                 ? voiceError
@@ -147,7 +155,11 @@ export function Chat() {
                   ? '● Recording… release to send'
                   : voiceState === 'transcribing'
                     ? 'Transcribing…'
-                    : `${mode === 'italian-tutor' ? 'Italian tutor' : mode === 'quiz' ? 'Quiz' : mode === 'study-coach' ? 'Study coach' : mode} · say “english” to exit`}
+                    : songState === 'recording'
+                      ? '♪ Listening for the song…'
+                      : songState === 'transcribing'
+                        ? 'Identifying…'
+                        : `${mode === 'italian-tutor' ? 'Italian tutor' : mode === 'quiz' ? 'Quiz' : mode === 'study-coach' ? 'Study coach' : mode} · say “english” to exit`}
             </span>
           </div>
         )}
@@ -178,11 +190,32 @@ export function Chat() {
           )}
           {micSupported && !input.trim() && (
             <button
+              onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); songStart(); }}
+              onPointerUp={() => songStop()}
+              onPointerLeave={() => songState === 'recording' && songStop()}
+              onPointerCancel={() => songStop()}
+              disabled={songState === 'transcribing' || voiceState !== 'idle' || sending}
+              className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-all select-none touch-none ${songState === 'recording' ? 'animate-pulse scale-110' : ''}`}
+              style={
+                songState === 'recording'
+                  ? { background: 'var(--accent)', color: 'var(--on-accent)' }
+                  : { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }
+              }
+              aria-label={songState === 'recording' ? 'Release to identify' : 'Hold to name a song playing'}
+              title="Name that song"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+              </svg>
+            </button>
+          )}
+          {micSupported && !input.trim() && (
+            <button
               onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); micStart(); }}
               onPointerUp={() => micStop()}
               onPointerLeave={() => voiceState === 'recording' && micStop()}
               onPointerCancel={() => micStop()}
-              disabled={voiceState === 'transcribing' || sending}
+              disabled={voiceState === 'transcribing' || songState !== 'idle' || sending}
               className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-all select-none touch-none ${voiceState === 'recording' ? 'animate-pulse scale-110' : ''}`}
               style={
                 voiceState === 'recording'

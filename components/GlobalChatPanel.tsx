@@ -178,7 +178,16 @@ export function GlobalChatPanel() {
 
   const { state: voiceState, error: voiceError, start: micStart, stop: micStop, supported: micSupported } = useVoiceInput(
     (t) => { setInput(''); void runTurn(t); },
-    convRef.current,
+    { conversationId: convRef.current },
+  );
+
+  const { state: songState, start: songStart, stop: songStop } = useVoiceInput(
+    (block) => {
+      setChatH((h) => (h < snapsRef.current[2] ? snapsRef.current[2] : h));
+      setMessages((m) => [...m, { role: 'assistant', text: block }]);
+      if (ttsRef.current) speakerRef.current!.flush(block.split('\n').find((l) => !l.startsWith('#') && l.trim()) ?? '');
+    },
+    { endpoint: '/api/song/identify', pick: (j) => j.block as string | undefined },
   );
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -252,6 +261,10 @@ export function GlobalChatPanel() {
                     <span className="text-[11px] font-medium animate-pulse" style={{ color: '#EF4444' }}>● Recording… release to send</span>
                   ) : voiceState === 'transcribing' ? (
                     <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Transcribing…</span>
+                  ) : songState === 'recording' ? (
+                    <span className="text-[11px] font-medium animate-pulse" style={{ color: 'var(--accent)' }}>♪ Listening for the song…</span>
+                  ) : songState === 'transcribing' ? (
+                    <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Identifying…</span>
                   ) : mode ? (
                     <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
                       {MODE_LABEL[mode]} · say &ldquo;english&rdquo; to exit
@@ -349,11 +362,32 @@ export function GlobalChatPanel() {
             />
             {micSupported && !input.trim() && (
               <button
+                onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); songStart(); }}
+                onPointerUp={() => songStop()}
+                onPointerLeave={() => songState === 'recording' && songStop()}
+                onPointerCancel={() => songStop()}
+                disabled={songState === 'transcribing' || voiceState !== 'idle' || sending}
+                className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all disabled:opacity-40 select-none touch-none ${songState === 'recording' ? 'animate-pulse scale-110' : ''}`}
+                style={
+                  songState === 'recording'
+                    ? { background: 'var(--accent)', color: 'var(--on-accent)' }
+                    : { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }
+                }
+                aria-label={songState === 'recording' ? 'Release to identify' : 'Hold to name a song playing'}
+                title="Name that song"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                </svg>
+              </button>
+            )}
+            {micSupported && !input.trim() && (
+              <button
                 onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); micStart(); }}
                 onPointerUp={() => micStop()}
                 onPointerLeave={() => voiceState === 'recording' && micStop()}
                 onPointerCancel={() => micStop()}
-                disabled={voiceState === 'transcribing' || sending}
+                disabled={voiceState === 'transcribing' || songState !== 'idle' || sending}
                 className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all disabled:opacity-40 select-none touch-none ${voiceState === 'recording' ? 'animate-pulse scale-110' : ''}`}
                 style={
                   voiceState === 'recording'

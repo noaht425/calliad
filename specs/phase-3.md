@@ -52,8 +52,17 @@ self-hosted Whisper WebSocket. Batch STT + streamed reply + streamed TTS is the 
   enough. Deepgram is the fallback. Batch Groq (~1 s to reply, ~$0.80/mo) stays until then.
 - **Stage 3 — wake word** ("Calliad" / "Cal", on-device) — Picovoice Porcupine (free tier,
   browser SDK, access key) or openWakeWord. Comes after streaming STT.
-- **Name-that-song** — AudD or ACRCloud fingerprint API (trial then ~$3–5/mo). Small feature,
-  reuses the mic infra. Needs a key.
+### ✅ Name-that-song (2026-08-31) — needs `AUDD_API_TOKEN`
+- `lib/tools/song.ts` — `identifySong(blob)` → AudD `/` recognise (`return=spotify,apple_music`)
+  → title/artist/album + streaming links block; `findByLyrics(q)` → AudD `/findLyrics`;
+  `isLyricQuery()` regex; `songIdAvailable()` gates on the token. Dark when unset (like TMDB).
+- `app/api/song/identify` — Supabase-auth multipart audio → `{ block }` (formatted markdown).
+- `useVoiceInput` generalised: `(onResult, { endpoint, pick, conversationId })`. A second
+  instance in Chat + GlobalChatPanel drives a **♪ hold-to-capture button** next to the mic →
+  `/api/song/identify` → the block is appended as an assistant message inline (no brain call).
+- `/api/chat` — a typed lyric fragment ("what's the song that goes '…'") → `findByLyrics` as a
+  `toolResult`; a bare "name that song" with no audio → a hint to use the ♪ button.
+- **Needs:** `AUDD_API_TOKEN` (audd.io). Free tier for testing, ~$5/mo for regular use.
 - **Delegated coding** — "add X to project Y" → Claude Code on a branch → tests → diff for
   review → explicit merge approval. A sandboxed runner + GitHub integration + guardrails; its
   own project, not a session.

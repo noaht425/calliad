@@ -11,20 +11,30 @@ const PREFERRED_MIME = (() => {
   return ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
 })();
 
+interface Opts {
+  conversationId?: string;
+  endpoint?: string;                          // default /api/chat/transcribe
+  pick?: (j: Record<string, unknown>) => string | undefined; // extract the result string
+  busyLabel?: string;                         // status shown while the POST is in flight
+}
+
 /**
- * Hold/tap-to-talk recorder. On stop, sends the clip to /api/chat/transcribe
- * and hands the transcript back via `onTranscript`. Shared by the Today chat
- * and the global panel.
+ * Hold/tap-to-record. On stop, POSTs the clip to `endpoint` and hands the picked
+ * result back via `onResult`. Used for voice notes (/api/chat/transcribe) and
+ * song ID (/api/song/identify). `state` is 'transcribing' during any upload.
  */
-export function useVoiceInput(onTranscript: (text: string) => void, conversationId?: string) {
+export function useVoiceInput(onResult: (text: string) => void, opts: Opts = {}) {
   const { session } = useAuth();
+  const endpoint = opts.endpoint ?? '/api/chat/transcribe';
+  const pick = opts.pick ?? ((j) => j.transcript as string | undefined);
+
   const [state, setState] = useState<VoiceState>('idle');
   const [error, setError] = useState<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const cbRef = useRef(onTranscript);
-  cbRef.current = onTranscript;
+  const cbRef = useRef(onResult);
+  cbRef.current = onResult;
 
   const supported =
     typeof window !== 'undefined' &&
@@ -41,7 +51,7 @@ export function useVoiceInput(onTranscript: (text: string) => void, conversation
   useEffect(() => cleanup, [cleanup]);
 
   const stop = useCallback(() => {
-    recorderRef.current?.state === 'recording' && recorderRef.current.stop();
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
   }, []);
 
   const start = useCallback(async () => {
@@ -66,19 +76,20 @@ export function useVoiceInput(onTranscript: (text: string) => void, conversation
         setError(null);
         try {
           const fd = new FormData();
-          fd.append('audio', new File([blob], `note.${type.includes('webm') ? 'webm' : 'm4a'}`, { type }));
-          if (conversationId) fd.append('conversationId', conversationId);
-          const res = await fetch('/api/chat/transcribe', {
+          fd.append('audio', new File([blob], `clip.${type.includes('webm') ? 'webm' : 'm4a'}`, { type }));
+          if (opts.conversationId) fd.append('conversationId', opts.conversationId);
+          const res = await fetch(endpoint, {
             method: 'POST',
             headers: { Authorization: `Bearer ${session.access_token}` },
             body: fd,
           });
           const j = await res.json().catch(() => ({}));
-          if (res.ok && j.transcript) cbRef.current(j.transcript);
-          else if (res.ok) setError('Didn’t catch that — try again.');
-          else setError(j.error || 'Transcription failed.');
+          const out = res.ok ? pick(j) : undefined;
+          if (out) cbRef.current(out);
+          else if (res.ok) setError('Nothing came back — try again.');
+          else setError((j.error as string) || 'That failed.');
         } catch {
-          setError('Transcription failed — check your connection.');
+          setError('That failed — check your connection.');
         } finally {
           setState('idle');
         }
@@ -91,7 +102,7 @@ export function useVoiceInput(onTranscript: (text: string) => void, conversation
       cleanup();
       setState('idle');
     }
-  }, [supported, session, conversationId, cleanup]);
+  }, [supported, session, endpoint, pick, opts.conversationId, cleanup]);
 
   const toggle = useCallback(() => {
     if (state === 'recording') stop();
