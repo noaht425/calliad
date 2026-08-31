@@ -186,3 +186,16 @@ Inspired by Doug's build. Same Apple ID / app-password as the calendar.
   which. `contactContextLine` rides in the prompt every turn.
 - Syncs with the calendar (cron sync + brief cron + Settings). `/api/contacts` (search / PATCH
   relationship) + Settings "Contacts" (search, per-row relationship dropdown).
+
+### ✅ Context-persistence sweep (2026-08-31)
+Doug's "ask if anything from the rolling context needs saving." The per-turn detectors already
+catch loops / "remember that I…" / taste / med replies; this catches the rest.
+- `lib/memory/sweep.ts` — `sweepConversation(userId, convId)`: last ~40 turns → T2 →
+  `{items: [{type: fact|relationship|loop|taste, summary, …}]}`, conservative, skips existing
+  loops and already-saved facts. `commitSweepItems` writes each to its home (`profile_facts` /
+  `contacts` via `setRelationship` / `open_loops` / `taste_log`). `isSaveRequest`.
+- `/api/chat` — "save this" / "anything worth keeping" / "checkpoint" → sweep → numbered list
+  stashed in `conversations.mode_state.sweep`; next turn "1 3" / "all" / "none" → commit + clear.
+- Verified: a synthetic transcript (sister's engagement, a new supplement, an Andor reaction,
+  an advisor email to send) → all four extracted with the right types; a low-signal 8-msg
+  conversation → `[]`.

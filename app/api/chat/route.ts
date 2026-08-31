@@ -40,6 +40,7 @@ import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
 import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
 import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock } from '@/lib/tools/beli';
 import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine } from '@/lib/integrations/icloud-contacts';
+import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -115,6 +116,34 @@ export async function POST(req: NextRequest) {
   if (medReply === 'not-yet') {
     await recordMed(user.id, false, 'not yet');
     return say('Okay — I’ll check once more later, then leave it.', 'med-reply');
+  }
+
+  // ── context sweep: pick response to a pending "worth saving" list ──────
+  const pendingSweep = (modeState.sweep as SweepItem[] | undefined) ?? undefined;
+  if (pendingSweep?.length && /^\s*(all|none|no(pe|thing)?|\d+([,\s]+\d+)*|\d+\s*[-–]\s*\d+)\s*$/i.test(text)) {
+    const t = text.trim().toLowerCase();
+    let chosen: SweepItem[] = [];
+    if (t === 'all') chosen = pendingSweep;
+    else if (/^(none|no|nope|nothing)$/.test(t)) chosen = [];
+    else {
+      const rng = t.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+      const idxs = rng
+        ? Array.from({ length: +rng[2] - +rng[1] + 1 }, (_, k) => +rng[1] + k)
+        : t.split(/[,\s]+/).map(Number).filter((n) => Number.isInteger(n));
+      chosen = idxs.map((n) => pendingSweep[n - 1]).filter(Boolean);
+    }
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, sweep: undefined } }).eq('id', conversationId);
+    const recap = chosen.length ? await commitSweepItems(user.id, chosen) : 'Left it all.';
+    return say(recap, 'sweep-commit');
+  }
+
+  // ── "save anything from this chat" → sweep + propose ──────────────────
+  if (isSaveRequest(text)) {
+    const items = await sweepConversation(user.id, conversationId).catch(() => []);
+    if (!items.length) return say(`Nothing here that isn't already on file.`, 'sweep-empty');
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, sweep: items } }).eq('id', conversationId);
+    const list = items.map((it, i) => `${i + 1}. ${it.summary}`).join('\n');
+    return say(`Worth keeping:\n${list}\n\nReply with the numbers to save (e.g. "1 3"), "all", or "none".`, 'sweep-proposed');
   }
 
   // ── "my niece Jessica" → resolve + offer to fix her relationship ───────
