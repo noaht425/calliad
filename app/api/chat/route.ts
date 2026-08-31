@@ -13,6 +13,9 @@ import { captureLink } from '@/lib/capture/link';
 import { runMorphology } from '@/lib/tools/morphology';
 import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
+import { upsertLoop } from '@/lib/memory/loops';
+import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
+import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo } from '@/lib/actions/detect';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -52,6 +55,40 @@ export async function POST(req: NextRequest) {
   await audit.log('inbound_message', 'noah', conversationId, { text, surface: 'pwa' });
   await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'user', content: text });
   await adminClient.from('conversations').update({ last_at: new Date().toISOString() }).eq('id', conversationId);
+
+  const say = async (reply: string, reason: string) => {
+    await adminClient.from('messages').insert({ conversation_id: conversationId!, role: 'assistant', content: reply });
+    await audit.log('outbound_message', 'calliad', conversationId!, { text: reply, surface: 'pwa', reason });
+    return streamResponse(conversationId!, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
+  };
+
+  // ── pending action awaiting yes/no ──────────────────────────────────────
+  const pending = await pendingFor(conversationId);
+  if (pending && (isYes(text) || isNo(text))) {
+    const r = await decideAction(user.id, pending.id, isYes(text) ? 'approved' : 'rejected', conversationId);
+    return say(r.message, 'action-decided');
+  }
+
+  // ── silent tier: add a task/reminder → open loop, no gate ───────────────
+  if (isTaskAdd(text)) {
+    const task = text.replace(/^.*?\b(add (a )?(task|reminder|to-?do)( to)?|remind me to|add to (my )?(to-?do|task list)|put on my to-?do)\b[:,]?\s*/i, '').trim();
+    if (task) {
+      await upsertLoop(user.id, { title: task.slice(0, 120), source: 'manual', tags: ['task'] });
+      return say(`Added: ${task}.`, 'task-add');
+    }
+  }
+
+  // ── confirm tier: calendar write → propose, wait for yes ────────────────
+  if (isCalendarWrite(text)) {
+    const ev = await extractEvent(text).catch(() => null);
+    if (!ev) return say(`I can put that on your calendar — when, exactly?`, 'calendar-write-underspecified');
+    await proposeAction({
+      userId: user.id, kind: 'create_event', riskTier: 'confirm',
+      summary: `${ev.title} — ${whenLabel(ev.start_at, ev.all_day)}`,
+      payload: { ...ev }, createdBy: conversationId,
+    });
+    return say(`Put **${ev.title}** on your calendar for **${whenLabel(ev.start_at, ev.all_day)}**${ev.location ? ` (${ev.location})` : ''}? Say yes and I'll add it.`, 'action-proposed');
+  }
 
   // ── inline quiz-item add: "quiz: PROMPT = ANSWER" ("greek quiz: ..." sets lang) ──
   const qm = text.match(/^(?:(latin|greek|italian|lat|grc|ita)\s+)?quiz[:\-]\s*(.+?)\s*=\s*(.+)$/i);
