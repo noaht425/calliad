@@ -49,9 +49,18 @@ morphology → spaced repetition → confirmation-gated writes.*
 ## Apply
 `0007_conversation_mode.sql` and `0008_quiz.sql` in the Supabase SQL Editor.
 
+### ✅ "Would I like this?" (pattern L + M)
+- `taste_log` seeded from `planning/taste-log.md` (59 entries; done via probe against prod).
+  `content/taste-log.md` vendored for the "What makes Noah bail" section.
+- `lib/taste/judge.ts` — title/kind extract → Open Library (books, no key) or TMDB
+  (screen, `TMDB_API_KEY` optional, degrades) → brain gets the full log + bail patterns as
+  ground truth; NO spoilers, weigh myth-retelling fidelity.
+- `/api/chat` detects "would I like / should I watch|read|play"; `/api/taste` + Settings manager.
+- **Optional:** `TMDB_API_KEY` (themoviedb.org) for film/show metadata.
+
 ## ⏭ Next
-- [ ] "Would I like this?" (Noah picked it) — needs `taste_log` seeded (~15-20 from
-  `planning/taste-log.md`) + metadata APIs (TMDB / Open Library).
-- [ ] Profile *slice* by intent + `profile_facts` propose→confirm.
+- [ ] Profile *slice* by intent + `profile_facts` propose→confirm (whole profile.md still goes
+  into every call — biggest remaining cost lever).
+- [ ] Tier routing beyond modes — cheap-win Q&A / trivia → T1.
 - [ ] Web-fetch tool (answer questions *about* a link).
 - [ ] Flight search, restaurant hand-off (later).
