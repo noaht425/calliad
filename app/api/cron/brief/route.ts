@@ -5,7 +5,7 @@ import { config } from '@/lib/hub/config';
 import { checkSecret } from '@/lib/hub/guard';
 import { sendPush } from '@/lib/hub/push';
 import { composeBrief } from '@/lib/brief/compose';
-import { syncCalendarEvents } from '@/lib/integrations/icloud-calendar';
+import { syncCalendarEvents, recentCalendarChanges } from '@/lib/integrations/icloud-calendar';
 import { syncContacts } from '@/lib/integrations/icloud-contacts';
 import { scanGmailLabel } from '@/lib/integrations/gmail';
 import { medCheckin } from '@/lib/health/meds';
@@ -62,10 +62,18 @@ async function handle(req: NextRequest) {
       // follow-up call stays the intended second touch — no double reminder.
       const med = await medCheckin(userId, { followUp: false }).catch((e) => ({ sent: false, reason: String(e) }));
 
-      const tidyCount = (await scanForTidy(userId).catch(() => [])).length;
-      const addendum = tidyCount
-        ? `Housekeeping: there are ${tidyCount} possible duplicate/stale item${tidyCount === 1 ? '' : 's'} in Noah's lists. End the brief with one short line telling him to say "tidy" to review them.`
-        : undefined;
+      const [tidyCount, calChanges] = await Promise.all([
+        scanForTidy(userId).then((x) => x.length).catch(() => 0),
+        recentCalendarChanges(userId).catch(() => [] as string[]),
+      ]);
+      const notes: string[] = [];
+      if (calChanges.length) {
+        notes.push(`Calendar changed since yesterday: ${calChanges.join('; ')}. Mention the relevant ones near the schedule, briefly.`);
+      }
+      if (tidyCount) {
+        notes.push(`Housekeeping: ${tidyCount} possible duplicate/stale item${tidyCount === 1 ? '' : 's'} in Noah's lists. End the brief with one short line telling him to say "tidy" to review them.`);
+      }
+      const addendum = notes.length ? notes.join('\n\n') : undefined;
 
       const brief = await composeBrief(userId, 'scheduled', { addendum });
       if (brief.deferred) { results.push({ userId, deferred: true, med }); continue; }

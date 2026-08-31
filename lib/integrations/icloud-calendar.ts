@@ -181,6 +181,51 @@ export async function syncCalendarEvents(
   // occurrences don't collapse into a single row on upsert.
   const rowKey = (e: ParsedCalendarEvent) => `${e.uid}::${e.startAt}`;
 
+  // ── changelog: added / moved / retitled / removed, non-recurring only ──
+  try {
+    const { data: prior } = await adminClient
+      .from('calendar_events')
+      .select('uid, title, start_at')
+      .eq('user_id', userId)
+      .eq('source', 'icloud')
+      .gte('start_at', now.toISOString());
+    const priorRows = (prior ?? []) as { uid: string; title: string; start_at: string }[];
+    const nextRows = events
+      .filter((e) => new Date(e.startAt) >= now)
+      .map((e) => ({ uid: rowKey(e), title: e.title, start_at: e.startAt }));
+
+    if (priorRows.length > 0) {
+      // count instances per base UID so recurring series (>1) are skipped
+      const base = (k: string) => k.split('::')[0];
+      const tally = (rows: { uid: string }[]) => {
+        const m = new Map<string, number>();
+        for (const r of rows) m.set(base(r.uid), (m.get(base(r.uid)) ?? 0) + 1);
+        return m;
+      };
+      const priorCount = tally(priorRows);
+      const nextCount = tally(nextRows);
+      const priorByBase = new Map(priorRows.map((r) => [base(r.uid), r]));
+      const nextByBase = new Map(nextRows.map((r) => [base(r.uid), r]));
+      const changes: { user_id: string; uid: string; title: string; kind: string; detail: string }[] = [];
+
+      for (const [b, r] of nextByBase) {
+        if ((nextCount.get(b) ?? 0) !== 1 || (priorCount.get(b) ?? 0) > 1) continue;
+        const p = priorByBase.get(b);
+        if (!p) changes.push({ user_id: userId, uid: b, title: r.title, kind: 'added', detail: r.start_at });
+        else if (p.start_at !== r.start_at) changes.push({ user_id: userId, uid: b, title: r.title, kind: 'moved', detail: `${p.start_at} -> ${r.start_at}` });
+        else if (p.title !== r.title) changes.push({ user_id: userId, uid: b, title: r.title, kind: 'retitled', detail: `${p.title} -> ${r.title}` });
+      }
+      for (const [b, p] of priorByBase) {
+        if ((priorCount.get(b) ?? 0) !== 1) continue;
+        if (!nextByBase.has(b)) changes.push({ user_id: userId, uid: b, title: p.title, kind: 'removed', detail: p.start_at });
+      }
+      if (changes.length) await adminClient.from('calendar_changes').insert(changes);
+    }
+    await adminClient.from('calendar_changes').delete().eq('user_id', userId).lt('at', new Date(now.getTime() - 8 * 86400000).toISOString());
+  } catch (e) {
+    console.error('[icloud] changelog error', e);
+  }
+
   if (events.length > 0) {
     await adminClient.from('calendar_events').upsert(
       events.map((e) => ({
@@ -234,4 +279,27 @@ export async function syncCalendarEvents(
     .eq('service', 'icloud_calendar');
 
   return { synced: events.length, removed, calendars: syncedUrls.length };
+}
+
+/** Recent calendar edits for the brief. Human-readable one-liners. */
+export async function recentCalendarChanges(userId: string, sinceHours = 26): Promise<string[]> {
+  const { data } = await adminClient
+    .from('calendar_changes')
+    .select('title, kind, detail, at')
+    .eq('user_id', userId)
+    .gte('at', new Date(Date.now() - sinceHours * 3600000).toISOString())
+    .order('at', { ascending: false })
+    .limit(12);
+  const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('en-US', { timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  };
+  return (data ?? []).map((c) => {
+    if (c.kind === 'added') return `"${c.title}" added (${fmt(String(c.detail))})`;
+    if (c.kind === 'removed') return `"${c.title}" cancelled (was ${fmt(String(c.detail))})`;
+    if (c.kind === 'retitled') return `renamed to "${c.title}"`;
+    const to = String(c.detail).split(' -> ')[1] ?? c.detail;
+    return `"${c.title}" moved to ${fmt(String(to))}`;
+  });
 }
