@@ -8,6 +8,13 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 async function requireUser(req: NextRequest) {
+  // Personal capture token (for an iOS Shortcut) — resolves to the single owner.
+  const capTok = req.headers.get('x-capture-token');
+  if (capTok && process.env.CAPTURE_TOKEN && capTok === process.env.CAPTURE_TOKEN) {
+    const { data: list } = await adminClient.auth.admin.listUsers();
+    const email = process.env.CAPTURE_USER_EMAIL;
+    return (email ? list.users.find((x) => x.email === email) : list.users[0]) ?? null;
+  }
   const token = req.headers.get('authorization')?.replace('Bearer ', '');
   if (!token) return null;
   const { data: { user } } = await supabase.auth.getUser(token);
