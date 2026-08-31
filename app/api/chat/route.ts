@@ -9,7 +9,8 @@ import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
 import { relevantLoops } from '@/lib/memory/loops';
 import { detectLoopsFromTurn } from '@/lib/memory/detect';
-import { captureLink } from '@/lib/capture/link';
+import { captureLink, listItems } from '@/lib/capture/link';
+import { runWebFetch } from '@/lib/tools/webfetch';
 import { runMorphology } from '@/lib/tools/morphology';
 import { profileSections, learnedFacts } from '@/lib/brain/profile';
 import { quizTurn } from '@/lib/quiz/session';
@@ -142,6 +143,13 @@ export async function POST(req: NextRequest) {
     return streamResponse(conversationId, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
   }
 
+  // ── web fetch: a link + a question about it, or "read the last thing I saved" ──
+  const readVerb = /\b(summar(y|ise|ize|ize it)|tl;?dr|recap|what does (it|this|that|the (article|page|link)) say|what'?s (in |it about)|read (it|this|that|me)|explain (this|that|the) (article|page|link|post)|according to (this|that|the) (link|article|page)|go read)\b/i.test(text);
+  const savedRef = /\b(that|the last|the latest|my (last|latest|most recent)) (link|article|page|thing i saved|bookmark)\b/i.test(text);
+  const wantsWebFetch =
+    !isCapture && (((urls?.length ?? 0) > 0 && (looksLikeQuestion || readVerb)) || (readVerb && savedRef));
+  const webFetchUrl = urls?.[0];
+
   // ── route ───────────────────────────────────────────────────────────────
   const decision = await route({ source: 'pwa', kind: 'message', text, conversationId, currentMode });
   if (decision.setMode && decision.setMode !== currentMode) {
@@ -174,6 +182,12 @@ export async function POST(req: NextRequest) {
   if (effectiveMode === 'quiz') {
     const q = await quizTurn(user.id, conversationId, text, modeState).catch(() => null);
     if (q) toolResult = q.toolResult;
+  } else if (wantsWebFetch) {
+    let target = webFetchUrl;
+    if (!target) target = (await listItems(user.id).catch(() => []))[0]?.url;
+    toolResult = target
+      ? await runWebFetch(target, text).catch(() => undefined)
+      : `## Web fetch\nNoah asked about a saved link but his reading list is empty.`;
   } else if (/\b(would i (like|enjoy|hate|bounce off)|should i (watch|read|play|start|bother with)|do you think i'?d (like|enjoy)|worth (watching|reading|playing)|think i'?d (like|enjoy))\b/i.test(text)) {
     toolResult = (await wouldILike(user.id, text).catch(() => undefined)) ?? toolResult;
   } else if (isFlightQuery(text)) {

@@ -90,9 +90,21 @@ morphology → spaced repetition → confirmation-gated writes.*
   work. Every page reskinned zinc/`dark:` → tokens; Settings → Appearance / theme picker.
 - Skipped Doug's PIM pages, his nudges/push/TMDB re-solves, and schedule-conflict detection.
 
+### ✅ Web-fetch tool (2026-08-31)
+- `lib/tools/webfetch.ts` — `fetchReadable(url)`: one GET (Chrome UA, 12 s, 1.5 MB cap),
+  HTML/plain-text only, prefers `<article>`/`<main>`/`<body>`, strips script/style/nav/chrome,
+  entity-decodes, truncates at 4000 words. SSRF guard blocks localhost / private / link-local
+  hosts and non-http schemes. `runWebFetch(url, question)` → a `toolResult` block with the body
+  fenced as `<untrusted source="web">`.
+- `/api/chat` — after the capture check: a message with a URL that's *also* a question (or a
+  "summarise / tl;dr / what does it say" verb), or "read the last thing I saved" (falls back to
+  the newest `list_items` row). Wired as the first `toolResult` branch after quiz. T2 answers
+  from the page text only.
+- Not a browser: no JS, no crawl, no PDF/video. JS-rendered pages and paywalls return a plain
+  "couldn't read it".
+
 ## ⏭ Next
 - [ ] Tier routing beyond modes — cheap-win Q&A / trivia → T1.
-- [ ] Web-fetch tool (answer questions *about* a link).
 ### ✅ Flight search + restaurant hand-off (no booking)
 - `lib/travel/detect.ts` — intent + T1 param extraction.
 - `lib/travel/flights.ts` — Google Flights + route-aware Alaska search links always;
