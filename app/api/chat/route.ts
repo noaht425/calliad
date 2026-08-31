@@ -45,11 +45,12 @@ import { isTidyRequest, scanForTidy, applyTidyItems, type TidyItem } from '@/lib
 import {
   riddleOfTheDay, isRiddleRequest, isRiddleReveal, extractRiddleGuess, checkRiddle,
   newSprint, isMathSprintStart, sprintResult,
-  newRootsQuiz, isRootsQuizStart, rootsPrompt, checkRoots,
+  newRootsQuiz, isRootsQuizStart, rootsPrompt, checkRoots, recordRootResult,
   recordScore, bestScore,
   type RiddleState, type SprintState, type RootsState,
 } from '@/lib/games/play';
 import { RIDDLES } from '@/lib/games/riddles';
+import { ROOTS } from '@/lib/games/roots';
 import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/travel/trips';
 import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
 import type { TurnState } from '@/lib/brain/prompt';
@@ -168,6 +169,7 @@ export async function POST(req: NextRequest) {
       return say(`Stopped — ${rq.correct}/${rq.i} so far.`, 'roots-stop');
     }
     const { ok, want } = checkRoots(rq, text);
+    await recordRootResult(user.id, ROOTS[rq.order[rq.i]].root, ok).catch(() => {});
     const advanced: RootsState = { ...rq, i: rq.i + 1, correct: rq.correct + (ok ? 1 : 0) };
     const mark = ok ? '✓' : `✗ (${want})`;
     if (advanced.i >= 8 || advanced.i >= advanced.order.length) {
@@ -255,7 +257,7 @@ export async function POST(req: NextRequest) {
     return say(`Math sprint — ${s.problems.length} problems, just the number, "stop" to bail.\n\n1/${s.problems.length}:  ${s.problems[0].q} = ?`, 'sprint-start');
   }
   if (isRootsQuizStart(text)) {
-    const s = newRootsQuiz();
+    const s = await newRootsQuiz(user.id);
     await adminClient.from('conversations').update({ mode_state: { ...modeState, roots: s } }).eq('id', conversationId);
     return say(`Roots quiz — 8 questions, "stop" to bail.\n\n1. ${rootsPrompt(s).text}`, 'roots-start');
   }

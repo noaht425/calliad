@@ -86,13 +86,54 @@ const ROOTS_N = 8;
 export const isRootsQuizStart = (t: string) =>
   /\b(roots quiz|etymology (quiz|drill)|quiz me on (roots|etymology)|word roots|latin\/?greek roots)\b/i.test(t);
 
-function shuffled(n: number): number[] {
-  const a = Array.from({ length: n }, (_, i) => i);
+function shuffle<T>(a: T[]): T[] {
   for (let i = a.length - 1; i > 0; i--) { const j = ri(0, i); [a[i], a[j]] = [a[j], a[i]]; }
   return a;
 }
-export function newRootsQuiz(): RootsState {
-  return { order: shuffled(ROOTS.length).slice(0, ROOTS_N * 2), i: 0, correct: 0, form: 'word' };
+
+/**
+ * Weighted, no-repeat-until-cycled selection: unseen roots first, then ones
+ * Noah keeps missing, then the least-recently-seen. Falls back to a plain
+ * shuffle if the progress table isn't there yet.
+ */
+export async function newRootsQuiz(userId: string): Promise<RootsState> {
+  let progress = new Map<string, { seen: number; miss: number; last: number }>();
+  try {
+    const { data } = await adminClient
+      .from('roots_progress').select('root, seen_count, miss_count, last_seen').eq('user_id', userId);
+    for (const r of data ?? []) {
+      progress.set(r.root as string, {
+        seen: (r.seen_count as number) ?? 0,
+        miss: (r.miss_count as number) ?? 0,
+        last: r.last_seen ? Date.parse(r.last_seen as string) : 0,
+      });
+    }
+  } catch { progress = new Map(); }
+
+  const now = Date.now();
+  const scored = ROOTS.map((r, idx) => {
+    const p = progress.get(r.root);
+    const tier = !p ? 3 : p.miss > 0 ? 2 : 1;
+    const ageDays = p ? Math.min(60, (now - p.last) / 86400000) : 60;
+    return { idx, score: tier * 1000 + (p?.miss ?? 0) * 40 + ageDays + Math.random() * 5 };
+  }).sort((a, b) => b.score - a.score);
+
+  const pool = shuffle(scored.slice(0, ROOTS_N * 3).map((x) => x.idx));
+  return { order: pool.slice(0, ROOTS_N * 2), i: 0, correct: 0, form: 'word' };
+}
+
+export async function recordRootResult(userId: string, rootStr: string, ok: boolean): Promise<void> {
+  try {
+    const { data: cur } = await adminClient
+      .from('roots_progress').select('seen_count, miss_count')
+      .eq('user_id', userId).eq('root', rootStr).maybeSingle();
+    const seen = ((cur?.seen_count as number) ?? 0) + 1;
+    const miss = Math.max(0, ((cur?.miss_count as number) ?? 0) + (ok ? -1 : 1));
+    await adminClient.from('roots_progress').upsert(
+      { user_id: userId, root: rootStr, seen_count: seen, miss_count: miss, last_seen: new Date().toISOString() },
+      { onConflict: 'user_id,root' },
+    );
+  } catch { /* table not migrated yet — non-fatal */ }
 }
 export function rootsPrompt(s: RootsState): { text: string; form: RootForm } {
   const r = ROOTS[s.order[s.i]];
