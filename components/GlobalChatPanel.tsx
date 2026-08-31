@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { streamChat } from '@/lib/api';
 import { useVoiceInput } from '@/lib/voice/useVoiceInput';
-import { SentenceSpeaker } from '@/lib/voice/speak';
+import { SentenceSpeaker, primeSpeech } from '@/lib/voice/speak';
 import { fileToResizedDataUrl } from '@/lib/image';
 import { useConversationSync } from '@/lib/chat/useConversationSync';
 
@@ -67,6 +67,17 @@ export function GlobalChatPanel() {
   ttsRef.current = ttsOn;
   const speakerRef = useRef<SentenceSpeaker>(null);
   if (!speakerRef.current) speakerRef.current = new SentenceSpeaker();
+
+  useEffect(() => { try { if (localStorage.getItem('calliad:tts') === '1') setTtsOn(true); } catch { /* no storage */ } }, []);
+  const toggleTts = useCallback(() => {
+    speakerRef.current!.cancel();
+    setTtsOn((v) => {
+      const next = !v;
+      try { localStorage.setItem('calliad:tts', next ? '1' : '0'); } catch { /* no storage */ }
+      if (next) primeSpeech(); // unlock speechSynthesis while we still have the tap
+      return next;
+    });
+  }, []);
 
   const snapsRef = useRef<[number, number, number, number]>([CLOSED, PEEK, 300, 560]);
   const dragRef = useRef({ active: false, startY: 0, startH: 0 });
@@ -140,6 +151,7 @@ export function GlobalChatPanel() {
   /* ─── Send ────────────────────────────────────────────────────────────── */
   const runTurn = useCallback(async (text: string, images: string[] = []) => {
     if ((!text.trim() && !images.length) || sending || !session) return;
+    if (ttsRef.current) primeSpeech(); // keep the gesture-unlock fresh for this reply
     setMessages((m) => [...m, { role: 'user', text, images: images.length ? images : undefined }, { role: 'assistant', text: '' }]);
     setSending(true);
     setChatH((h) => (h < snapsRef.current[2] ? snapsRef.current[2] : h));
@@ -297,7 +309,7 @@ export function GlobalChatPanel() {
                 </div>
                 <div className="absolute right-4 flex items-center gap-3">
                   <button
-                    onClick={() => { speakerRef.current!.cancel(); setTtsOn((v) => !v); }}
+                    onClick={toggleTts}
                     className="transition-colors"
                     style={{ color: ttsOn ? 'var(--accent)' : 'var(--text-quiet)' }}
                     title={ttsOn ? 'Spoken replies on' : 'Spoken replies off'}

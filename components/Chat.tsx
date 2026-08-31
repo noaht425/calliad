@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { streamChat } from '@/lib/api';
 import { useVoiceInput } from '@/lib/voice/useVoiceInput';
-import { SentenceSpeaker } from '@/lib/voice/speak';
+import { SentenceSpeaker, primeSpeech } from '@/lib/voice/speak';
 import { fileToResizedDataUrl } from '@/lib/image';
 import { useConversationSync } from '@/lib/chat/useConversationSync';
 
@@ -35,6 +35,17 @@ export function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  useEffect(() => { try { if (localStorage.getItem('calliad:tts') === '1') setTtsOn(true); } catch { /* no storage */ } }, []);
+  const toggleTts = useCallback(() => {
+    speakerRef.current!.cancel();
+    setTtsOn((v) => {
+      const next = !v;
+      try { localStorage.setItem('calliad:tts', next ? '1' : '0'); } catch { /* no storage */ }
+      if (next) primeSpeech();
+      return next;
+    });
+  }, []);
+
   // On load, show today's brief (if there is one) and let replies continue it.
   useEffect(() => {
     if (!session) return;
@@ -62,6 +73,7 @@ export function Chat() {
 
   const runTurn = useCallback(async (text: string, images: string[] = []) => {
     if ((!text.trim() && !images.length) || sending || !session) return;
+    if (ttsRef.current) primeSpeech();
     setMessages((m) => [...m, { role: 'user', text, images: images.length ? images : undefined }, { role: 'assistant', text: '' }]);
     setSending(true);
     speakerRef.current!.cancel();
@@ -244,7 +256,7 @@ export function Chat() {
           />
           {micSupported && !input.trim() && !pendingImages.length && (
             <button
-              onClick={() => { speakerRef.current!.cancel(); setTtsOn((v) => !v); }}
+              onClick={toggleTts}
               className="shrink-0 h-9 w-9 rounded-xl flex items-center justify-center transition-colors"
               style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: ttsOn ? 'var(--accent)' : 'var(--text-quiet)' }}
               aria-label={ttsOn ? 'Spoken replies on' : 'Spoken replies off'}

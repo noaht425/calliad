@@ -345,6 +345,7 @@ export default function SettingsPage() {
   const router = useRouter();
   const [gmailParam, setGmailParam] = useState<string | null>(null);
   const [pushState, setPushState] = useState<'unknown' | 'granted' | 'denied' | 'default'>('unknown');
+  const [pushMsg, setPushMsg] = useState('');
   const [health, setHealth] = useState<{ killswitch: KillLevel; spendMonthToDate: number; spendCap: number } | null>(null);
   const [ints, setInts] = useState<IntegrationsState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -715,17 +716,50 @@ export default function SettingsPage() {
       <section className="mb-8">
         <h2 className={label}>Notifications</h2>
         <p className="text-sm text-[var(--text-muted)] mb-2">Push permission: <span className="font-medium">{pushState}</span></p>
-        {pushState !== 'granted' && (
+        <div className="flex flex-wrap gap-2">
           <button
             className={btn}
             onClick={async () => {
-              const ok = await requestPushPermission(session.access_token);
-              setPushState(ok ? 'granted' : (Notification.permission as typeof pushState));
+              setPushMsg('Setting up…');
+              const r = await requestPushPermission(session.access_token);
+              setPushState(typeof Notification !== 'undefined' ? (Notification.permission as typeof pushState) : 'unknown');
+              if (r.ok) setPushMsg('Subscribed on this device. Try the test below.');
+              else setPushMsg(
+                r.reason === 'not-installed'
+                  ? 'On iPhone/iPad, add Calliad to your Home Screen first, then open it from that icon and try again.'
+                  : r.reason === 'denied'
+                    ? 'Permission was denied — enable notifications for Calliad in your browser/site settings, then retry.'
+                    : r.reason === 'unsupported'
+                      ? 'This browser can’t do web push. On iOS you need the Home Screen app (iOS 16.4+).'
+                      : r.reason === 'save-failed'
+                        ? 'Subscribed in the browser but the server didn’t save it — try again.'
+                        : 'Couldn’t subscribe — try again, or reinstall the Home Screen app.',
+              );
             }}
           >
-            Enable push notifications
+            {pushState === 'granted' ? 'Re-subscribe this device' : 'Enable push notifications'}
           </button>
-        )}
+          <button
+            className={btn}
+            onClick={async () => {
+              setPushMsg('Sending…');
+              try {
+                const res = await fetch('/api/push/test', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } });
+                const j = await res.json();
+                setPushMsg(
+                  j.sent > 0
+                    ? `Sent to ${j.sent} device${j.sent === 1 ? '' : 's'}${j.pruned ? ` (${j.pruned} stale removed)` : ''} — you should see it now.`
+                    : 'No active subscriptions on the server. Tap “Enable / Re-subscribe” above first.',
+                );
+              } catch {
+                setPushMsg('Test request failed.');
+              }
+            }}
+          >
+            Send test notification
+          </button>
+        </div>
+        {pushMsg && <p className="text-xs text-[var(--text-muted)] mt-2">{pushMsg}</p>}
       </section>
 
       {/* ── Hub status ───────────────────────────────────────────────── */}
