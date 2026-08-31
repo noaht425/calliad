@@ -14,7 +14,12 @@ interface Loop {
   due_at: string | null;
   tags: string[];
   source: string;
+  recur: 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly' | null;
 }
+
+const RECUR_SHORT: Record<string, string> = {
+  daily: 'daily', weekdays: 'weekdays', weekly: 'weekly', biweekly: 'every 2 wks', monthly: 'monthly',
+};
 
 const DAY = 86400000;
 const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
@@ -127,7 +132,12 @@ export default function TasksPage() {
                         style={{ borderColor: 'var(--accent-border)' }}
                       />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm" style={{ color: 'var(--text)' }}>{l.title}</p>
+                        <p className="text-sm" style={{ color: 'var(--text)' }}>
+                          {l.title}
+                          {l.recur && (
+                            <span className="ml-1.5 text-[10px] align-middle" style={{ color: 'var(--accent)' }}>↻ {RECUR_SHORT[l.recur]}</span>
+                          )}
+                        </p>
                         {l.body && <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{l.body}</p>}
                         <div className="mt-1 flex items-center gap-2 text-[11px]" style={{ color: 'var(--text-quiet)' }}>
                           {l.due_at

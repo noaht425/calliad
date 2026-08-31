@@ -8,7 +8,32 @@ export interface OpenLoop {
   status: 'open' | 'done' | 'dropped';
   tags: string[];
   source: string;
+  recur: 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly' | null;
 }
+
+export type Recur = NonNullable<OpenLoop['recur']>;
+
+/** Next due date for a recurring loop, always strictly in the future. */
+export function nextRecurDate(recur: Recur, from: Date): string {
+  const advance = (d: Date): Date => {
+    const n = new Date(d);
+    if (recur === 'daily') n.setDate(n.getDate() + 1);
+    else if (recur === 'weekdays') { do { n.setDate(n.getDate() + 1); } while (n.getDay() === 0 || n.getDay() === 6); }
+    else if (recur === 'weekly') n.setDate(n.getDate() + 7);
+    else if (recur === 'biweekly') n.setDate(n.getDate() + 14);
+    else n.setMonth(n.getMonth() + 1); // monthly
+    return n;
+  };
+  let next = advance(from);
+  const now = Date.now();
+  let guard = 0;
+  while (next.getTime() <= now && guard++ < 60) next = advance(next);
+  return next.toISOString();
+}
+
+export const RECUR_LABEL: Record<Recur, string> = {
+  daily: 'every day', weekdays: 'every weekday', weekly: 'every week', biweekly: 'every 2 weeks', monthly: 'every month',
+};
 
 /** Open loops that are due soon or match any of the given tags. Most-urgent first. */
 export async function relevantLoops(
@@ -20,7 +45,7 @@ export async function relevantLoops(
 
   const { data } = await adminClient
     .from('open_loops')
-    .select('id, title, body, due_at, status, tags, source')
+    .select('id, title, body, due_at, status, tags, source, recur')
     .eq('user_id', userId)
     .eq('status', 'open')
     .order('due_at', { ascending: true, nullsFirst: false })
@@ -40,7 +65,7 @@ export async function relevantLoops(
 export async function allOpenLoops(userId: string): Promise<OpenLoop[]> {
   const { data } = await adminClient
     .from('open_loops')
-    .select('id, title, body, due_at, status, tags, source')
+    .select('id, title, body, due_at, status, tags, source, recur')
     .eq('user_id', userId)
     .eq('status', 'open')
     .order('due_at', { ascending: true, nullsFirst: false });
@@ -50,7 +75,7 @@ export async function allOpenLoops(userId: string): Promise<OpenLoop[]> {
 /** Insert, or merge into an existing open loop with a matching title (case-insensitive). */
 export async function upsertLoop(
   userId: string,
-  loop: { title: string; body?: string | null; due_at?: string | null; tags?: string[]; source?: string },
+  loop: { title: string; body?: string | null; due_at?: string | null; tags?: string[]; source?: string; recur?: Recur | null },
 ): Promise<'inserted' | 'merged' | 'skipped'> {
   const title = loop.title.trim();
   if (!title) return 'skipped';
@@ -70,6 +95,7 @@ export async function upsertLoop(
         body: loop.body ?? existing.body,
         due_at: loop.due_at ?? existing.due_at,
         tags: [...new Set([...(existing.tags ?? []), ...(loop.tags ?? [])])],
+        ...(loop.recur !== undefined ? { recur: loop.recur } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq('id', existing.id);
@@ -83,16 +109,38 @@ export async function upsertLoop(
     due_at: loop.due_at ?? null,
     tags: loop.tags ?? [],
     source: loop.source ?? 'chat',
+    recur: loop.recur ?? null,
   });
   return 'inserted';
 }
 
 export async function setLoopStatus(userId: string, id: string, status: 'done' | 'dropped'): Promise<void> {
+  const { data: loop } = await adminClient
+    .from('open_loops')
+    .select('title, body, tags, due_at, recur, source, status')
+    .eq('user_id', userId)
+    .eq('id', id)
+    .maybeSingle();
+
   await adminClient
     .from('open_loops')
     .update({ status, updated_at: new Date().toISOString() })
     .eq('user_id', userId)
     .eq('id', id);
+
+  // Completing a recurring task spawns the next occurrence. Dropping ends it.
+  if (status === 'done' && loop?.recur && loop.status === 'open') {
+    const base = loop.due_at ? new Date(loop.due_at) : new Date();
+    await adminClient.from('open_loops').insert({
+      user_id: userId,
+      title: loop.title,
+      body: loop.body ?? null,
+      tags: loop.tags ?? [],
+      source: loop.source ?? 'chat',
+      recur: loop.recur,
+      due_at: nextRecurDate(loop.recur as Recur, base),
+    });
+  }
 }
 
 export async function setLoopDue(userId: string, id: string, due_at: string | null): Promise<void> {

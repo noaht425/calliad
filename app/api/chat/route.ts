@@ -15,7 +15,7 @@ import { runMorphology } from '@/lib/tools/morphology';
 import { profileSections, learnedFacts } from '@/lib/brain/profile';
 import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
-import { upsertLoop } from '@/lib/memory/loops';
+import { upsertLoop, RECUR_LABEL } from '@/lib/memory/loops';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
@@ -242,13 +242,14 @@ export async function POST(req: NextRequest) {
 
   // ── silent tier: add a task → open loop (tagged 'task'), no gate ────────
   if (isTaskAdd(text)) {
-    const { title, due_at } = await extractTask(text).catch(() => ({ title: text.trim(), due_at: null }));
+    const { title, due_at, recur } = await extractTask(text).catch(() => ({ title: text.trim(), due_at: null, recur: null }));
     if (title) {
-      await upsertLoop(user.id, { title, due_at, source: 'manual', tags: ['task'] });
+      await upsertLoop(user.id, { title, due_at, recur, source: 'manual', tags: ['task'] });
       const whenNote = due_at
-        ? ` — due ${new Date(due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ })}`
+        ? ` — ${recur ? 'first due ' : 'due '}${new Date(due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ })}`
         : '';
-      return say(`Added: ${title}${whenNote}.`, 'task-add');
+      const recurNote = recur ? ` (${RECUR_LABEL[recur]})` : '';
+      return say(`Added: ${title}${whenNote}${recurNote}.`, 'task-add');
     }
   }
 
