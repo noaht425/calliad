@@ -10,6 +10,7 @@ import { getIntegrationContext } from '@/lib/integrations/context';
 import { relevantLoops } from '@/lib/memory/loops';
 import { detectLoopsFromTurn } from '@/lib/memory/detect';
 import { captureLink } from '@/lib/capture/link';
+import { runMorphology } from '@/lib/tools/morphology';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -87,14 +88,16 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops] = await Promise.all([
+  const [recent, integrations, loops, toolResult] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
+    decision.tools.includes('morphology') ? runMorphology(text).catch(() => undefined) : Promise.resolve(undefined),
   ]);
   const state: TurnState = {
     now: new Date(), tz: TZ, recent, integrations, loops,
     mode: effectiveMode === 'default' ? undefined : effectiveMode,
+    toolResult,
   };
   const { meta, stream } = await call({
     purpose: 'chat',

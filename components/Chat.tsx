@@ -63,7 +63,8 @@ export function Chat() {
               };
               return next;
             }),
-          onDone: (_full, meta) => setMode(meta?.mode && meta.mode !== 'default' ? meta.mode : undefined),
+          onDone: (_full, meta) =>
+            setMode(meta?.mode && ['italian-tutor', 'quiz', 'study-coach'].includes(meta.mode) ? meta.mode : undefined),
         },
         convRef.current,
       );
