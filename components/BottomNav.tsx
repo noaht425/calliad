@@ -2,10 +2,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-/** Phase 0 nav — Today + Settings only. Grows back as pages return in later phases. */
+/** Phase 1 nav — Today + Reading + Settings. Grows as surfaces return. */
 export function BottomNav() {
   const path = usePathname();
   const onHome = path === '/';
+  const onReading = path.startsWith('/reading');
   const onSettings = path.startsWith('/settings');
 
   return (
@@ -19,6 +20,15 @@ export function BottomNav() {
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
           Today
+        </Link>
+        <Link
+          href="/reading"
+          className={`flex-1 flex flex-col items-center gap-1 py-3 text-[10px] font-medium transition-colors ${onReading ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-400 dark:text-zinc-600'}`}
+        >
+          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={onReading ? 2.25 : 1.75} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+          </svg>
+          Reading
         </Link>
         <Link
           href="/settings"

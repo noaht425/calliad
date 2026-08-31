@@ -9,6 +9,7 @@ import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
 import { relevantLoops } from '@/lib/memory/loops';
 import { detectLoopsFromTurn } from '@/lib/memory/detect';
+import { captureLink } from '@/lib/capture/link';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -45,6 +46,21 @@ export async function POST(req: NextRequest) {
   await audit.log('inbound_message', 'noah', conversationId, { text, surface: 'pwa' });
   await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'user', content: text });
   await adminClient.from('conversations').update({ last_at: new Date().toISOString() }).eq('id', conversationId);
+
+  // ── frictionless capture: bare URL, or a URL + an explicit "save" phrase ──
+  const urls = text.match(/https?:\/\/[^\s<>"')]+/g);
+  const saveIntent = /\b(save|add|bookmark|keep|file|read later|watch later|reading list|watch list)\b/i.test(text);
+  if (urls && (text.trim() === urls[0] || (saveIntent && urls.length === 1))) {
+    const r = await captureLink(user.id, urls[0], { source: 'chat' });
+    const reply = r.ok
+      ? r.deduped
+        ? `Already on your ${r.item.kind} list: ${r.item.title ?? r.item.url}.`
+        : `Filed under ${r.item.kind}: ${r.item.title ?? r.item.url}.${r.item.descriptor ? ` ${r.item.descriptor}` : ''}`
+      : `Couldn't grab that link — ${r.error}.`;
+    await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply });
+    await audit.log('outbound_message', 'calliad', conversationId, { text: reply, surface: 'pwa', reason: 'capture' });
+    return streamResponse(conversationId, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
+  }
 
   // ── route ───────────────────────────────────────────────────────────────
   const decision = await route({ source: 'pwa', kind: 'message', text, conversationId });
