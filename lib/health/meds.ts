@@ -1,6 +1,7 @@
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { sendPush } from '@/lib/hub/push';
+import { signAction } from '@/lib/hub/push-token';
 
 // Active daily medication check-in. Persona: "a light spoken check-in lands
 // better than a reminder that needs a tick." Max two pushes a day; after that
@@ -50,7 +51,17 @@ export async function medCheckin(
     sent === 0
       ? 'Did you take your meds today?'
       : 'Still checking — meds today? (last one, then I’ll drop it)';
-  const push = await sendPush(userId, { title: 'Meds', body, url: '/', tag: 'meds' });
+  const push = await sendPush(userId, {
+    title: 'Meds',
+    body,
+    url: '/',
+    tag: 'meds',
+    actions: [
+      { action: 'med-took', title: 'Took them' },
+      { action: 'med-not-yet', title: 'Not yet' },
+    ],
+    actionToken: signAction(userId, 'med'),
+  });
 
   await adminClient.from('med_log').upsert(
     {

@@ -17,6 +17,8 @@ export interface PushPayload {
   body: string;
   url?: string;
   tag?: string;
+  actions?: { action: string; title: string }[]; // notification buttons (max 2 on iOS)
+  actionToken?: string;                           // signed token for /api/push/action
 }
 
 /** Send a web-push to all of a user's subscriptions; prune expired (410) ones. */
@@ -36,7 +38,14 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<{ 
     try {
       await webpush.sendNotification(
         { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-        JSON.stringify({ title: payload.title, body: payload.body, url: payload.url ?? '/', tag: payload.tag ?? 'calliad' }),
+        JSON.stringify({
+          title: payload.title,
+          body: payload.body,
+          url: payload.url ?? '/',
+          tag: payload.tag ?? 'calliad',
+          ...(payload.actions?.length ? { actions: payload.actions.slice(0, 2) } : {}),
+          ...(payload.actionToken ? { actionToken: payload.actionToken } : {}),
+        }),
       );
       sent++;
     } catch (err: unknown) {
