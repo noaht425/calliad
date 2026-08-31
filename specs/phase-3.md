@@ -44,10 +44,14 @@ self-hosted Whisper WebSocket. Batch STT + streamed reply + streamed TTS is the 
 
 ## ⏭ Rest of Phase 3 — each needs a decision or an external piece
 
-- **Streaming STT** (finishes Stage 2's latency goal) — pick a provider (Deepgram/AssemblyAI)
-  and accept the recurring cost, or stand up self-hosted Whisper.
+- **Streaming STT + Stage 3 hands-free** — **deferred 2026-08-31** (Noah: wants it eventually,
+  other work first). When picked back up: AssemblyAI Universal-Streaming is the pick (~$3/mo at
+  personal scale, voice-agent-shaped, temp-token browser flow works on Vercel — no new infra);
+  ~1 day for a working version (token endpoint + `lib/voice/streamingSTT.ts` WS client +
+  rewire the mic button), +½ day for an AudioWorklet if opus framing latency isn't crisp
+  enough. Deepgram is the fallback. Batch Groq (~1 s to reply, ~$0.80/mo) stays until then.
 - **Stage 3 — wake word** ("Calliad" / "Cal", on-device) — Picovoice Porcupine (free tier,
-  browser SDK, access key) or openWakeWord. Moderate build; lower value than Stage 2 polish.
+  browser SDK, access key) or openWakeWord. Comes after streaming STT.
 - **Name-that-song** — AudD or ACRCloud fingerprint API (trial then ~$3–5/mo). Small feature,
   reuses the mic infra. Needs a key.
 - **Delegated coding** — "add X to project Y" → Claude Code on a branch → tests → diff for
