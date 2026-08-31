@@ -40,7 +40,7 @@ export default function ReadingPage() {
 
   return (
     <PageShell>
-      <PageHeader title="Reading &amp; watch" count={items.length || undefined} />
+      <PageHeader title="Reading & watch" count={items.length || undefined} />
       <PageBody className="px-4 pt-2">
         <div className="max-w-xl mx-auto">
           {items.length === 0 && (
