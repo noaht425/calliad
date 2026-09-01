@@ -20,7 +20,13 @@ const TABS: { key: string; label: string; countKey: keyof Counts }[] = [
   { key: 'colleague', label: 'Colleagues', countKey: 'colleague' },
   { key: 'all', label: 'All', countKey: 'all' },
 ];
-const REL_CYCLE: Rel[] = ['family', 'friend', 'colleague', 'acquaintance', null];
+const REL_OPTS: { value: string; label: string }[] = [
+  { value: '', label: '— none —' },
+  { value: 'family', label: 'Family' },
+  { value: 'friend', label: 'Friend' },
+  { value: 'colleague', label: 'Colleague' },
+  { value: 'acquaintance', label: 'Acquaintance' },
+];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function parseBday(b: string | null): { mm: number; dd: number; year: number | null } | null {
@@ -74,10 +80,7 @@ export default function PeoplePage() {
     await fetch('/api/contacts', { method: 'PATCH', headers: h, body: JSON.stringify({ id, ...body }) });
     void load();
   };
-  const cycleRel = (c: Contact) => {
-    const i = REL_CYCLE.indexOf(c.relationship);
-    patch(c.id, { relationship: REL_CYCLE[(i + 1) % REL_CYCLE.length] });
-  };
+  const setRel = (c: Contact, v: string) => patch(c.id, { relationship: v || null });
 
   const shown = items.filter((c) => {
     if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !(c.org ?? '').toLowerCase().includes(search.toLowerCase())) return false;
@@ -104,7 +107,7 @@ export default function PeoplePage() {
                   color: 'var(--text)',
                 }}
               >
-                {t.label} {counts ? <span style={{ color: 'var(--text-quiet)' }}>({counts[t.countKey]})</span> : null}
+                {t.label} {counts ? <span style={{ color: 'var(--text-muted)' }}>({counts[t.countKey]})</span> : null}
               </button>
             ))}
           </div>
@@ -133,7 +136,7 @@ export default function PeoplePage() {
             ))}
           </div>
 
-          {shown.length === 0 && <p className="text-sm" style={{ color: 'var(--text-quiet)' }}>No one here.</p>}
+          {shown.length === 0 && <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No one here.</p>}
 
           <ul className="space-y-2">
             {shown.map((c) => {
@@ -172,34 +175,42 @@ export default function PeoplePage() {
                             className="underline"
                             onClick={() => { patch(c.id, { name: draft.name.trim(), birthday: draft.birthday.trim() || null }); setEditing(null); }}
                           >save</button>
-                          <button className="underline" style={{ color: 'var(--text-quiet)' }} onClick={() => setEditing(null)}>cancel</button>
+                          <button className="underline" style={{ color: 'var(--text-muted)' }} onClick={() => setEditing(null)}>cancel</button>
                         </div>
                       </div>
                     ) : (
                       <>
                         <p className="text-sm truncate" style={{ color: 'var(--text)' }}>{c.name}</p>
-                        <p className="text-[11px]" style={{ color: 'var(--text-quiet)' }}>
-                          {c.relationship ? <span style={{ color: 'var(--accent)' }}>{c.relationship_note || c.relationship}</span> : null}
-                          {c.relationship && (bd || c.org) ? ' · ' : ''}
-                          {bd}{bd && soon != null ? ` (${soon === 0 ? 'today' : `in ${soon}d`})` : ''}
-                          {!bd && c.org ? c.org : ''}
-                        </p>
+                        {(bd || c.org) && (
+                          <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                            {bd}{bd && soon != null ? ` · ${soon === 0 ? 'today' : `in ${soon}d`}` : ''}
+                            {!bd && c.org ? c.org : ''}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-1">
+                          <select
+                            value={c.relationship ?? ''}
+                            onChange={(e) => setRel(c, e.target.value)}
+                            className="rounded-md border px-1.5 py-1 text-[11px]"
+                            style={{ borderColor: 'var(--border)', background: 'var(--paper)', color: c.relationship ? 'var(--accent)' : 'var(--text-muted)' }}
+                            aria-label="Relationship"
+                          >
+                            {REL_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                          <button
+                            className="text-[11px] underline"
+                            style={{ color: 'var(--text-muted)' }}
+                            onClick={() => { setEditing(c.id); setDraft({ name: c.name, birthday: c.birthday ?? '' }); }}
+                          >edit</button>
+                          <button
+                            className="text-[11px] underline"
+                            style={{ color: 'var(--text-muted)' }}
+                            onClick={() => patch(c.id, { hidden: true })}
+                          >hide</button>
+                        </div>
                       </>
                     )}
                   </div>
-                  {editing !== c.id && (
-                    <div className="shrink-0 flex items-center gap-2 text-[var(--text-quiet)]">
-                      <button onClick={() => cycleRel(c)} title="Change relationship" aria-label="Change relationship">
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
-                      </button>
-                      <button onClick={() => { setEditing(c.id); setDraft({ name: c.name, birthday: c.birthday ?? '' }); }} title="Edit" aria-label="Edit">
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z" /></svg>
-                      </button>
-                      <button onClick={() => patch(c.id, { hidden: true })} title="Hide in Calliad" aria-label="Hide">
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
-                      </button>
-                    </div>
-                  )}
                 </li>
               );
             })}

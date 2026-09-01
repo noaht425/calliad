@@ -54,7 +54,7 @@ export default function UnsubscribesPage() {
       <PageBody className="px-4 pt-2">
         <div className="max-w-xl mx-auto pb-4">
           {rows.length === 0 && (
-            <p className="text-sm" style={{ color: 'var(--text-quiet)' }}>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
               None yet. When Calliad sees an unsubscribe confirmation in your promo mail it logs the sender here and watches for 10 days to check it stuck. Or add one below / say &ldquo;I unsubscribed from X&rdquo; in chat.
             </p>
           )}
@@ -71,14 +71,14 @@ export default function UnsubscribesPage() {
                           <p className="text-sm" style={{ color: 'var(--text)' }}>{r.sender_name}</p>
                           <p className="text-[11px]" style={{ color: 'var(--accent)' }}>{r.sender_domain}</p>
                         </div>
-                        <span className="text-[10px] font-mono" style={{ color: r.status === 'still_coming' ? '#ef4444' : r.status === 'confirmed' ? '#16a34a' : 'var(--text-quiet)' }}>
+                        <span className="text-[10px] font-mono" style={{ color: r.status === 'still_coming' ? '#ef4444' : r.status === 'confirmed' ? '#16a34a' : 'var(--text-muted)' }}>
                           {STATUS_LABEL[r.status]}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between mt-2 text-[11px]" style={{ color: 'var(--text-quiet)' }}>
+                      <div className="flex items-center justify-between mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
                         <span>unsub {fmt(r.unsubscribed_at)} · last marketing {fmt(r.last_marketing_at)}</span>
                       </div>
-                      <div className="flex items-center justify-between mt-1 text-[11px]" style={{ color: 'var(--text-quiet)' }}>
+                      <div className="flex items-center justify-between mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
                         <span>{r.days_watched} of {r.watch_days} days</span>
                         <button className="underline" onClick={() => remove(r.id)}>remove</button>
                       </div>

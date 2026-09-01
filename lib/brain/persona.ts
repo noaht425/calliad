@@ -87,11 +87,57 @@ export async function regenerateVoiceProfile(userId: string): Promise<string | n
   return text;
 }
 
+// ── Layer 0: personality axes (1–5 dials) ─────────────────────────────────
+export interface Axes { warmth: number; directness: number; wit: number; verbosity: number; proactivity: number }
+export const AXES_DEFAULT: Axes = { warmth: 3, directness: 3, wit: 3, verbosity: 3, proactivity: 3 };
+export const AXES_META: { key: keyof Axes; label: string; low: string; high: string }[] = [
+  { key: 'warmth', label: 'Warmth', low: 'Cool, professional', high: 'Friendly, personal' },
+  { key: 'directness', label: 'Directness', low: 'Hedged, exploratory', high: 'Blunt, assertive' },
+  { key: 'wit', label: 'Wit', low: 'Purely functional', high: 'Dry humour, wordplay' },
+  { key: 'verbosity', label: 'Verbosity', low: 'One-liners', high: 'Full context + reasoning' },
+  { key: 'proactivity', label: 'Proactivity', low: "Only what's asked", high: 'Surfaces extra observations' },
+];
+
+export async function getAxes(): Promise<Axes> {
+  try {
+    const raw = await config.get('personality_axes').catch(() => '');
+    const p = raw ? JSON.parse(raw) : {};
+    return {
+      warmth: clampAxis(p.warmth), directness: clampAxis(p.directness), wit: clampAxis(p.wit),
+      verbosity: clampAxis(p.verbosity), proactivity: clampAxis(p.proactivity),
+    };
+  } catch { return { ...AXES_DEFAULT }; }
+}
+export async function setAxes(a: Partial<Axes>): Promise<Axes> {
+  const cur = await getAxes();
+  const next = { ...cur, ...Object.fromEntries(Object.entries(a).map(([k, v]) => [k, clampAxis(v)])) } as Axes;
+  await config.set('personality_axes', JSON.stringify(next));
+  return next;
+}
+const clampAxis = (v: unknown) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(1, Math.min(5, n)) : 3; };
+
+function axesLines(a: Axes): string[] {
+  const out: string[] = [];
+  if (a.warmth <= 2) out.push('Keep it cool and professional — minimal personalising, skip empathy filler.');
+  else if (a.warmth >= 4) out.push('Be warm and personal — address Noah directly, acknowledge how something lands when it fits.');
+  if (a.directness <= 2) out.push('Hedge and explore — offer options and caveats rather than a single verdict.');
+  else if (a.directness >= 4) out.push("Be blunt — say what he should do, don't soften it with \"you might consider\".");
+  if (a.wit <= 2) out.push('Stay purely functional — no jokes or asides.');
+  else if (a.wit >= 4) out.push('Dry humour and the odd wordplay are welcome when they land.');
+  if (a.verbosity <= 2) out.push('Very terse — one or two lines, no visible reasoning.');
+  else if (a.verbosity >= 4) out.push('Give full context and walk through the reasoning.');
+  if (a.proactivity <= 2) out.push("Answer only what's asked — don't volunteer tangents or \"by the way\" notes.");
+  else if (a.proactivity >= 4) out.push('Volunteer useful observations and "by the way…" notes liberally.');
+  return out;
+}
+
 /** The block folded into the cached persona layer. Stable for days at a time. */
 export async function personaExtra(userId: string): Promise<string> {
-  const [fam, voice] = await Promise.all([familiarity(userId), getVoiceProfile()]);
+  const [fam, voice, axes] = await Promise.all([familiarity(userId), getVoiceProfile(), getAxes()]);
   const parts: string[] = [];
   if (FAM_LINES[fam.level]) parts.push(FAM_LINES[fam.level]);
+  const al = axesLines(axes);
+  if (al.length) parts.push(al.join(' '));
   if (voice) parts.push(voice);
   return parts.length ? `## Rapport\n${parts.join('\n\n')}` : '';
 }

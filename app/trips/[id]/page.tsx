@@ -81,18 +81,18 @@ export default function TripDetailPage() {
       <SubPageHeader title="Trip" onBack={() => router.push('/trips')} />
       <PageBody className="px-4 pt-2">
         <div className="max-w-xl mx-auto pb-4">
-          {notFound && <p className="text-sm" style={{ color: 'var(--text-quiet)' }}>Trip not found.</p>}
+          {notFound && <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Trip not found.</p>}
           {trip && (
             <>
               <div className="rounded-xl px-4 py-4 mb-5" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
                 <div className="flex items-baseline justify-between gap-2">
                   <h1 className="text-lg font-medium" style={{ color: 'var(--text)' }}>{trip.destination}</h1>
-                  <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: 'var(--text-quiet)' }}>{trip.status}</span>
+                  <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{trip.status}</span>
                 </div>
                 <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
                   {fmt(trip.start_date)}{trip.end_date && trip.end_date !== trip.start_date ? ` – ${fmt(trip.end_date)}` : ''}
                 </p>
-                <p className="text-[11px] mt-1" style={{ color: 'var(--text-quiet)' }}>
+                <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
                   {trip.home_airport ? `Home airport ${trip.home_airport}` : ''}{trip.home_airport && trip.has_pet ? ' · ' : ''}{trip.has_pet ? 'traveling with a pet' : ''}
                 </p>
                 {trip.notes && <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>{trip.notes}</p>}
@@ -115,21 +115,21 @@ export default function TripDetailPage() {
                   </div>
                 </div>
               ))}
-              {cardMsg && <p className="text-xs mb-4" style={{ color: 'var(--text-quiet)' }}>{cardMsg}</p>}
+              {cardMsg && <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>{cardMsg}</p>}
 
               <section className="mb-6">
                 <SectionLabel className="mb-2">Itinerary</SectionLabel>
                 {items.length === 0 ? (
-                  <p className="text-xs" style={{ color: 'var(--text-quiet)' }}>Nothing parsed from email yet. Confirmations from your inbox show up here automatically.</p>
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Nothing parsed from email yet. Confirmations from your inbox show up here automatically.</p>
                 ) : (
                   <ul className="space-y-2">
                     {items.map((i) => (
                       <li key={i.id} className="rounded-lg px-3 py-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                        <p className="text-[11px] font-mono uppercase tracking-wide" style={{ color: 'var(--text-quiet)' }}>
+                        <p className="text-[11px] font-mono uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
                           {KIND_ICON[i.kind] ?? '•'} {i.kind}{i.confirmation_number ? ` · ${i.confirmation_number}` : ''}
                         </p>
                         <p className="text-sm" style={{ color: 'var(--text)' }}>{i.title}</p>
-                        <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-quiet)' }}>
+                        <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
                           {i.start_at ? new Date(i.start_at).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}
                           {i.location ? ` · ${i.location}` : ''}
                         </p>
@@ -142,7 +142,7 @@ export default function TripDetailPage() {
               {sources.length > 0 && (
                 <section className="mb-6">
                   <SectionLabel className="mb-2">Sources</SectionLabel>
-                  <ul className="space-y-1 text-[11px]" style={{ color: 'var(--text-quiet)' }}>
+                  <ul className="space-y-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
                     {sources.map((s) => (
                       <li key={s.id}>✉ {s.subject ?? '(email)'}{s.received_at ? ` · ${new Date(s.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</li>
                     ))}
@@ -156,14 +156,14 @@ export default function TripDetailPage() {
                   {Object.keys(PREP_LABELS).map((k) => {
                     const done = trip.prep_state?.[k] === 'sent';
                     return (
-                      <li key={k} className="flex items-center gap-2 text-xs" style={{ color: done ? 'var(--text-quiet)' : 'var(--text-muted)' }}>
+                      <li key={k} className="flex items-center gap-2 text-xs" style={{ color: done ? 'var(--text-muted)' : 'var(--text-muted)' }}>
                         <span style={{ color: done ? '#16a34a' : 'var(--border)' }}>{done ? '✓' : '○'}</span>
                         {PREP_LABELS[k]}{done ? ' — nudged' : ''}
                       </li>
                     );
                   })}
                 </ul>
-                <p className="text-[11px] mt-2" style={{ color: 'var(--text-quiet)' }}>
+                <p className="text-[11px] mt-2" style={{ color: 'var(--text-muted)' }}>
                   Calliad pushes each of these as the trip nears. Email-parsed flights, hotels and car rentals will show here in a later update.
                 </p>
               </section>
@@ -185,7 +185,7 @@ export default function TripDetailPage() {
                       {s}
                     </button>
                   ))}
-                  <button onClick={del} className="rounded-lg px-3 py-1.5 underline" style={{ color: 'var(--text-quiet)' }}>delete</button>
+                  <button onClick={del} className="rounded-lg px-3 py-1.5 underline" style={{ color: 'var(--text-muted)' }}>delete</button>
                 </div>
               </section>
             </>

@@ -33,7 +33,7 @@ export default function MorePage() {
               style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
             >
               <p className="text-sm" style={{ color: 'var(--text)' }}>{l.label}</p>
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-quiet)' }}>{l.sub}</p>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{l.sub}</p>
             </Link>
           ))}
         </div>

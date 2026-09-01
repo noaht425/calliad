@@ -73,7 +73,7 @@ function AboutYou({ token }: { token: string }) {
   };
   const Row = ({ title, field, ph }: { title: string; field: keyof PrefsState; ph?: string }) => (
     <div className="mb-3">
-      <p className="text-xs text-[var(--text-muted)] mb-1">{title}</p>
+      <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{title}</p>
       <TagInput values={p[field] as string[]} onChange={(v) => saveList(field, v)} placeholder={ph} />
     </div>
   );
@@ -84,11 +84,37 @@ function AboutYou({ token }: { token: string }) {
       <Row title="Preferred car rental" field="preferred_car_rental" />
       <Row title="Cities you visit often" field="frequent_cities" />
       <Row title="Dietary preferences or restrictions" field="dietary_restrictions" ph="e.g. vegetarian, no shellfish…" />
-      <label className="flex items-center gap-2 mt-3 text-sm text-[var(--text)]">
-        <input type="checkbox" checked={p.has_pet} onChange={(e) => savePet(e.target.checked)} />
-        I have a pet
-        <span className="text-xs text-[var(--text-quiet)]">— Calliad reminds you about boarding before trips</span>
-      </label>
+      <div className="mt-3">
+        <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text)' }}>
+          <input type="checkbox" checked={p.has_pet} onChange={(e) => savePet(e.target.checked)} className="h-4 w-4" />
+          I have a pet
+        </label>
+        <p className="text-[11px] mt-0.5 ml-6" style={{ color: 'var(--text-muted)' }}>Calliad reminds you to arrange boarding before trips.</p>
+      </div>
+    </div>
+  );
+}
+
+const T = 'var(--text)';
+const TM = 'var(--text-muted)';
+
+function Segmented({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  return (
+    <div className="flex gap-1">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          onClick={() => onChange(n)}
+          className="flex-1 rounded-md py-1.5 text-xs font-medium transition-colors"
+          style={{
+            background: value === n ? 'var(--accent)' : 'var(--surface)',
+            color: value === n ? 'var(--on-accent)' : TM,
+            border: `1px solid ${value === n ? 'var(--accent)' : 'var(--border)'}`,
+          }}
+        >
+          {n}
+        </button>
+      ))}
     </div>
   );
 }
@@ -97,6 +123,7 @@ function Personality({ token }: { token: string }) {
   const [d, setD] = useState<{
     familiarity: { level: string; score: number; weeks: number; facts: number; turns: number };
     voiceProfile: string; preset: string; presets: { key: string; label: string }[];
+    axes: Record<string, number>; axesMeta: { key: string; label: string; low: string; high: string }[];
   } | null>(null);
   const [voice, setVoice] = useState('');
   const [custom, setCustom] = useState('');
@@ -111,78 +138,104 @@ function Personality({ token }: { token: string }) {
     }
   }, [token]);
   useEffect(() => { void load(); }, [load]);
-  if (!d) return <p className="text-sm text-[var(--text-quiet)]">…</p>;
+  if (!d) return <p className="text-sm" style={{ color: TM }}>…</p>;
 
   const put = async (body: Record<string, unknown>, note = '') => {
-    setMsg(note || 'Saving…');
+    if (note) setMsg(note);
     const r = await fetch('/api/personality', { method: 'PUT', headers: h, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
-    setMsg(j.note || 'Saved.');
+    if (j.note) setMsg(j.note);
     void load();
   };
   const isCustom = d.preset.startsWith('custom:');
+  const act = 'rounded-md px-2.5 py-1 text-xs font-medium';
 
   return (
-    <div className="space-y-4 text-sm">
+    <div className="space-y-5 text-sm" style={{ color: T }}>
+      {/* axes */}
       <div>
-        <p className="text-xs text-[var(--text-muted)] mb-1">Familiarity</p>
-        <p className="text-[var(--text)]">
-          <span className="capitalize font-medium">{d.familiarity.level}</span>
-          <span className="text-[var(--text-quiet)]"> · {d.familiarity.weeks}w together · {d.familiarity.facts} facts · {d.familiarity.turns} messages</span>
-        </p>
-        <p className="text-[11px] text-[var(--text-quiet)] mt-1">
-          Grows on its own — Calliad gets a little more familiar and terse as this climbs. Nothing to set.
-        </p>
+        <p className="text-xs mb-2" style={{ color: TM }}>Dials — 1 (left label) to 5 (right label)</p>
+        <div className="space-y-2.5">
+          {d.axesMeta.map((m) => (
+            <div key={m.key}>
+              <div className="flex justify-between text-[11px] mb-1" style={{ color: TM }}>
+                <span>{m.label} · {m.low}</span><span>{m.high}</span>
+              </div>
+              <Segmented value={d.axes[m.key] ?? 3} onChange={(n) => { setD({ ...d, axes: { ...d.axes, [m.key]: n } }); put({ axes: { [m.key]: n } }); }} />
+            </div>
+          ))}
+        </div>
       </div>
 
+      {/* familiarity */}
       <div>
-        <p className="text-xs text-[var(--text-muted)] mb-1">Voice profile</p>
+        <p className="text-xs mb-1" style={{ color: TM }}>Familiarity (automatic)</p>
+        <p style={{ color: T }}>
+          <span className="capitalize font-medium">{d.familiarity.level}</span>
+          <span style={{ color: TM }}> · {d.familiarity.weeks}w together · {d.familiarity.facts} facts · {d.familiarity.turns} messages</span>
+        </p>
+        <p className="text-[11px] mt-1" style={{ color: TM }}>Climbs with use; Calliad gets a little more familiar and terse as it does. Nothing to set here.</p>
+      </div>
+
+      {/* voice profile */}
+      <div>
+        <p className="text-xs mb-1" style={{ color: TM }}>Voice profile</p>
         <textarea
           value={voice}
           onChange={(e) => setVoice(e.target.value)}
           rows={4}
-          placeholder="Regenerates from accumulated context once there's a couple weeks of history."
+          placeholder="Auto-writes itself from your history after a couple of weeks. Edit freely."
           className="w-full rounded-lg border px-3 py-2 text-xs"
-          style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+          style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: T }}
         />
-        <div className="flex gap-3 text-xs mt-1">
-          <button className="underline" onClick={() => put({ voiceProfile: voice })}>save</button>
-          <button className="underline" onClick={() => put({ regenerate: true })}>regenerate</button>
-          <button className="underline text-[var(--text-quiet)]" onClick={() => { setVoice(''); put({ voiceProfile: '' }, 'Cleared.'); }}>reset</button>
+        <div className="flex gap-2 mt-1.5">
+          <button className={act} style={{ background: 'var(--accent)', color: 'var(--on-accent)' }} onClick={() => put({ voiceProfile: voice }, 'Saved.')}>Save</button>
+          <button className={act} style={{ background: 'var(--surface)', color: T, border: '1px solid var(--border)' }} onClick={() => put({ regenerate: true }, 'Regenerating…')}>Regenerate</button>
+          <button className={act} style={{ background: 'var(--surface)', color: TM, border: '1px solid var(--border)' }} onClick={() => { setVoice(''); put({ voiceProfile: '' }, 'Cleared.'); }}>Reset</button>
         </div>
       </div>
 
+      {/* stance */}
       <div>
-        <p className="text-xs text-[var(--text-muted)] mb-1">Stance</p>
-        <div className="flex flex-col gap-1">
+        <p className="text-xs mb-1.5" style={{ color: TM }}>Stance</p>
+        <div className="flex flex-wrap gap-1.5">
           {d.presets.map((p) => (
-            <label key={p.key} className="flex items-center gap-2">
-              <input type="radio" name="preset" checked={!isCustom && d.preset === p.key} onChange={() => put({ preset: p.key }, `Set to ${p.label}.`)} />
+            <button
+              key={p.key}
+              onClick={() => put({ preset: p.key }, `Stance: ${p.label}.`)}
+              className="rounded-lg px-3 py-1.5 text-xs"
+              style={{
+                background: !isCustom && d.preset === p.key ? 'var(--accent)' : 'var(--surface)',
+                color: !isCustom && d.preset === p.key ? 'var(--on-accent)' : T,
+                border: '1px solid var(--border)',
+              }}
+            >
               {p.label}
-            </label>
+            </button>
           ))}
-          <label className="flex items-center gap-2">
-            <input type="radio" name="preset" checked={isCustom} onChange={() => custom.trim() && put({ preset: `custom:${custom.trim()}` }, 'Set to custom.')} />
+          <button
+            onClick={() => custom.trim() && put({ preset: `custom:${custom.trim()}` }, 'Stance: custom.')}
+            className="rounded-lg px-3 py-1.5 text-xs"
+            style={{ background: isCustom ? 'var(--accent)' : 'var(--surface)', color: isCustom ? 'var(--on-accent)' : T, border: '1px solid var(--border)' }}
+          >
             Custom
-          </label>
-          {(isCustom || custom) && (
-            <div className="flex gap-2 mt-1">
-              <input
-                value={custom}
-                onChange={(e) => setCustom(e.target.value)}
-                placeholder="e.g. a bored 1970s BBC announcer"
-                className="flex-1 rounded border px-2 py-1 text-xs"
-                style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
-              />
-              <button className="underline text-xs" onClick={() => custom.trim() && put({ preset: `custom:${custom.trim()}` }, 'Saved custom.')}>save</button>
-            </div>
-          )}
+          </button>
         </div>
-        <p className="text-[11px] text-[var(--text-quiet)] mt-1">
-          Harsh professor auto-applies during quizzes and Italian practice. Say &ldquo;lighten up&rdquo; / &ldquo;back to normal&rdquo; in chat to switch on the fly.
+        <div className="flex gap-2 mt-2">
+          <input
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            placeholder="Custom stance — e.g. a bored 1970s BBC announcer"
+            className="flex-1 rounded border px-2 py-1.5 text-xs"
+            style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: T }}
+          />
+          <button className={act} style={{ background: 'var(--surface)', color: T, border: '1px solid var(--border)' }} onClick={() => custom.trim() && put({ preset: `custom:${custom.trim()}` }, 'Saved.')}>Set</button>
+        </div>
+        <p className="text-[11px] mt-1.5" style={{ color: TM }}>
+          Harsh professor auto-applies during quizzes and Italian practice. In chat: &ldquo;be a harsh professor&rdquo;, &ldquo;lighten up&rdquo;, &ldquo;back to normal&rdquo;.
         </p>
       </div>
-      {msg && <p className="text-xs text-[var(--text-quiet)]">{msg}</p>}
+      {msg && <p className="text-xs" style={{ color: TM }}>{msg}</p>}
     </div>
   );
 }

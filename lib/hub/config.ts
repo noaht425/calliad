@@ -17,6 +17,7 @@ const SEED: Record<string, string> = {
   persona_addendum: '',
   persona_addendum_at: '',
   personality_preset: 'default',
+  personality_axes: JSON.stringify({ warmth: 3, directness: 3, wit: 3, verbosity: 3, proactivity: 3 }),
 };
 
 export async function getConfig(key: string): Promise<string> {

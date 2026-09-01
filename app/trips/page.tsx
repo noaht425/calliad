@@ -53,7 +53,7 @@ export default function TripsPage() {
       <PageBody className="px-4 pt-2">
         <div className="max-w-xl mx-auto pb-4">
           {items.length === 0 && (
-            <p className="text-sm" style={{ color: 'var(--text-quiet)' }}>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
               No trips yet. Say &ldquo;I&rsquo;m flying to Rome May 3–12&rdquo; in chat and it lands here.
             </p>
           )}
@@ -69,7 +69,7 @@ export default function TripsPage() {
                         <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>{t.destination}</p>
                         <span className="text-[11px]" style={{ color: 'var(--accent)' }}>{relLabel(t.start_date)}</span>
                       </div>
-                      <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-quiet)' }}>
+                      <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
                         {dateRange(t.start_date, t.end_date)}{t.has_pet ? ' · pet' : ''}
                       </p>
                     </Link>
@@ -86,7 +86,7 @@ export default function TripsPage() {
                 {past.map((t) => (
                   <li key={t.id}>
                     <Link href={`/trips/${t.id}`} className="block rounded-xl px-4 py-2.5 text-xs" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                      {t.destination} <span style={{ color: 'var(--text-quiet)' }}>· {dateRange(t.start_date, t.end_date)}{t.status === 'cancelled' ? ' · cancelled' : ''}</span>
+                      {t.destination} <span style={{ color: 'var(--text-muted)' }}>· {dateRange(t.start_date, t.end_date)}{t.status === 'cancelled' ? ' · cancelled' : ''}</span>
                     </Link>
                   </li>
                 ))}

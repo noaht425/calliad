@@ -18,7 +18,7 @@ interface Row {
 
 const NEXT_STATE: Record<SeasonState, SeasonState> = { pending: 'watching', watching: 'watched', watched: 'pending' };
 const STATE_STYLE: Record<SeasonState, { bg: string; fg: string }> = {
-  pending: { bg: 'var(--surface)', fg: 'var(--text-quiet)' },
+  pending: { bg: 'var(--surface)', fg: 'var(--text-muted)' },
   watching: { bg: 'var(--accent)', fg: 'var(--on-accent)' },
   watched: { bg: 'transparent', fg: '#16a34a' },
 };
@@ -85,7 +85,7 @@ export default function WatchPage() {
                   color: 'var(--text)',
                 }}
               >
-                {t === 'watching' ? 'Watching' : 'Want to Watch'} <span style={{ color: 'var(--text-quiet)' }}>({counts[t]})</span>
+                {t === 'watching' ? 'Watching' : 'Want to Watch'} <span style={{ color: 'var(--text-muted)' }}>({counts[t]})</span>
               </button>
             ))}
           </div>
@@ -112,7 +112,7 @@ export default function WatchPage() {
             />
           )}
 
-          {shown.length === 0 && <p className="text-sm" style={{ color: 'var(--text-quiet)' }}>Nothing here yet.</p>}
+          {shown.length === 0 && <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Nothing here yet.</p>}
 
           <ul className="space-y-2.5">
             {shown.map((r) => {
@@ -129,7 +129,7 @@ export default function WatchPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start gap-2">
                         <p className="flex-1 text-sm font-medium" style={{ color: 'var(--text)' }}>
-                          {r.title}{r.year ? <span style={{ color: 'var(--text-quiet)' }}> ({r.year})</span> : null}
+                          {r.title}{r.year ? <span style={{ color: 'var(--text-muted)' }}> ({r.year})</span> : null}
                         </p>
                         {r.streaming[0] && (
                           <span className="shrink-0 text-[10px] rounded px-1.5 py-0.5" style={{ background: 'var(--paper)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
@@ -137,7 +137,7 @@ export default function WatchPage() {
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 mt-1 text-[11px]" style={{ color: 'var(--text-quiet)' }}>
+                      <div className="flex items-center gap-2 mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
                         {r.media_type === 'tv' && r.total_seasons ? <span>{watched}/{r.total_seasons} seasons</span> : null}
                         {r.next_air_date ? <span>· next {fmtDate(r.next_air_date)}</span> : null}
                         {r.air_status && /ended|canceled/i.test(r.air_status) ? <span>· ended</span> : null}
@@ -155,13 +155,13 @@ export default function WatchPage() {
                   {r.overview && (
                     <button onClick={() => setOpen(expanded ? null : r.id)} className="block w-full text-left px-3 pb-2 text-[12.5px] leading-snug" style={{ color: 'var(--text-muted)' }}>
                       <span className={expanded ? '' : 'line-clamp-2'}>{r.overview}</span>
-                      <span className="text-[11px]" style={{ color: 'var(--text-quiet)' }}> {expanded ? 'Less ↑' : 'More ↓'}</span>
+                      <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}> {expanded ? 'Less ↑' : 'More ↓'}</span>
                     </button>
                   )}
                   {expanded && (
                     <div className="px-3 pb-3 pt-1 space-y-2" style={{ borderTop: '1px solid var(--border-quiet, var(--border))' }}>
                       {r.cast_names.length > 0 && (
-                        <p className="text-[11px]" style={{ color: 'var(--text-quiet)' }}>Cast · {r.cast_names.slice(0, 4).join(', ')}</p>
+                        <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Cast · {r.cast_names.slice(0, 4).join(', ')}</p>
                       )}
                       {r.seasons.map((s) => (
                         <div key={s.season} className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -175,12 +175,12 @@ export default function WatchPage() {
                           </button>
                         </div>
                       ))}
-                      {r.air_status && <p className="text-[11px]" style={{ color: 'var(--text-quiet)' }}>Status · {r.air_status}</p>}
+                      {r.air_status && <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Status · {r.air_status}</p>}
                       <div className="flex gap-3 text-[11px] pt-1">
                         {r.status === 'want'
                           ? <button className="underline" onClick={() => patch({ id: r.id, status: 'watching' })}>start watching</button>
-                          : <button className="underline" style={{ color: 'var(--text-quiet)' }} onClick={() => patch({ id: r.id, status: 'want' })}>move to want</button>}
-                        <button className="underline" style={{ color: 'var(--text-quiet)' }} onClick={() => remove(r.id)}>remove</button>
+                          : <button className="underline" style={{ color: 'var(--text-muted)' }} onClick={() => patch({ id: r.id, status: 'want' })}>move to want</button>}
+                        <button className="underline" style={{ color: 'var(--text-muted)' }} onClick={() => remove(r.id)}>remove</button>
                       </div>
                     </div>
                   )}
