@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { anthropicCostUsd } from '@/lib/router/tiers';
+import { getPrefs } from '@/lib/profile/prefs';
 
 // Beli has no API. Noah screenshots his ranked / want-to-try lists; Sonnet
 // vision pulls the restaurants; they land in restaurant_prefs and feed the
@@ -301,6 +302,8 @@ export async function restaurantTasteBlock(userId: string, text: string): Promis
     L.push('', 'Nothing from his question is on file yet — reason from the ratings below.');
   }
   if (prefs) L.push('', prefs);
+  const diet = (await getPrefs(userId).catch(() => ({ dietary_restrictions: [] as string[] }))).dietary_restrictions;
+  if (diet.length) L.push('', `Dietary: ${diet.join(', ')} — factor this into any recommendation.`);
   L.push(
     '',
     '### Instructions',

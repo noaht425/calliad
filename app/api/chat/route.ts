@@ -25,6 +25,7 @@ import { classifyMedReply, recordMed, medContextLine } from '@/lib/health/meds';
 import { isEmailDraft, composeEmail } from '@/lib/actions/email';
 import { wouldILike } from '@/lib/taste/judge';
 import { isFlightQuery, isRestaurantQuery, extractFlight, extractRestaurant } from '@/lib/travel/detect';
+import { prefsLine } from '@/lib/profile/prefs';
 import { flightSearch } from '@/lib/travel/flights';
 import { restaurantHandoff } from '@/lib/travel/restaurant';
 import { isLyricQuery, findByLyrics } from '@/lib/tools/song';
@@ -583,7 +584,9 @@ export async function POST(req: NextRequest) {
       toolResult;
   } else if (isFlightQuery(text)) {
     const fp = await extractFlight(text).catch(() => null);
-    toolResult = fp ? await flightSearch(fp).catch(() => undefined) : `## Flight search\nCouldn't pin down where/when — ask Noah for the destination and rough dates.`;
+    toolResult = fp
+      ? await flightSearch(fp, await prefsLine(user.id).catch(() => '')).catch(() => undefined)
+      : `## Flight search\nCouldn't pin down where/when — ask Noah for the destination and rough dates.`;
   } else if (isRestaurantQuery(text)) {
     const rp = await extractRestaurant(text).catch(() => null);
     const [handoff, prefs] = await Promise.all([

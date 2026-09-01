@@ -90,7 +90,7 @@ async function amadeusOffers(p: FlightParams): Promise<Offer[] | null> {
   }
 }
 
-export async function flightSearch(p: FlightParams): Promise<string> {
+export async function flightSearch(p: FlightParams, prefsLine = ''): Promise<string> {
   const offers = await amadeusOffers(p);
   await audit.log('tool_call', 'calliad', null, { tool: 'flight_search', ...p, amadeus: Boolean(offers) });
 
@@ -114,7 +114,7 @@ export async function flightSearch(p: FlightParams): Promise<string> {
   lines.push(
     '',
     '### Instructions',
-    "Present this as a shortlist in your voice. APPLY Noah's travel prefs from his profile: Alaska preferred, Delta/American fine, flag any Lufthansa, aisle seat, prefers routing through a NYC airport (JFK/LGA/EWR) over Hartford. Recommend but NEVER book — hand him the link to pull the trigger himself.",
+    `Present this as a shortlist in your voice. APPLY Noah's travel prefs${prefsLine ? ` — ${prefsLine}` : ' from his profile / learned facts'}; he also likes routing through a NYC airport (JFK/LGA/EWR) over Hartford. Recommend but NEVER book — hand him the link to pull the trigger himself.`,
   );
   return lines.join('\n');
 }

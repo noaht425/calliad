@@ -22,6 +22,77 @@ const btn = 'rounded-lg bg-[var(--accent)] text-[var(--on-accent)] text-sm font-
 const field = 'w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2 text-sm';
 const label = 'text-[10px] font-mono uppercase tracking-[0.16em] text-[var(--text-quiet)] mb-3';
 
+function TagInput({ values, onChange, placeholder }: { values: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
+  const [draft, setDraft] = useState('');
+  const commit = () => {
+    const t = draft.trim();
+    if (t && !values.some((v) => v.toLowerCase() === t.toLowerCase())) onChange([...values, t]);
+    setDraft('');
+  };
+  return (
+    <div className="flex flex-wrap gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5">
+      {values.map((v) => (
+        <span key={v} className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--text)]">
+          {v}
+          <button onClick={() => onChange(values.filter((x) => x !== v))} aria-label={`Remove ${v}`} className="text-[var(--text-quiet)]">×</button>
+        </span>
+      ))}
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); } else if (e.key === 'Backspace' && !draft && values.length) onChange(values.slice(0, -1)); }}
+        onBlur={commit}
+        placeholder={placeholder ?? 'Type and press Enter…'}
+        className="flex-1 min-w-[120px] bg-transparent text-sm text-[var(--text)] outline-none py-0.5"
+      />
+    </div>
+  );
+}
+
+interface PrefsState {
+  preferred_airlines: string[]; preferred_hotels: string[]; preferred_car_rental: string[];
+  frequent_cities: string[]; dietary_restrictions: string[]; has_pet: boolean;
+}
+
+function AboutYou({ token }: { token: string }) {
+  const [p, setP] = useState<PrefsState | null>(null);
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  useEffect(() => {
+    fetch('/api/profile/prefs', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null)).then((j) => j && setP(j)).catch(() => {});
+  }, [token]);
+  if (!p) return <p className="text-sm text-[var(--text-quiet)]">…</p>;
+
+  const saveList = (field: keyof PrefsState, values: string[]) => {
+    setP({ ...p, [field]: values });
+    fetch('/api/profile/prefs', { method: 'PUT', headers: h, body: JSON.stringify({ field, values }) });
+  };
+  const savePet = (has_pet: boolean) => {
+    setP({ ...p, has_pet });
+    fetch('/api/profile/prefs', { method: 'PUT', headers: h, body: JSON.stringify({ has_pet }) });
+  };
+  const Row = ({ title, field, ph }: { title: string; field: keyof PrefsState; ph?: string }) => (
+    <div className="mb-3">
+      <p className="text-xs text-[var(--text-muted)] mb-1">{title}</p>
+      <TagInput values={p[field] as string[]} onChange={(v) => saveList(field, v)} placeholder={ph} />
+    </div>
+  );
+  return (
+    <div>
+      <Row title="Preferred airlines" field="preferred_airlines" />
+      <Row title="Preferred hotel chains" field="preferred_hotels" />
+      <Row title="Preferred car rental" field="preferred_car_rental" />
+      <Row title="Cities you visit often" field="frequent_cities" />
+      <Row title="Dietary preferences or restrictions" field="dietary_restrictions" ph="e.g. vegetarian, no shellfish…" />
+      <label className="flex items-center gap-2 mt-3 text-sm text-[var(--text)]">
+        <input type="checkbox" checked={p.has_pet} onChange={(e) => savePet(e.target.checked)} />
+        I have a pet
+        <span className="text-xs text-[var(--text-quiet)]">— Calliad reminds you about boarding before trips</span>
+      </label>
+    </div>
+  );
+}
+
 function WeatherLocation({ token }: { token: string }) {
   const [label, setLabel] = useState<string>('…');
   const [city, setCity] = useState('');
@@ -549,6 +620,12 @@ export default function SettingsPage() {
       <PageHeader title="Settings" />
       <PageBody className="px-4 pt-2">
         <div className="max-w-xl mx-auto pb-4">
+
+      {/* ── About you ───────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>About you</h2>
+        <AboutYou token={session.access_token} />
+      </section>
 
       {/* ── Appearance ──────────────────────────────────────────────── */}
       <section className="mb-8">

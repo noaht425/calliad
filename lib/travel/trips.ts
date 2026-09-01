@@ -1,6 +1,7 @@
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { t1Json, t1Available } from '@/lib/llm/gemini';
+import { getPrefs } from '@/lib/profile/prefs';
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 const DEFAULT_HOME_AIRPORT = process.env.HOME_AIRPORT ?? 'SEA';
@@ -80,7 +81,7 @@ export async function createTrip(
       start_date: t.start_date,
       end_date: t.end_date,
       home_airport: DEFAULT_HOME_AIRPORT,
-      has_pet: t.has_pet ?? false,
+      has_pet: t.has_pet || (await getPrefs(userId).catch(() => ({ has_pet: false }))).has_pet,
     })
     .select('id, destination, start_date, end_date, home_airport, has_pet, status, prep_state')
     .single();
