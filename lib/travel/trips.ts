@@ -15,6 +15,7 @@ export interface Trip {
   has_pet: boolean;
   status: 'planned' | 'active' | 'done' | 'cancelled';
   prep_state: Record<string, string>;
+  notes?: string | null;
 }
 
 // ── detection + extraction ────────────────────────────────────────────────
@@ -100,6 +101,30 @@ export async function upcomingTrips(userId: string): Promise<Trip[]> {
     .order('start_date', { ascending: true })
     .limit(10);
   return (data ?? []) as Trip[];
+}
+
+const TRIP_SEL = 'id, destination, start_date, end_date, home_airport, has_pet, status, prep_state, notes';
+
+export async function listTrips(userId: string): Promise<Trip[]> {
+  const { data } = await adminClient
+    .from('trips')
+    .select(TRIP_SEL)
+    .eq('user_id', userId)
+    .order('start_date', { ascending: true });
+  return (data ?? []) as Trip[];
+}
+
+export async function getTrip(userId: string, id: string): Promise<Trip | null> {
+  const { data } = await adminClient.from('trips').select(TRIP_SEL).eq('user_id', userId).eq('id', id).maybeSingle();
+  return (data as Trip) ?? null;
+}
+
+export async function setTripStatus(userId: string, id: string, status: Trip['status']): Promise<void> {
+  await adminClient.from('trips').update({ status, updated_at: new Date().toISOString() }).eq('user_id', userId).eq('id', id);
+}
+
+export async function deleteTrip(userId: string, id: string): Promise<void> {
+  await adminClient.from('trips').delete().eq('user_id', userId).eq('id', id);
 }
 
 // ── prep tasks ───────────────────────────────────────────────────────────

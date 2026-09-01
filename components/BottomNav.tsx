@@ -17,11 +17,10 @@ function IcTasks({ on }: { on: boolean }) {
     </svg>
   );
 }
-function IcReading({ on }: { on: boolean }) {
+function IcTravel({ on }: { on: boolean }) {
   return (
     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={on ? 2.1 : 1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+      <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3.5S18 3 16.5 4.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
     </svg>
   );
 }
@@ -33,23 +32,24 @@ function IcPeople({ on }: { on: boolean }) {
     </svg>
   );
 }
-function IcSettings({ on }: { on: boolean }) {
+function IcMore({ on }: { on: boolean }) {
   return (
-    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={on ? 2.1 : 1.8} strokeLinecap="round" strokeLinejoin="round">
-      <line x1="4" y1="8" x2="20" y2="8" /><circle cx="15" cy="8" r="2.5" />
-      <line x1="4" y1="16" x2="20" y2="16" /><circle cx="9" cy="16" r="2.5" />
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <circle cx="5" cy="12" r={on ? 2.1 : 1.9} /><circle cx="12" cy="12" r={on ? 2.1 : 1.9} /><circle cx="19" cy="12" r={on ? 2.1 : 1.9} />
     </svg>
   );
 }
 
-/* ─── BottomNav — Today / Tasks / Reading / People / Settings ────────────── */
+const MORE_ROUTES = ['/more', '/reading', '/watch', '/settings'];
+
+/* ─── BottomNav — Today / Tasks / Travel / People / More ─────────────────── */
 export function BottomNav() {
   const path = usePathname();
   const onHome = path === '/';
   const onTasks = path.startsWith('/tasks');
-  const onReading = path.startsWith('/reading');
+  const onTravel = path.startsWith('/trips') || path.startsWith('/travel');
   const onPeople = path.startsWith('/people');
-  const onSettings = path.startsWith('/settings');
+  const onMore = MORE_ROUTES.some((r) => path.startsWith(r));
 
   const color = (active: boolean) => (active ? 'var(--tab-active, var(--text))' : 'var(--tab-off)');
   const tab = 'flex-1 flex flex-col items-center justify-center gap-[4px] text-[10px] transition-colors';
@@ -68,17 +68,17 @@ export function BottomNav() {
           <IcTasks on={onTasks} />
           Tasks
         </Link>
-        <Link href="/reading" className={tab} style={{ color: color(onReading) }}>
-          <IcReading on={onReading} />
-          Reading
+        <Link href="/trips" className={tab} style={{ color: color(onTravel) }}>
+          <IcTravel on={onTravel} />
+          Travel
         </Link>
         <Link href="/people" className={tab} style={{ color: color(onPeople) }}>
           <IcPeople on={onPeople} />
           People
         </Link>
-        <Link href="/settings" className={tab} style={{ color: color(onSettings) }}>
-          <IcSettings on={onSettings} />
-          Settings
+        <Link href="/more" className={tab} style={{ color: color(onMore) }}>
+          <IcMore on={onMore} />
+          More
         </Link>
       </div>
       <div style={{ height: 'env(safe-area-inset-bottom, 28px)' }} />
