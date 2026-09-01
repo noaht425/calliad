@@ -25,6 +25,14 @@ function IcReading({ on }: { on: boolean }) {
     </svg>
   );
 }
+function IcPeople({ on }: { on: boolean }) {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={on ? 2.1 : 1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
 function IcSettings({ on }: { on: boolean }) {
   return (
     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={on ? 2.1 : 1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -34,12 +42,13 @@ function IcSettings({ on }: { on: boolean }) {
   );
 }
 
-/* ─── BottomNav — Today / Tasks / Reading / Settings ─────────────────────── */
+/* ─── BottomNav — Today / Tasks / Reading / People / Settings ────────────── */
 export function BottomNav() {
   const path = usePathname();
   const onHome = path === '/';
   const onTasks = path.startsWith('/tasks');
   const onReading = path.startsWith('/reading');
+  const onPeople = path.startsWith('/people');
   const onSettings = path.startsWith('/settings');
 
   const color = (active: boolean) => (active ? 'var(--tab-active, var(--text))' : 'var(--tab-off)');
@@ -62,6 +71,10 @@ export function BottomNav() {
         <Link href="/reading" className={tab} style={{ color: color(onReading) }}>
           <IcReading on={onReading} />
           Reading
+        </Link>
+        <Link href="/people" className={tab} style={{ color: color(onPeople) }}>
+          <IcPeople on={onPeople} />
+          People
         </Link>
         <Link href="/settings" className={tab} style={{ color: color(onSettings) }}>
           <IcSettings on={onSettings} />

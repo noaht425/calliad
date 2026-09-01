@@ -21,6 +21,7 @@ export interface Contact {
   note: string | null;
   relationship: Relationship | null;
   relationship_note: string | null;
+  hidden?: boolean;
 }
 
 async function client(userId: string): Promise<DAVClient | null> {
@@ -126,13 +127,13 @@ export async function syncContacts(userId: string): Promise<{ synced: number; re
 }
 
 // ── lookup ───────────────────────────────────────────────────────────────
-const SEL = 'id, uid, name, first_name, last_name, emails, phones, org, birthday, groups, note, relationship, relationship_note';
+const SEL = 'id, uid, name, first_name, last_name, emails, phones, org, birthday, groups, note, relationship, relationship_note, hidden';
 
 export async function findContacts(userId: string, query: string): Promise<Contact[]> {
   const q = query.trim().toLowerCase();
   if (q.length < 2) return [];
   const { data } = await adminClient.from('contacts').select(SEL).eq('user_id', userId);
-  const rows = (data ?? []) as Contact[];
+  const rows = (data ?? []).filter((r) => !(r as { hidden?: boolean }).hidden) as Contact[];
   const scored = rows
     .map((r) => {
       const name = r.name.toLowerCase();
@@ -166,11 +167,49 @@ export async function setRelationship(userId: string, id: string, relationship: 
   await audit.log('outbound_message', 'calliad', null, { action: 'set_relationship', id, relationship, note });
 }
 
-export async function listContacts(userId: string, opts: { withRelationship?: boolean } = {}): Promise<Contact[]> {
+export async function listContacts(
+  userId: string,
+  opts: { withRelationship?: boolean; relationship?: Relationship | 'all'; includeHidden?: boolean; search?: string } = {},
+): Promise<Contact[]> {
   let q = adminClient.from('contacts').select(SEL).eq('user_id', userId).order('name');
   if (opts.withRelationship) q = q.not('relationship', 'is', null);
+  if (opts.relationship && opts.relationship !== 'all') q = q.eq('relationship', opts.relationship);
   const { data } = await q;
-  return (data ?? []) as Contact[];
+  let rows = (data ?? []) as (Contact & { hidden?: boolean })[];
+  if (!opts.includeHidden) rows = rows.filter((r) => !r.hidden);
+  if (opts.search) {
+    const s = opts.search.toLowerCase();
+    rows = rows.filter((r) => r.name.toLowerCase().includes(s) || (r.org ?? '').toLowerCase().includes(s));
+  }
+  return rows as Contact[];
+}
+
+export async function contactCounts(userId: string): Promise<{ all: number; family: number; friend: number; colleague: number; acquaintance: number; unfiled: number }> {
+  const { data } = await adminClient.from('contacts').select('relationship, hidden').eq('user_id', userId);
+  const rows = (data ?? []).filter((r) => !(r as { hidden?: boolean }).hidden);
+  const c = { all: rows.length, family: 0, friend: 0, colleague: 0, acquaintance: 0, unfiled: 0 };
+  for (const r of rows) {
+    const rel = r.relationship as keyof typeof c | null;
+    if (rel && rel in c) (c[rel] as number)++;
+    else c.unfiled++;
+  }
+  return c;
+}
+
+export async function hideContact(userId: string, id: string, hidden: boolean): Promise<void> {
+  await adminClient.from('contacts').update({ hidden, updated_at: new Date().toISOString() }).eq('user_id', userId).eq('id', id);
+}
+
+export async function updateContactFields(
+  userId: string,
+  id: string,
+  fields: { name?: string; birthday?: string | null; relationship_note?: string | null },
+): Promise<void> {
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (fields.name !== undefined) patch.name = fields.name;
+  if (fields.birthday !== undefined) patch.birthday = fields.birthday;
+  if (fields.relationship_note !== undefined) patch.relationship_note = fields.relationship_note;
+  await adminClient.from('contacts').update(patch).eq('user_id', userId).eq('id', id);
 }
 
 // ── kinship term → relationship bucket ───────────────────────────────────
