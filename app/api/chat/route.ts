@@ -59,6 +59,8 @@ import {
   applyWatchUpdate, listWatch, watchListBlock, watchContextLine,
 } from '@/lib/tools/watchlist';
 import type { TurnState } from '@/lib/brain/prompt';
+import { personaExtra, presetOverlay, resolvePreset, detectPresetSwitch, PRESETS } from '@/lib/brain/persona';
+import { config } from '@/lib/hub/config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -136,6 +138,14 @@ export async function POST(req: NextRequest) {
   if (medReply === 'not-yet') {
     await recordMed(user.id, false, 'not yet');
     return say('Okay — I’ll check once more later, then leave it.', 'med-reply');
+  }
+
+  // ── personality preset switch ────────────────────────────────────────
+  const presetSwitch = detectPresetSwitch(text);
+  if (presetSwitch && text.trim().split(/\s+/).length <= 9) {
+    const next = presetSwitch === 'default' ? undefined : presetSwitch;
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, preset: next } }).eq('id', conversationId);
+    return say(next ? `Switched — ${PRESETS[next]?.label ?? next}.` : 'Back to normal.', 'preset-switch');
   }
 
   // ── memory games: math sprint (answer flow) ──────────────────────────
@@ -542,7 +552,7 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine] = await Promise.all([
+  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine, rapport, userPreset] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
@@ -550,7 +560,15 @@ export async function POST(req: NextRequest) {
     learnedFacts(user.id).catch(() => ''),
     contactContextLine(user.id, text).catch(() => ''),
     tripsContextLine(user.id).catch(() => ''),
+    personaExtra(user.id).catch(() => ''),
+    config.get('personality_preset').catch(() => 'default'),
   ]);
+  const activePreset = resolvePreset({
+    userDefault: userPreset,
+    convPreset: modeState.preset as string | undefined,
+    mode: effectiveMode,
+    drillMode: !!(modeState.roots || modeState.sprint),
+  });
 
   const deckUrl = text.match(/https?:\/\/(?:www\.)?archidekt\.com\/(?:api\/)?decks\/\d+/)?.[0];
   const moxUrl = /https?:\/\/(?:www\.)?moxfield\.com\/decks\/[\w-]+/.test(text);
@@ -644,6 +662,8 @@ export async function POST(req: NextRequest) {
     medStatus: medLine || undefined,
     contacts: contactsLine || undefined,
     trips: tripsLine || undefined,
+    personaExtra: rapport || undefined,
+    presetOverlay: presetOverlay(activePreset) || undefined,
   };
   // A tool result means a longer, denser reply is expected (deck analysis, sim
   // narration, web-page answers). 1024 is stingy there — and with adaptive effort

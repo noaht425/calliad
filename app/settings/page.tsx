@@ -93,6 +93,100 @@ function AboutYou({ token }: { token: string }) {
   );
 }
 
+function Personality({ token }: { token: string }) {
+  const [d, setD] = useState<{
+    familiarity: { level: string; score: number; weeks: number; facts: number; turns: number };
+    voiceProfile: string; preset: string; presets: { key: string; label: string }[];
+  } | null>(null);
+  const [voice, setVoice] = useState('');
+  const [custom, setCustom] = useState('');
+  const [msg, setMsg] = useState('');
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const load = useCallback(async () => {
+    const r = await fetch('/api/personality', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) {
+      const j = await r.json();
+      setD(j); setVoice(j.voiceProfile ?? '');
+      if (typeof j.preset === 'string' && j.preset.startsWith('custom:')) setCustom(j.preset.slice(7));
+    }
+  }, [token]);
+  useEffect(() => { void load(); }, [load]);
+  if (!d) return <p className="text-sm text-[var(--text-quiet)]">…</p>;
+
+  const put = async (body: Record<string, unknown>, note = '') => {
+    setMsg(note || 'Saving…');
+    const r = await fetch('/api/personality', { method: 'PUT', headers: h, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    setMsg(j.note || 'Saved.');
+    void load();
+  };
+  const isCustom = d.preset.startsWith('custom:');
+
+  return (
+    <div className="space-y-4 text-sm">
+      <div>
+        <p className="text-xs text-[var(--text-muted)] mb-1">Familiarity</p>
+        <p className="text-[var(--text)]">
+          <span className="capitalize font-medium">{d.familiarity.level}</span>
+          <span className="text-[var(--text-quiet)]"> · {d.familiarity.weeks}w together · {d.familiarity.facts} facts · {d.familiarity.turns} messages</span>
+        </p>
+        <p className="text-[11px] text-[var(--text-quiet)] mt-1">
+          Grows on its own — Calliad gets a little more familiar and terse as this climbs. Nothing to set.
+        </p>
+      </div>
+
+      <div>
+        <p className="text-xs text-[var(--text-muted)] mb-1">Voice profile</p>
+        <textarea
+          value={voice}
+          onChange={(e) => setVoice(e.target.value)}
+          rows={4}
+          placeholder="Regenerates from accumulated context once there's a couple weeks of history."
+          className="w-full rounded-lg border px-3 py-2 text-xs"
+          style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+        />
+        <div className="flex gap-3 text-xs mt-1">
+          <button className="underline" onClick={() => put({ voiceProfile: voice })}>save</button>
+          <button className="underline" onClick={() => put({ regenerate: true })}>regenerate</button>
+          <button className="underline text-[var(--text-quiet)]" onClick={() => { setVoice(''); put({ voiceProfile: '' }, 'Cleared.'); }}>reset</button>
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs text-[var(--text-muted)] mb-1">Stance</p>
+        <div className="flex flex-col gap-1">
+          {d.presets.map((p) => (
+            <label key={p.key} className="flex items-center gap-2">
+              <input type="radio" name="preset" checked={!isCustom && d.preset === p.key} onChange={() => put({ preset: p.key }, `Set to ${p.label}.`)} />
+              {p.label}
+            </label>
+          ))}
+          <label className="flex items-center gap-2">
+            <input type="radio" name="preset" checked={isCustom} onChange={() => custom.trim() && put({ preset: `custom:${custom.trim()}` }, 'Set to custom.')} />
+            Custom
+          </label>
+          {(isCustom || custom) && (
+            <div className="flex gap-2 mt-1">
+              <input
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                placeholder="e.g. a bored 1970s BBC announcer"
+                className="flex-1 rounded border px-2 py-1 text-xs"
+                style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+              />
+              <button className="underline text-xs" onClick={() => custom.trim() && put({ preset: `custom:${custom.trim()}` }, 'Saved custom.')}>save</button>
+            </div>
+          )}
+        </div>
+        <p className="text-[11px] text-[var(--text-quiet)] mt-1">
+          Harsh professor auto-applies during quizzes and Italian practice. Say &ldquo;lighten up&rdquo; / &ldquo;back to normal&rdquo; in chat to switch on the fly.
+        </p>
+      </div>
+      {msg && <p className="text-xs text-[var(--text-quiet)]">{msg}</p>}
+    </div>
+  );
+}
+
 function WeatherLocation({ token }: { token: string }) {
   const [label, setLabel] = useState<string>('…');
   const [city, setCity] = useState('');
@@ -625,6 +719,12 @@ export default function SettingsPage() {
       <section className="mb-8">
         <h2 className={label}>About you</h2>
         <AboutYou token={session.access_token} />
+      </section>
+
+      {/* ── Personality ─────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>Personality</h2>
+        <Personality token={session.access_token} />
       </section>
 
       {/* ── Appearance ──────────────────────────────────────────────── */}

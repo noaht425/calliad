@@ -12,6 +12,11 @@ const SEED: Record<string, string> = {
   spend_month_to_date_usd: '0',
   // Where the brief's weather is for. JSON {lat,lon,label}. Default: Trinity / Hartford.
   weather_location: JSON.stringify({ lat: 41.7637, lon: -72.6851, label: 'Hartford' }),
+  // Personality: generated "voice profile" + when it was last regenerated + the
+  // user's default stance preset.
+  persona_addendum: '',
+  persona_addendum_at: '',
+  personality_preset: 'default',
 };
 
 export async function getConfig(key: string): Promise<string> {

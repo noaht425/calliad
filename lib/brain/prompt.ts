@@ -76,6 +76,8 @@ export interface TurnState {
   medStatus?: string;               // today's medication check-in state, if unsettled
   contacts?: string;                // known contacts referenced this turn
   trips?: string;                   // upcoming trips (for prep-aware answers)
+  personaExtra?: string;            // rapport: familiarity line + voice profile (cached layer)
+  presetOverlay?: string;           // stance preset overlay (fresh layer)
 }
 
 function renderLoops(loops: OpenLoop[], tz: string): string {
@@ -134,10 +136,11 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
   })} (${state.tz}).`;
 
   const system: Anthropic.TextBlockParam[] = [
-    // Layers 1–2 — frozen prefix, cache breakpoint after it.
+    // Layers 1–2 — frozen prefix, cache breakpoint after it. `personaExtra`
+    // (rapport / voice profile) changes at most daily, so it stays cacheable.
     {
       type: 'text',
-      text: `${PERSONA}\n\n${OPERATING_RULES}`,
+      text: `${PERSONA}\n\n${OPERATING_RULES}${state.personaExtra ? `\n\n${state.personaExtra}` : ''}`,
       cache_control: { type: 'ephemeral', ttl: '1h' },
     },
     // Layer 3 — profile CORE, second cache breakpoint (stable within a session).
@@ -165,6 +168,7 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
   }
   const overlay = state.mode && MODE_OVERLAY[state.mode];
   if (overlay) system.push({ type: 'text', text: overlay });
+  if (state.presetOverlay) system.push({ type: 'text', text: state.presetOverlay });
   if (state.toolResult) system.push({ type: 'text', text: state.toolResult });
 
   const lastUser: Anthropic.MessageParam = images?.length

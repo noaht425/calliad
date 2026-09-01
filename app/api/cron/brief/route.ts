@@ -13,6 +13,7 @@ import { scanForTidy } from '@/lib/memory/tidy';
 import { upcomingCharges } from '@/lib/money/subscriptions';
 import { riddleOfTheDay } from '@/lib/games/play';
 import { refreshWatchAirDates, watchContextLine } from '@/lib/tools/watchlist';
+import { regenerateVoiceProfile } from '@/lib/brain/persona';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -66,6 +67,11 @@ async function handle(req: NextRequest) {
       const med = await medCheckin(userId, { followUp: false }).catch((e) => ({ sent: false, reason: String(e) }));
 
       await refreshWatchAirDates(userId).catch(() => 0);
+      // regenerate the voice profile ~weekly
+      const lastVoice = await config.get('persona_addendum_at').catch(() => '');
+      if (!lastVoice || Date.now() - Date.parse(lastVoice) > 6.5 * 86400000) {
+        await regenerateVoiceProfile(userId).catch(() => {});
+      }
       const [tidyCount, calChanges, charges, pendingFacts, airing] = await Promise.all([
         scanForTidy(userId).then((x) => x.length).catch(() => 0),
         recentCalendarChanges(userId).catch(() => [] as string[]),
