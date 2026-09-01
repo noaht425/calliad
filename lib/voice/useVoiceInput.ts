@@ -33,6 +33,7 @@ export function useVoiceInput(onResult: (text: string) => void, opts: Opts = {})
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cbRef = useRef(onResult);
   cbRef.current = onResult;
 
@@ -41,14 +42,44 @@ export function useVoiceInput(onResult: (text: string) => void, opts: Opts = {})
     typeof MediaRecorder !== 'undefined' &&
     !!navigator.mediaDevices?.getUserMedia;
 
-  const cleanup = useCallback(() => {
+  // Fully release the mic (stops the "in use" indicator). Next start() re-acquires.
+  const releaseStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    recorderRef.current = null;
-    chunksRef.current = [];
   }, []);
 
-  useEffect(() => cleanup, [cleanup]);
+  // Between recordings we keep the granted stream alive briefly so a burst of
+  // voice notes doesn't re-prompt / re-spin the mic each time. iOS still asks
+  // once per app launch — that's a standalone-PWA limitation, not something the
+  // page can persist.
+  const detachRecorder = useCallback(() => {
+    recorderRef.current = null;
+    chunksRef.current = [];
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(releaseStream, 90_000);
+  }, [releaseStream]);
+
+  const getStream = useCallback(async () => {
+    const live = streamRef.current?.getAudioTracks().some((t) => t.readyState === 'live');
+    if (streamRef.current && live) return streamRef.current;
+    streamRef.current = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    return streamRef.current;
+  }, []);
+
+  useEffect(() => {
+    // Drop the mic when the app is backgrounded / closed so it doesn't sit hot.
+    const onHidden = () => { if (document.visibilityState === 'hidden') releaseStream(); };
+    window.addEventListener('pagehide', releaseStream);
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      window.removeEventListener('pagehide', releaseStream);
+      document.removeEventListener('visibilitychange', onHidden);
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+      releaseStream();
+    };
+  }, [releaseStream]);
 
   const stop = useCallback(() => {
     if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
@@ -56,11 +87,9 @@ export function useVoiceInput(onResult: (text: string) => void, opts: Opts = {})
 
   const start = useCallback(async () => {
     if (!supported || !session) return;
+    if (idleTimer.current) { clearTimeout(idleTimer.current); idleTimer.current = null; }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      streamRef.current = stream;
+      const stream = await getStream();
       const recorder = new MediaRecorder(stream, PREFERRED_MIME ? { mimeType: PREFERRED_MIME } : undefined);
       recorderRef.current = recorder;
       chunksRef.current = [];
@@ -69,7 +98,7 @@ export function useVoiceInput(onResult: (text: string) => void, opts: Opts = {})
       recorder.onstop = async () => {
         const type = recorder.mimeType || 'audio/mp4';
         const blob = new Blob(chunksRef.current, { type });
-        cleanup();
+        detachRecorder();
         if (blob.size < 2048) { setState('idle'); return; } // too short / silent
 
         setState('transcribing');
@@ -99,10 +128,11 @@ export function useVoiceInput(onResult: (text: string) => void, opts: Opts = {})
       navigator.vibrate?.(15);
       setState('recording');
     } catch {
-      cleanup();
+      releaseStream();
+      recorderRef.current = null;
       setState('idle');
     }
-  }, [supported, session, endpoint, pick, opts.conversationId, cleanup]);
+  }, [supported, session, endpoint, pick, opts.conversationId, getStream, detachRecorder, releaseStream]);
 
   const toggle = useCallback(() => {
     if (state === 'recording') stop();

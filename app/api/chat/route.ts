@@ -56,7 +56,8 @@ import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/tra
 import { isUnsubscribeMention, noteUnsubscribeFromChat } from '@/lib/mail/unsubscribes';
 import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
 import {
-  isWatchAdd, isWatchUpdate, isWatchQuery, extractWatchTitle, addToWatchList, cleanScreenTitle,
+  isWatchAdd, isWatchUpdate, isWatchQuery, extractWatchTitle, addWatchFromText,
+  upgradeWatchRowViaWeb, looksVague,
   applyWatchUpdate, listWatch, watchListBlock, watchContextLine,
 } from '@/lib/tools/watchlist';
 import type { TurnState } from '@/lib/brain/prompt';
@@ -396,16 +397,19 @@ export async function POST(req: NextRequest) {
       // "remind me to watch <show>" with no time attached is really a watch-list add
       const wm = !due_at && !recur ? /^\s*watch(?:ing)?\s+(.+)$/i.exec(title) : null;
       if (wm) {
-        const cleaned = cleanScreenTitle(wm[1]);
-        if (cleaned.length >= 2) {
-          const fresh = /\b(new|latest|just (?:came out|dropped|released|premiered)|recently)\b/i.test(text);
-          const r = await addToWatchList(user.id, cleaned, 'want', { freshOnly: fresh }).catch(() => null);
-          if (r?.row) {
-            return say(
-              `Put **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''} on your watch list — want to watch${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${r.note && r.note.includes('no TMDB') ? " (couldn't find it on TMDB — added by name)" : ''}`,
-              'watch-add',
-            );
-          }
+        const r = await addWatchFromText(user.id, wm[1], 'want', text).catch(() => null);
+        if (r?.row) {
+          const upgrading = !r.row.tmdb_id && looksVague(wm[1]);
+          if (upgrading) waitUntil(upgradeWatchRowViaWeb(user.id, r.row.id, wm[1]));
+          const tail = r.row.tmdb_id
+            ? ''
+            : upgrading
+              ? " I'll pin down the exact title in a moment — check /watch."
+              : " (couldn't find it on TMDB — added by name)";
+          return say(
+            `Put **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''} on your watch list — want to watch${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${tail}`,
+            'watch-add',
+          );
         }
         // add failed → fall through and keep it as a task
       }
@@ -444,11 +448,17 @@ export async function POST(req: NextRequest) {
   if (isWatchAdd(text)) {
     const w = extractWatchTitle(text);
     if (w) {
-      const fresh = /\b(new|latest|just (?:came out|dropped|released|premiered)|recently)\b/i.test(text);
-      const r = await addToWatchList(user.id, w.title, w.status, { freshOnly: fresh }).catch(() => null);
+      const r = await addWatchFromText(user.id, w.raw, w.status, text).catch(() => null);
       if (r?.row) {
+        const upgrading = !r.row.tmdb_id && looksVague(w.raw);
+        if (upgrading) waitUntil(upgradeWatchRowViaWeb(user.id, r.row.id, w.raw));
+        const tail = r.row.tmdb_id
+          ? ''
+          : upgrading
+            ? " I'll pin down the exact title in a moment — check /watch."
+            : " (couldn't find it on TMDB — added by name)";
         return say(
-          `${r.added ? 'Added' : 'Updated'} **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''} — ${r.row.status === 'watching' ? 'watching' : 'want to watch'}${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${r.note && r.note.includes('no TMDB') ? ' (couldn\'t find it on TMDB — added by name)' : ''}`,
+          `${r.added ? 'Added' : 'Updated'} **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''} — ${r.row.status === 'watching' ? 'watching' : 'want to watch'}${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${tail}`,
           'watch-add',
         );
       }

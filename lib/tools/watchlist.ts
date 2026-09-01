@@ -1,6 +1,7 @@
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { searchScreen, screenDetails, tmdbAvailable } from '@/lib/tools/tmdb';
+import { resolveScreenTitleViaWeb } from '@/lib/tools/resolve-title';
 
 export type WatchStatus = 'watching' | 'want' | 'done';
 export type SeasonState = 'pending' | 'watching' | 'watched';
@@ -228,15 +229,58 @@ export function cleanScreenTitle(raw: string): string {
   return s;
 }
 
-export function extractWatchTitle(text: string): { title: string; status: WatchStatus } | null {
+export function extractWatchTitle(text: string): { title: string; status: WatchStatus; raw: string } | null {
   const status: WatchStatus =
     /\b(start(?:ed)? watching|i'?m watching|currently watching|now watching)\b/i.test(text) ? 'watching' : 'want';
   const body = text.replace(
     /^.*?\b(add|put|start(?:ed)? watching|i'?m watching|currently watching|want(?:s|ed)? to watch|need(?:s|ed)? to watch|gotta watch|have to watch|watch)\b\s*/i,
     '',
   );
-  const title = cleanScreenTitle(body === text ? text : body);
-  return title.length >= 2 ? { title, status } : null;
+  const raw = body === text ? text : body;
+  const title = cleanScreenTitle(raw);
+  return title.length >= 2 ? { title, status, raw } : null;
+}
+
+const FRESH_RE = /\b(new|latest|just (?:came out|dropped|released|premiered)|recently)\b/i;
+// a raw phrase that reads like a *description* rather than a title — worth a
+// web lookup if TMDB can't place it ("the new Green Lantern show" -> "Lanterns")
+export const looksVague = (raw: string) =>
+  /\b(new|latest|just|recently|show|series|movie|film|thing|one)\b/i.test(raw) || raw.trim().split(/\s+/).length >= 3;
+
+/** Chat-facing add: clean the user's words to a title, store fast (by name if
+ *  TMDB can't place it). The route schedules {@link upgradeWatchRowViaWeb} for
+ *  a bare row so a vague "new X show" gets its real title filled in after. */
+export async function addWatchFromText(
+  userId: string,
+  rawPhrase: string,
+  status: WatchStatus,
+  fullText: string,
+): Promise<{ row: WatchRow | null; added: boolean; note?: string }> {
+  const cleaned = cleanScreenTitle(rawPhrase);
+  if (cleaned.length < 2) return { row: null, added: false };
+  return addToWatchList(userId, cleaned, status, { freshOnly: FRESH_RE.test(fullText) });
+}
+
+/** Background (waitUntil): a bare by-name row may be a loose reference to
+ *  something new. Spend one web search to pin the real title, then re-resolve
+ *  through TMDB and swap the row. No-op if the row already resolved or is gone. */
+export async function upgradeWatchRowViaWeb(userId: string, rowId: string, rawPhrase: string): Promise<void> {
+  const { data: row } = await adminClient
+    .from('watch_list')
+    .select('id, tmdb_id, status, title')
+    .eq('user_id', userId)
+    .eq('id', rowId)
+    .maybeSingle();
+  if (!row || row.tmdb_id) return;
+
+  const resolved = await resolveScreenTitleViaWeb(rawPhrase).catch(() => null);
+  if (!resolved || resolved.toLowerCase() === String(row.title).toLowerCase()) return;
+
+  const r = await addToWatchList(userId, resolved, (row.status as WatchStatus) ?? 'want').catch(() => null);
+  if (r?.row && r.row.id !== rowId) {
+    await adminClient.from('watch_list').delete().eq('user_id', userId).eq('id', rowId);
+    await audit.log('tool_call', 'calliad', null, { tool: 'watch_upgrade', from: row.title, to: r.row.title });
+  }
 }
 
 export async function matchWatchRow(userId: string, title: string): Promise<WatchRow | null> {
