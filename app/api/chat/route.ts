@@ -56,7 +56,7 @@ import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/tra
 import { isUnsubscribeMention, noteUnsubscribeFromChat } from '@/lib/mail/unsubscribes';
 import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
 import {
-  isWatchAdd, isWatchUpdate, isWatchQuery, extractWatchTitle, addToWatchList,
+  isWatchAdd, isWatchUpdate, isWatchQuery, extractWatchTitle, addToWatchList, cleanScreenTitle,
   applyWatchUpdate, listWatch, watchListBlock, watchContextLine,
 } from '@/lib/tools/watchlist';
 import type { TurnState } from '@/lib/brain/prompt';
@@ -393,6 +393,22 @@ export async function POST(req: NextRequest) {
   if (isTaskAdd(text) && !isSubscriptionAdd(text)) {
     const { title, due_at, recur } = await extractTask(text).catch(() => ({ title: text.trim(), due_at: null, recur: null }));
     if (title) {
+      // "remind me to watch <show>" with no time attached is really a watch-list add
+      const wm = !due_at && !recur ? /^\s*watch(?:ing)?\s+(.+)$/i.exec(title) : null;
+      if (wm) {
+        const cleaned = cleanScreenTitle(wm[1]);
+        if (cleaned.length >= 2) {
+          const fresh = /\b(new|latest|just (?:came out|dropped|released|premiered)|recently)\b/i.test(text);
+          const r = await addToWatchList(user.id, cleaned, 'want', { freshOnly: fresh }).catch(() => null);
+          if (r?.row) {
+            return say(
+              `Put **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''} on your watch list — want to watch${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${r.note && r.note.includes('no TMDB') ? " (couldn't find it on TMDB — added by name)" : ''}`,
+              'watch-add',
+            );
+          }
+        }
+        // add failed → fall through and keep it as a task
+      }
       await upsertLoop(user.id, { title, due_at, recur, source: 'manual', tags: ['task'] });
       const whenNote = due_at
         ? ` — ${recur ? 'first due ' : 'due '}${new Date(due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ })}`
@@ -428,7 +444,8 @@ export async function POST(req: NextRequest) {
   if (isWatchAdd(text)) {
     const w = extractWatchTitle(text);
     if (w) {
-      const r = await addToWatchList(user.id, w.title, w.status).catch(() => null);
+      const fresh = /\b(new|latest|just (?:came out|dropped|released|premiered)|recently)\b/i.test(text);
+      const r = await addToWatchList(user.id, w.title, w.status, { freshOnly: fresh }).catch(() => null);
       if (r?.row) {
         return say(
           `${r.added ? 'Added' : 'Updated'} **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''} — ${r.row.status === 'watching' ? 'watching' : 'want to watch'}${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${r.note && r.note.includes('no TMDB') ? ' (couldn\'t find it on TMDB — added by name)' : ''}`,

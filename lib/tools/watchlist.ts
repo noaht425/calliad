@@ -41,11 +41,15 @@ export async function addToWatchList(
   userId: string,
   title: string,
   status: WatchStatus = 'want',
+  opts: { freshOnly?: boolean } = {},
 ): Promise<{ row: WatchRow | null; added: boolean; note?: string }> {
   const clean = title.trim();
   if (!clean) return { row: null, added: false };
 
-  const hit = tmdbAvailable() ? await searchScreen(clean).catch(() => null) : null;
+  let hit = tmdbAvailable() ? await searchScreen(clean).catch(() => null) : null;
+  // "that new X show" — don't let a years-old namesake stand in for a release
+  // TMDB may not have indexed yet. Better to store by name than to mis-resolve.
+  if (hit && opts.freshOnly && hit.year && hit.year < new Date().getFullYear() - 2) hit = null;
   if (!hit) {
     // no TMDB match — store minimal so it isn't lost
     const { data } = await adminClient
@@ -183,19 +187,55 @@ export async function watchContextLine(userId: string): Promise<string[]> {
 
 // ── chat intent ─────────────────────────────────────────────────────────
 export const isWatchAdd = (t: string) =>
-  /\b(add\b.{0,40}\b(watch ?list|to watch)|put\b.{0,40}\bon (my )?(watch ?list|want[- ]to[- ]watch)|watch ?list[:]?\s+\S|want to watch\b|start(ed)? watching\b|add\b.{0,30}\bto (my )?(shows|queue))\b/i.test(t);
+  /\b(add\b.{0,40}\b(watch ?list|to watch)|put\b.{0,40}\bon (my )?(watch ?list|want[- ]to[- ]watch|queue|shows)|watch ?list[:]?\s+\S|want to watch\b|start(ed)? watching\b|add\b.{0,30}\bto (my )?(shows|queue))\b/i.test(t);
 export const isWatchUpdate = (t: string) =>
   /\b(i'?m (on|watching) season \d|finished season \d|done with season \d|caught up on\b|rate\b.{0,40}\b(stars?|\/5|out of 5)|give\b.{0,40}\bstars?\b|\d\s*stars?\b|finished\b.{0,40}\b(show|series|season)|marked?\b.{0,30}\bwatched)\b/i.test(t);
 export const isWatchQuery = (t: string) =>
   /\b(what('?s| is) (on )?my watch ?list|what am i watching|what should i watch next|anything (airing|coming out) (soon|this week)|what'?s (airing|dropping|new) (soon|this week)|my (shows|watch ?list))\b/i.test(t);
 
+/**
+ * Strip the filler around a spoken/typed screen title so TMDB search and the
+ * stored name are clean. "that new Green Lantern show. Can you add it to my
+ * want to watch?" -> "Green Lantern".
+ */
+export function cleanScreenTitle(raw: string): string {
+  // an explicit "... called / titled X" wins outright
+  const named = raw.match(/\b(?:called|titled|named)\s+"?([A-Za-z0-9][\w'’&: -]*?)"?[.!?]*\s*$/i);
+  if (named && named[1].trim().length >= 2) return named[1].replace(/["'`]/g, '').trim();
+
+  let s = raw.trim();
+  // a trailing new sentence — "... show. Can you add it?", "... . It sounds good."
+  s = s.replace(/[.!?]\s+(can|could|would|will|i|it|please|thanks|that|this|add|put)\b.*$/i, '');
+  // "... to my watch list / want to watch / queue / shows / list"
+  s = s.replace(/[,\s]+\b(to|on|for)\s+(my\s+)?(watch\s?list|want(?:[- ]to[- ]watch)(?:\s+list)?|shows|queue|list|me)\b.*$/i, '');
+  // leftover polite tails
+  s = s.replace(/[,\s]+\b(can|could|would|will)\s+you\b.*$/i, '');
+  s = s.replace(/[,\s]+\b(please|for me|thanks?|thank you)\b[\s.!?]*$/i, '');
+  // "... that just came out", "... which premiered last week", "... everyone's talking about"
+  s = s.replace(/[,\s]+\b(that|which)\s+(just\s+|recently\s+)?(came out|comes out|dropped|premiered|started|is out|released|aired)\b.*$/i, '');
+  s = s.replace(/[,\s]+\b(everyone'?s|everybody'?s)\s+(talking about|watching|into)\b.*$/i, '');
+  // leading filler — only "that/this ...", or an explicit "the/a new ..."
+  let leadStripped = false;
+  s = s.replace(/^(that|this)\s+(new\s+|latest\s+)?/i, () => { leadStripped = true; return ''; });
+  s = s.replace(/^(the|a|an)\s+(new|latest)\s+/i, () => { leadStripped = true; return ''; });
+  s = s.replace(/^(new|latest)\s+/i, () => { leadStripped = true; return ''; });
+  // drop a trailing "show/series/movie/film" only when we saw leading filler,
+  // so a real title like "The Morning Show" is left alone
+  if (leadStripped) s = s.replace(/\s+(tv\s+)?(show|series|movie|film)\b[\s.!?]*$/i, '');
+  s = s.replace(/["'`]/g, '').replace(/^[\s,:;-]+|[\s,.:;!?-]+$/g, '').trim();
+  // spoken / transcribed titles arrive all-lowercase — title-case them
+  if (s && s === s.toLowerCase()) s = s.replace(/\b([a-z])/g, (_m, c: string) => c.toUpperCase());
+  return s;
+}
+
 export function extractWatchTitle(text: string): { title: string; status: WatchStatus } | null {
-  const status: WatchStatus = /\b(start(ed)? watching|i'?m watching|currently watching)\b/i.test(text) ? 'watching' : 'want';
-  const title = text
-    .replace(/^.*?\b(add|put|start watching|started watching|i'?m watching|want to watch)\b\s*/i, '')
-    .replace(/\b(to|on)\s+(my\s+)?(watch\s?list|want[- ]to[- ]watch(?:\s+list)?|shows|queue|list)\b.*$/i, '')
-    .replace(/["'.!]/g, '')
-    .trim();
+  const status: WatchStatus =
+    /\b(start(?:ed)? watching|i'?m watching|currently watching|now watching)\b/i.test(text) ? 'watching' : 'want';
+  const body = text.replace(
+    /^.*?\b(add|put|start(?:ed)? watching|i'?m watching|currently watching|want(?:s|ed)? to watch|need(?:s|ed)? to watch|gotta watch|have to watch|watch)\b\s*/i,
+    '',
+  );
+  const title = cleanScreenTitle(body === text ? text : body);
   return title.length >= 2 ? { title, status } : null;
 }
 

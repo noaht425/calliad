@@ -128,14 +128,26 @@ export default function WatchPage() {
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start gap-2">
-                        <p className="flex-1 text-sm font-medium" style={{ color: 'var(--text)' }}>
+                        <button
+                          onClick={() => setOpen(expanded ? null : r.id)}
+                          className="flex-1 text-left text-sm font-medium"
+                          style={{ color: 'var(--text)' }}
+                        >
                           {r.title}{r.year ? <span style={{ color: 'var(--text-muted)' }}> ({r.year})</span> : null}
-                        </p>
+                        </button>
                         {r.streaming[0] && (
                           <span className="shrink-0 text-[10px] rounded px-1.5 py-0.5" style={{ background: 'var(--paper)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
                             {r.streaming[0]}
                           </span>
                         )}
+                        <button
+                          onClick={() => setOpen(expanded ? null : r.id)}
+                          aria-label={expanded ? 'Collapse' : 'Expand'}
+                          className="shrink-0 -mr-1 px-1 text-[11px]"
+                          style={{ color: 'var(--text-muted)' }}
+                        >
+                          {expanded ? '▲' : '▼'}
+                        </button>
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
                         {r.media_type === 'tv' && r.total_seasons ? <span>{watched}/{r.total_seasons} seasons</span> : null}
@@ -176,11 +188,11 @@ export default function WatchPage() {
                         </div>
                       ))}
                       {r.air_status && <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Status · {r.air_status}</p>}
-                      <div className="flex gap-3 text-[11px] pt-1">
+                      <div className="flex gap-4 text-xs pt-1">
                         {r.status === 'want'
-                          ? <button className="underline" onClick={() => patch({ id: r.id, status: 'watching' })}>start watching</button>
-                          : <button className="underline" style={{ color: 'var(--text-muted)' }} onClick={() => patch({ id: r.id, status: 'want' })}>move to want</button>}
-                        <button className="underline" style={{ color: 'var(--text-muted)' }} onClick={() => remove(r.id)}>remove</button>
+                          ? <button className="underline" style={{ color: 'var(--text)' }} onClick={() => patch({ id: r.id, status: 'watching' })}>start watching</button>
+                          : <button className="underline" style={{ color: 'var(--text)' }} onClick={() => patch({ id: r.id, status: 'want' })}>move to want</button>}
+                        <button className="underline" style={{ color: '#dc2626' }} onClick={() => remove(r.id)}>remove</button>
                       </div>
                     </div>
                   )}
