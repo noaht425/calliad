@@ -168,6 +168,13 @@ export async function POST(req: NextRequest) {
     return say(next ? `Switched — ${PRESETS[next]?.label ?? next}.` : 'Back to normal.', 'preset-switch');
   }
 
+  // A language-practice thread is a conversation. The English-command intent
+  // handlers below (calendar, tasks, watch list, taste, games, capture…) misfire
+  // on foreign text and on the user explaining in English what they want to say,
+  // so skip them entirely and let the brain (with the practice overlay) answer.
+  // "back to English" and language/preset switches above still work.
+  if (!modeState.practiceLang) {
+
   // ── memory games: math sprint (answer flow) ──────────────────────────
   const sprint = modeState.sprint as SprintState | undefined;
   if (sprint?.problems?.length) {
@@ -561,6 +568,8 @@ export async function POST(req: NextRequest) {
     return streamResponse(conversationId, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
   }
 
+  } // end: skip intent handlers while in a language-practice thread
+
   // ── frictionless capture: one URL, not a question, little other text ──
   const urls = text.match(/https?:\/\/[^\s<>"')]+/g);
   const withoutUrls = text.replace(/https?:\/\/[^\s<>"')]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -622,6 +631,7 @@ export async function POST(req: NextRequest) {
     convPreset: modeState.preset as string | undefined,
     mode: effectiveMode,
     drillMode: !!(modeState.roots || modeState.sprint),
+    practice: !!modeState.practiceLang,
   });
 
   const deckUrl = text.match(/https?:\/\/(?:www\.)?archidekt\.com\/(?:api\/)?decks\/\d+/)?.[0];

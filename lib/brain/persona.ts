@@ -174,10 +174,12 @@ export function presetOverlay(key: string | undefined): string {
   return p?.overlay ? p.overlay + PRESET_GUARD : '';
 }
 
-/** conversation override > mode/drill auto > user default > 'default'. */
-export function resolvePreset(opts: { userDefault?: string; convPreset?: string; mode?: Mode; drillMode?: boolean }): string {
+/** conversation override > mode/drill/practice auto > user default > 'default'. */
+export function resolvePreset(opts: {
+  userDefault?: string; convPreset?: string; mode?: Mode; drillMode?: boolean; practice?: boolean;
+}): string {
   if (opts.convPreset) return opts.convPreset;
-  if (opts.mode === 'quiz' || opts.mode === 'italian-tutor' || opts.drillMode) return 'harsh-professor';
+  if (opts.mode === 'quiz' || opts.mode === 'italian-tutor' || opts.drillMode || opts.practice) return 'harsh-professor';
   return opts.userDefault || 'default';
 }
 
