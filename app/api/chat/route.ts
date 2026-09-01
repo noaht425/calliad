@@ -220,7 +220,9 @@ export async function POST(req: NextRequest) {
 
   // ── memory games: riddle guess / reveal ─────────────────────────────
   const riddleSt = modeState.riddle as RiddleState | undefined;
-  if (riddleSt && !riddleSt.revealed && Date.now() - riddleSt.at < 12 * 3600000) {
+  // Not while a language-practice thread is live — short replies there are
+  // conversation, not riddle guesses.
+  if (riddleSt && !riddleSt.revealed && !modeState.practiceLang && Date.now() - riddleSt.at < 12 * 3600000) {
     if (isRiddleReveal(text)) {
       await adminClient.from('conversations').update({ mode_state: { ...modeState, riddle: { ...riddleSt, revealed: true } } }).eq('id', conversationId);
       return say(`${RIDDLES[riddleSt.id].a}`, 'riddle-reveal');

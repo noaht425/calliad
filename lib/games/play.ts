@@ -36,11 +36,22 @@ export const isRiddleRequest = (t: string) =>
 export const isRiddleReveal = (t: string) =>
   /\b(give up|i give up|reveal|the answer|what'?s the answer|tell me( the answer)?|show( me)? the answer|i don'?t know|no idea|stumped)\b/i.test(t);
 
-/** Pull a guessed answer out of "is it a candle" / "the answer is footsteps" / bare guess. */
+// Openers that mean "this is conversation, not a riddle guess" — questions,
+// greetings, fillers (incl. a few Italian ones, since practice runs in-thread).
+const RIDDLE_NONGUESS =
+  /^(how|what|whats|what's|why|who|whom|whose|when|where|which|can|could|would|should|shall|will|do|does|did|are|is|was|were|have|has|had|may|might|am|hi|hii|hey|hello|yo|sup|ok|okay|k|yes|yeah|yep|yup|no|nope|nah|sure|maybe|thanks|thx|ty|thank|please|pls|lol|lmao|haha|nice|cool|great|good|morning|evening|night|hola|ciao|salve|vabbe|vabbè|allora|beh|boh|dai|senti|scusa|prego)\b/i;
+
+/** Pull a guessed answer out of "is it a candle" / "the answer is footsteps" /
+ *  a short bare noun-phrase. Returns null for questions, greetings, and chatter
+ *  so a pending riddle doesn't swallow normal conversation. */
 export function extractRiddleGuess(t: string): string | null {
-  const m = t.match(/\b(?:the answer is|is it|i think it'?s|it'?s|my guess is|answer:?|guess:?)\s+(.+)$/i);
-  if (m) return m[1];
-  if (t.trim().split(/\s+/).length <= 4 && /[a-z]/i.test(t)) return t; // short bare guess
+  const s = t.trim();
+  const m = s.match(/\b(?:the answer is|is it|i think it'?s|it'?s|my guess is|answer:?|guess:?)\s+(.+)$/i);
+  if (m) return m[1].replace(/[?!.]+\s*$/, '').trim() || null;
+  const words = s.split(/\s+/);
+  if (words.length >= 1 && words.length <= 4 && !/[?]/.test(s) && /[a-z]/i.test(s) && !RIDDLE_NONGUESS.test(s)) {
+    return s.replace(/[.!]+\s*$/, '').trim() || null; // short bare guess
+  }
   return null;
 }
 export function checkRiddle(id: number, guess: string): boolean {
