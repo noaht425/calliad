@@ -146,8 +146,20 @@ export async function POST(req: NextRequest) {
   // ── language practice: "reply to me in French" / "back to English" ────
   const curPractice = modeState.practiceLang as PracticeLang | undefined;
   if (curPractice && detectPracticeExit(text)) {
-    await adminClient.from('conversations').update({ mode_state: { ...modeState, practiceLang: undefined } }).eq('id', conversationId);
-    return say('Back to English.', 'practice-exit');
+    // the same message may also carry a riddle guess ("...and the answer is X")
+    const rs = modeState.riddle as RiddleState | undefined;
+    const g = rs && !rs.revealed ? extractRiddleGuess(text) : null;
+    let riddleTail = '';
+    if (rs && g) {
+      const solved = checkRiddle(rs.id, g);
+      modeState.riddle = { ...rs, revealed: solved };
+      if (solved) { await recordScore(user.id, 'riddle', 1, { id: rs.id }); riddleTail = ` And yes — the riddle was **${RIDDLES[rs.id].a}**.`; }
+      else riddleTail = ` Not the riddle answer, though — say "answer" to give up.`;
+    }
+    await adminClient.from('conversations')
+      .update({ mode_state: { ...modeState, practiceLang: undefined } })
+      .eq('id', conversationId);
+    return say(`Back to English.${riddleTail}`, 'practice-exit');
   }
   {
     const pl = detectPracticeLang(text);

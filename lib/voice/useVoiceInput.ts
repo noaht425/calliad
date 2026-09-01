@@ -59,12 +59,16 @@ export function useVoiceInput(onResult: (text: string) => void, opts: Opts = {})
     idleTimer.current = setTimeout(releaseStream, 90_000);
   }, [releaseStream]);
 
+  // true right after a real getUserMedia call (incl. the iOS permission prompt) —
+  // the mic needs a beat to spin up or the first ~0.5s records as silence.
+  const freshAcquire = useRef(false);
   const getStream = useCallback(async () => {
     const live = streamRef.current?.getAudioTracks().some((t) => t.readyState === 'live');
-    if (streamRef.current && live) return streamRef.current;
+    if (streamRef.current && live) { freshAcquire.current = false; return streamRef.current; }
     streamRef.current = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
+    freshAcquire.current = true;
     return streamRef.current;
   }, []);
 
@@ -81,15 +85,27 @@ export function useVoiceInput(onResult: (text: string) => void, opts: Opts = {})
     };
   }, [releaseStream]);
 
+  const stopRequested = useRef(false);
   const stop = useCallback(() => {
+    stopRequested.current = true;
     if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
   }, []);
 
   const start = useCallback(async () => {
     if (!supported || !session) return;
     if (idleTimer.current) { clearTimeout(idleTimer.current); idleTimer.current = null; }
+    stopRequested.current = false;
     try {
       const stream = await getStream();
+      // Fresh mic (first tap / after the iOS prompt) needs a moment to spin up,
+      // or the clip is silence and Whisper hallucinates a stock phrase.
+      const warmup = freshAcquire.current ? 300 : 0;
+      freshAcquire.current = false;
+      if (warmup) {
+        setState('recording');
+        await new Promise((r) => setTimeout(r, warmup));
+        if (stopRequested.current) { setState('idle'); return; } // let go during warmup
+      }
       const recorder = new MediaRecorder(stream, PREFERRED_MIME ? { mimeType: PREFERRED_MIME } : undefined);
       recorderRef.current = recorder;
       chunksRef.current = [];

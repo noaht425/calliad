@@ -46,10 +46,29 @@ export async function transcribe(
     throw new Error(`groq stt ${r.status}: ${body.slice(0, 200)}`);
   }
 
-  const j = (await r.json()) as { text?: string; duration?: number };
-  const text = (j.text ?? '').trim();
+  const j = (await r.json()) as {
+    text?: string;
+    duration?: number;
+    segments?: { no_speech_prob?: number; avg_logprob?: number }[];
+  };
+  let text = (j.text ?? '').trim();
   const durationSec = j.duration ?? 0;
   const costUsd = (durationSec / 3600) * PRICE_PER_HOUR;
+
+  // Whisper fills silence / a broken clip with a stock phrase ("Thank you.",
+  // "Grazie a tutti.", subtitle credits) or bare punctuation. Drop those before
+  // they become a chat message — the mic often catches nothing on the very first
+  // tap after iOS re-prompts for permission.
+  const segs = j.segments ?? [];
+  const meanNoSpeech = segs.length ? segs.reduce((a, s) => a + (s.no_speech_prob ?? 0), 0) / segs.length : 0;
+  const meanLogprob = segs.length ? segs.reduce((a, s) => a + (s.avg_logprob ?? 0), 0) / segs.length : 0;
+  const stripped = text.replace(/[\s.,!?¿¡…"'’()\-–—]/g, '').toLowerCase();
+  const noSpeech =
+    stripped.length === 0 ||
+    durationSec < 0.5 ||
+    meanNoSpeech >= 0.65 ||
+    (segs.length > 0 && meanNoSpeech >= 0.45 && meanLogprob < -0.85 && stripped.length <= 20);
+  if (noSpeech) text = '';
 
   await audit.modelCall({
     conversation_id: opts.conversationId ?? null,

@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
     await audit.log('tool_call', 'calliad', conversationId, {
       tool: 'transcribe', chars: text.length, duration_s: Math.round(durationSec), cost_usd: costUsd,
     });
+    if (!text.trim()) return json({ error: "Didn't catch that — hold the mic, speak, then release." }, 422);
     return json({ transcript: text }, 200);
   } catch (err) {
     await audit.log('error', 'system', conversationId, { where: 'transcribe', message: String(err) });
