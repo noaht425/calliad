@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { adminClient } from '@/lib/supabase.server';
 import { transcribe, sttAvailable } from '@/lib/llm/groq';
 import { audit } from '@/lib/hub/audit';
 
@@ -31,8 +32,17 @@ export async function POST(req: NextRequest) {
 
   const name = (audio instanceof File && audio.name) || 'note.m4a';
 
+  // Pin the language only when the conversation is explicitly in a language mode;
+  // otherwise auto-detect so English/Italian both transcribe correctly.
+  const explicit = (form.get('language') as string) || '';
+  let language = /^(it|en|es|fr|de|la|grc?)$/i.test(explicit) ? explicit.toLowerCase() : undefined;
+  if (!language && conversationId) {
+    const { data } = await adminClient.from('conversations').select('mode').eq('id', conversationId).maybeSingle();
+    if (data?.mode === 'italian-tutor') language = 'it';
+  }
+
   try {
-    const { text, durationSec, costUsd } = await transcribe(audio, name, { conversationId });
+    const { text, durationSec, costUsd } = await transcribe(audio, name, { conversationId, language });
     await audit.log('tool_call', 'calliad', conversationId, {
       tool: 'transcribe', chars: text.length, duration_s: Math.round(durationSec), cost_usd: costUsd,
     });

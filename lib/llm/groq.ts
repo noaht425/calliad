@@ -20,7 +20,7 @@ export interface Transcription {
 export async function transcribe(
   file: Blob,
   filename: string,
-  opts: { conversationId?: string | null } = {},
+  opts: { conversationId?: string | null; language?: string } = {},
 ): Promise<Transcription> {
   const key = process.env.GROQ_API_KEY;
   if (!key) throw new Error('GROQ_API_KEY not set');
@@ -29,7 +29,10 @@ export async function transcribe(
   const fd = new FormData();
   fd.append('file', file, filename);
   fd.append('model', MODEL);
-  fd.append('language', 'en');
+  // Only pin a language when the caller is sure (e.g. Italian-tutor mode).
+  // Otherwise let whisper-large-v3-turbo auto-detect — it's fully multilingual,
+  // and Noah switches between English and Italian.
+  if (opts.language) fd.append('language', opts.language);
   fd.append('response_format', 'verbose_json'); // carries .duration for cost
 
   const r = await fetch(ENDPOINT, {
