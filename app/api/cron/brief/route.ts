@@ -12,6 +12,7 @@ import { medCheckin } from '@/lib/health/meds';
 import { scanForTidy } from '@/lib/memory/tidy';
 import { upcomingCharges } from '@/lib/money/subscriptions';
 import { riddleOfTheDay } from '@/lib/games/play';
+import { refreshWatchAirDates, watchContextLine } from '@/lib/tools/watchlist';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -64,13 +65,15 @@ async function handle(req: NextRequest) {
       // follow-up call stays the intended second touch — no double reminder.
       const med = await medCheckin(userId, { followUp: false }).catch((e) => ({ sent: false, reason: String(e) }));
 
-      const [tidyCount, calChanges, charges, pendingFacts] = await Promise.all([
+      await refreshWatchAirDates(userId).catch(() => 0);
+      const [tidyCount, calChanges, charges, pendingFacts, airing] = await Promise.all([
         scanForTidy(userId).then((x) => x.length).catch(() => 0),
         recentCalendarChanges(userId).catch(() => [] as string[]),
         upcomingCharges(userId).catch(() => [] as string[]),
         adminClient.from('profile_facts').select('id', { count: 'exact', head: true })
           .eq('user_id', userId).eq('confirmed', false).eq('source', 'chat')
           .then((r) => r.count ?? 0, () => 0),
+        watchContextLine(userId).catch(() => [] as string[]),
       ]);
       const notes: string[] = [];
       if (calChanges.length) {
@@ -78,6 +81,9 @@ async function handle(req: NextRequest) {
       }
       if (charges.length) {
         notes.push(`Subscriptions renewing in the next few days: ${charges.join('; ')}. One short line if relevant.`);
+      }
+      if (airing.length) {
+        notes.push(`From Noah's watch list, airing soon: ${airing.join('; ')}. Mention if it lands in the next few days.`);
       }
       if (tidyCount) {
         notes.push(`Housekeeping: ${tidyCount} possible duplicate/stale item${tidyCount === 1 ? '' : 's'} in Noah's lists. End the brief with one short line telling him to say "tidy" to review them.`);

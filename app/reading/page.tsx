@@ -43,6 +43,9 @@ export default function ReadingPage() {
       <PageHeader title="Reading & watch" count={items.length || undefined} />
       <PageBody className="px-4 pt-2">
         <div className="max-w-xl mx-auto">
+          <a href="/watch" className="inline-flex items-center gap-1 text-xs mb-4" style={{ color: 'var(--accent)' }}>
+            → TV &amp; film watch list
+          </a>
           {items.length === 0 && (
             <p className="text-sm" style={{ color: 'var(--text-quiet)' }}>
               Nothing yet. Send Calliad a link in chat, or share one to it from another app.

@@ -54,6 +54,10 @@ import { RIDDLES } from '@/lib/games/riddles';
 import { ROOTS } from '@/lib/games/roots';
 import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/travel/trips';
 import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
+import {
+  isWatchAdd, isWatchUpdate, isWatchQuery, extractWatchTitle, addToWatchList,
+  applyWatchUpdate, listWatch, watchListBlock, watchContextLine,
+} from '@/lib/tools/watchlist';
 import type { TurnState } from '@/lib/brain/prompt';
 
 export const runtime = 'nodejs';
@@ -385,6 +389,26 @@ export async function POST(req: NextRequest) {
     // couldn't pin it down → fall through to the brain
   }
 
+  // ── silent tier: watch list — add / update / query ────────────────────
+  if (isWatchAdd(text)) {
+    const w = extractWatchTitle(text);
+    if (w) {
+      const r = await addToWatchList(user.id, w.title, w.status).catch(() => null);
+      if (r?.row) {
+        return say(
+          `${r.added ? 'Added' : 'Updated'} **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''} — ${r.row.status === 'watching' ? 'watching' : 'want to watch'}${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${r.note && r.note.includes('no TMDB') ? ' (couldn\'t find it on TMDB — added by name)' : ''}`,
+          'watch-add',
+        );
+      }
+      return say(`Couldn't add "${w.title}" — try the /watch screen.`, 'watch-add-failed');
+    }
+  }
+  if (isWatchUpdate(text)) {
+    const msg = await applyWatchUpdate(user.id, text).catch(() => null);
+    if (msg) return say(msg, 'watch-update');
+    // no match on the list → fall through (maybe it's a taste reaction)
+  }
+
   // ── silent tier: a reaction to a book/show/film/game → taste_log ────────
   // Runs before the profile-fact path so "remember I loved X" lands in the
   // taste log (verdict + why), not as a loose profile fact.
@@ -573,6 +597,13 @@ export async function POST(req: NextRequest) {
       : `## Web fetch\nNoah asked about a saved link but his reading list is empty.`;
   } else if (isSubscriptionQuery(text)) {
     toolResult = await subscriptionsSummary(user.id).catch(() => undefined);
+  } else if (isWatchQuery(text)) {
+    if (/\b(airing|dropping|coming out|new (episode|season)) (soon|this week|next)|what'?s (airing|new|dropping)/i.test(text)) {
+      const soon = await watchContextLine(user.id).catch(() => [] as string[]);
+      toolResult = soon.length ? `## Airing soon\n${soon.map((s) => `- ${s}`).join('\n')}` : `## Airing soon\nNothing in your watch list has an episode in the next ~10 days.`;
+    } else {
+      toolResult = watchListBlock(await listWatch(user.id).catch(() => []));
+    }
   } else if (isRestaurantTasteQuery(text)) {
     toolResult = await restaurantTasteBlock(user.id, text).catch(() => undefined);
   } else if (/\b(would i (like|enjoy|hate|bounce off)|should i (watch|read|play|start|bother with|eat at|go to)|do you think i'?d (like|enjoy)|worth (watching|reading|playing|a visit|going to)|think i'?d (like|enjoy)|what did i (rate|think of|give)|have i (been (to|there)|tried|eaten at)|my (score|rating) (for|of|on))\b/i.test(text)) {
