@@ -78,6 +78,7 @@ export interface TurnState {
   trips?: string;                   // upcoming trips (for prep-aware answers)
   personaExtra?: string;            // rapport: familiarity line + voice profile (cached layer)
   presetOverlay?: string;           // stance preset overlay (fresh layer)
+  practiceOverlay?: string;         // "reply in language X for practice" overlay
 }
 
 function renderLoops(loops: OpenLoop[], tz: string): string {
@@ -168,6 +169,7 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
   }
   const overlay = state.mode && MODE_OVERLAY[state.mode];
   if (overlay) system.push({ type: 'text', text: overlay });
+  if (state.practiceOverlay) system.push({ type: 'text', text: state.practiceOverlay });
   if (state.presetOverlay) system.push({ type: 'text', text: state.presetOverlay });
   if (state.toolResult) system.push({ type: 'text', text: state.toolResult });
 

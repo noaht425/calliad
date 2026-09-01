@@ -61,6 +61,7 @@ import {
 } from '@/lib/tools/watchlist';
 import type { TurnState } from '@/lib/brain/prompt';
 import { personaExtra, presetOverlay, resolvePreset, detectPresetSwitch, PRESETS } from '@/lib/brain/persona';
+import { detectPracticeLang, detectPracticeExit, practiceOverlay, type PracticeLang } from '@/lib/brain/practice';
 import { config } from '@/lib/hub/config';
 
 export const runtime = 'nodejs';
@@ -139,6 +140,23 @@ export async function POST(req: NextRequest) {
   if (medReply === 'not-yet') {
     await recordMed(user.id, false, 'not yet');
     return say('Okay — I’ll check once more later, then leave it.', 'med-reply');
+  }
+
+  // ── language practice: "reply to me in French" / "back to English" ────
+  const curPractice = modeState.practiceLang as PracticeLang | undefined;
+  if (curPractice && detectPracticeExit(text)) {
+    await adminClient.from('conversations').update({ mode_state: { ...modeState, practiceLang: undefined } }).eq('id', conversationId);
+    return say('Back to English.', 'practice-exit');
+  }
+  {
+    const pl = detectPracticeLang(text);
+    if (pl && (!curPractice || curPractice.name !== pl.name || curPractice.level !== pl.level)) {
+      await adminClient.from('conversations').update({ mode_state: { ...modeState, practiceLang: pl } }).eq('id', conversationId);
+      return say(
+        `${pl.name} it is (${pl.level}). I'll reply in ${pl.name} from here — say "back to English" to stop.`,
+        'practice-enter',
+      );
+    }
   }
 
   // ── personality preset switch ────────────────────────────────────────
@@ -671,6 +689,7 @@ export async function POST(req: NextRequest) {
     trips: tripsLine || undefined,
     personaExtra: rapport || undefined,
     presetOverlay: presetOverlay(activePreset) || undefined,
+    practiceOverlay: modeState.practiceLang ? practiceOverlay(modeState.practiceLang as PracticeLang) : undefined,
   };
   // A tool result means a longer, denser reply is expected (deck analysis, sim
   // narration, web-page answers). 1024 is stingy there — and with adaptive effort

@@ -35,10 +35,12 @@ export async function POST(req: NextRequest) {
   // Pin the language only when the conversation is explicitly in a language mode;
   // otherwise auto-detect so English/Italian both transcribe correctly.
   const explicit = (form.get('language') as string) || '';
-  let language = /^(it|en|es|fr|de|la|grc?)$/i.test(explicit) ? explicit.toLowerCase() : undefined;
+  let language = /^(it|en|es|fr|de|pt|nl|la|el|grc?)$/i.test(explicit) ? explicit.toLowerCase() : undefined;
   if (!language && conversationId) {
-    const { data } = await adminClient.from('conversations').select('mode').eq('id', conversationId).maybeSingle();
-    if (data?.mode === 'italian-tutor') language = 'it';
+    const { data } = await adminClient.from('conversations').select('mode, mode_state').eq('id', conversationId).maybeSingle();
+    const pl = (data?.mode_state as { practiceLang?: { code?: string } } | null)?.practiceLang?.code;
+    if (pl && /^[a-z]{2}$/.test(pl)) language = pl;
+    else if (data?.mode === 'italian-tutor') language = 'it';
   }
 
   try {
