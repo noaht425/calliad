@@ -53,6 +53,7 @@ import {
 import { RIDDLES } from '@/lib/games/riddles';
 import { ROOTS } from '@/lib/games/roots';
 import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/travel/trips';
+import { isUnsubscribeMention, noteUnsubscribeFromChat } from '@/lib/mail/unsubscribes';
 import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
 import {
   isWatchAdd, isWatchUpdate, isWatchQuery, extractWatchTitle, addToWatchList,
@@ -397,6 +398,12 @@ export async function POST(req: NextRequest) {
       );
     }
     // couldn't pin it down → fall through to the brain
+  }
+
+  // ── silent tier: "I unsubscribed from X" → track + verify ────────────
+  if (isUnsubscribeMention(text)) {
+    const msg = await noteUnsubscribeFromChat(user.id, text).catch(() => null);
+    if (msg) return say(msg, 'unsub-noted');
   }
 
   // ── silent tier: watch list — add / update / query ────────────────────

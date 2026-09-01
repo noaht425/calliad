@@ -12,6 +12,11 @@ interface Trip {
   home_airport: string | null; has_pet: boolean; notes: string | null;
   status: 'planned' | 'active' | 'done' | 'cancelled'; prep_state: Record<string, string>;
 }
+interface Item { id: string; kind: string; title: string; start_at: string | null; end_at: string | null; location: string | null; confirmation_number: string | null }
+interface Source { id: string; subject: string | null; received_at: string | null }
+interface Card { id: string; subject: string; options: string[] }
+
+const KIND_ICON: Record<string, string> = { flight: '✈', hotel: '🏨', car: '🚗', train: '🚆', activity: '◆' };
 
 const PREP_LABELS: Record<string, string> = {
   pet_boarding: 'Pet boarding / sitter',
@@ -31,7 +36,11 @@ export default function TripDetailPage() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const [trip, setTrip] = useState<Trip | null>(null);
+  const [items, setItems] = useState<Item[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
+  const [cards, setCards] = useState<Card[]>([]);
   const [notFound, setNotFound] = useState(false);
+  const [cardMsg, setCardMsg] = useState('');
 
   useEffect(() => { if (!loading && !session) router.push('/login'); }, [loading, session, router]);
   const h = useMemo(
@@ -41,9 +50,19 @@ export default function TripDetailPage() {
   const load = useCallback(async () => {
     if (!h) return;
     const r = await fetch(`/api/trips?id=${id}`, { headers: h });
-    if (r.ok) setTrip((await r.json()).trip);
-    else setNotFound(true);
+    if (r.ok) {
+      const j = await r.json();
+      setTrip(j.trip); setItems(j.items ?? []); setSources(j.sources ?? []); setCards(j.cards ?? []);
+    } else setNotFound(true);
   }, [h, id]);
+  const answerCard = async (cardId: string, choice: string) => {
+    if (!h) return;
+    setCardMsg('…');
+    const r = await fetch('/api/trips/curation', { method: 'POST', headers: h, body: JSON.stringify({ cardId, choice }) });
+    const j = await r.json().catch(() => ({}));
+    setCardMsg(j.message ?? '');
+    void load();
+  };
   useEffect(() => { void load(); }, [load]);
 
   const setStatus = async (status: Trip['status']) => {
@@ -78,6 +97,58 @@ export default function TripDetailPage() {
                 </p>
                 {trip.notes && <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>{trip.notes}</p>}
               </div>
+
+              {cards.map((c) => (
+                <div key={c.id} className="rounded-xl px-4 py-3 mb-4" style={{ background: 'var(--accent-wash, var(--surface))', border: '1px solid var(--accent)' }}>
+                  <p className="text-sm mb-2" style={{ color: 'var(--text)' }}>{c.subject}</p>
+                  <div className="flex gap-2">
+                    {c.options.map((o) => (
+                      <button
+                        key={o}
+                        onClick={() => answerCard(c.id, o)}
+                        className="rounded-lg px-3 py-1.5 text-xs"
+                        style={o.toLowerCase().includes('check') ? { background: 'var(--accent)', color: 'var(--on-accent)' } : { background: 'var(--surface)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+                      >
+                        {o}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {cardMsg && <p className="text-xs mb-4" style={{ color: 'var(--text-quiet)' }}>{cardMsg}</p>}
+
+              <section className="mb-6">
+                <SectionLabel className="mb-2">Itinerary</SectionLabel>
+                {items.length === 0 ? (
+                  <p className="text-xs" style={{ color: 'var(--text-quiet)' }}>Nothing parsed from email yet. Confirmations from your inbox show up here automatically.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {items.map((i) => (
+                      <li key={i.id} className="rounded-lg px-3 py-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                        <p className="text-[11px] font-mono uppercase tracking-wide" style={{ color: 'var(--text-quiet)' }}>
+                          {KIND_ICON[i.kind] ?? '•'} {i.kind}{i.confirmation_number ? ` · ${i.confirmation_number}` : ''}
+                        </p>
+                        <p className="text-sm" style={{ color: 'var(--text)' }}>{i.title}</p>
+                        <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-quiet)' }}>
+                          {i.start_at ? new Date(i.start_at).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}
+                          {i.location ? ` · ${i.location}` : ''}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              {sources.length > 0 && (
+                <section className="mb-6">
+                  <SectionLabel className="mb-2">Sources</SectionLabel>
+                  <ul className="space-y-1 text-[11px]" style={{ color: 'var(--text-quiet)' }}>
+                    {sources.map((s) => (
+                      <li key={s.id}>✉ {s.subject ?? '(email)'}{s.received_at ? ` · ${new Date(s.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
               <section className="mb-6">
                 <SectionLabel className="mb-2">Prep</SectionLabel>

@@ -40,7 +40,7 @@ function IcMore({ on }: { on: boolean }) {
   );
 }
 
-const MORE_ROUTES = ['/more', '/reading', '/watch', '/settings'];
+const MORE_ROUTES = ['/more', '/reading', '/watch', '/unsubscribes', '/settings'];
 
 /* ─── BottomNav — Today / Tasks / Travel / People / More ─────────────────── */
 export function BottomNav() {

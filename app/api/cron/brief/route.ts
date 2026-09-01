@@ -14,6 +14,8 @@ import { upcomingCharges } from '@/lib/money/subscriptions';
 import { riddleOfTheDay } from '@/lib/games/play';
 import { refreshWatchAirDates, watchContextLine } from '@/lib/tools/watchlist';
 import { regenerateVoiceProfile } from '@/lib/brain/persona';
+import { parseTravelEmails, refreshTripGapCards } from '@/lib/travel/trip-email';
+import { detectUnsubscribes, verifyUnsubscribes } from '@/lib/mail/unsubscribes';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -59,7 +61,13 @@ async function handle(req: NextRequest) {
         await syncCalendarEvents(userId).catch(() => {});
         await syncContacts(userId).catch(() => {});
       }
-      if (s.has('gmail')) await scanGmailLabel(userId).catch(() => {});
+      if (s.has('gmail')) {
+        await scanGmailLabel(userId).catch(() => {});
+        await parseTravelEmails(userId).catch(() => {});
+        await refreshTripGapCards(userId).catch(() => {});
+        await detectUnsubscribes(userId).catch(() => {});
+        await verifyUnsubscribes(userId).catch(() => {});
+      }
 
       // Morning medication check-in (its own push). medCheckin self-limits to
       // 2 sends/day and skips if already taken, so the 2pm nudge cron's

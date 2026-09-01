@@ -185,6 +185,67 @@ export async function scanGmailLabel(
   return { captured, skipped, label };
 }
 
+/**
+ * Scan an arbitrary Gmail search query into email_items, tagged with `labelTag`
+ * so consumers (travel parser, unsubscribe verifier) can filter. Shares the
+ * fetch/store shape with scanGmailLabel.
+ */
+export async function scanGmailQuery(
+  userId: string,
+  q: string,
+  labelTag: string,
+  opts: { max?: number } = {},
+): Promise<{ captured: number; skipped: number } | { error: string }> {
+  const client = await getAuthenticatedClient(userId);
+  if (!client) return { error: 'not_connected' };
+  const gmail = google.gmail({ version: 'v1', auth: client.oauth2 });
+
+  let list;
+  try {
+    list = await gmail.users.messages.list({ userId: 'me', q, maxResults: opts.max ?? 25 });
+  } catch (err) {
+    return { error: `gmail_list_failed: ${String(err)}` };
+  }
+
+  let captured = 0;
+  let skipped = 0;
+  for (const msg of list.data.messages ?? []) {
+    if (!msg.id) continue;
+    const { data: existing } = await adminClient
+      .from('email_items').select('id').eq('user_id', userId).eq('gmail_message_id', msg.id).maybeSingle();
+    if (existing) { skipped++; continue; }
+    try {
+      const full = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' });
+      const headers = full.data.payload?.headers ?? [];
+      const h = (n: string) => headers.find((x) => x.name?.toLowerCase() === n)?.value ?? '';
+      const received = full.data.internalDate ? new Date(parseInt(full.data.internalDate)).toISOString() : null;
+      let bodyText = '';
+      if (full.data.payload?.parts) {
+        const { plain, html } = extractBody(full.data.payload.parts);
+        bodyText = (plain.trim() || stripHtml(html)).slice(0, 6000);
+      } else if (full.data.payload?.body?.data) {
+        const raw = Buffer.from(full.data.payload.body.data, 'base64').toString('utf-8');
+        bodyText = (full.data.payload.mimeType?.includes('html') ? stripHtml(raw) : raw).slice(0, 6000);
+      }
+      await adminClient.from('email_items').insert({
+        user_id: userId,
+        gmail_message_id: msg.id,
+        gmail_thread_id: full.data.threadId ?? msg.id,
+        label: labelTag,
+        from_addr: h('from'),
+        subject: h('subject') || '(no subject)',
+        snippet: full.data.snippet ?? null,
+        body_text: bodyText || null,
+        received_at: received,
+      });
+      captured++;
+    } catch (err) {
+      console.error('[gmail] scanGmailQuery', msg.id, err);
+    }
+  }
+  return { captured, skipped };
+}
+
 export async function getGmailStatus(userId: string) {
   const { data } = await adminClient
     .from('connected_services')
