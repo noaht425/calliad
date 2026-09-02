@@ -66,25 +66,27 @@ export async function sendChatAction(chatId: number | string, action = 'typing')
   await call('sendChatAction', { chat_id: chatId, action });
 }
 
-/** Resolve a Telegram file_id to a downloadable URL. */
-export async function telegramFileUrl(fileId: string): Promise<string | null> {
-  const f = await call<{ file_path?: string }>('getFile', { file_id: fileId });
-  return f?.file_path ? `${FILE_API()}/${f.file_path}` : null;
-}
-
-/** Download a Telegram file as a Blob (voice notes, photos). */
-export async function fetchTelegramFile(fileId: string): Promise<{ blob: Blob; name: string } | null> {
-  const url = await telegramFileUrl(fileId);
-  if (!url) return null;
-  try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-    if (!r.ok) return null;
-    const blob = await r.blob();
-    const name = url.split('/').pop() || 'file';
-    return { blob, name };
-  } catch {
-    return null;
+/** Download a Telegram file as a Blob (voice notes, photos). Throws with a
+ *  descriptive message on any failure so callers can surface / log the reason. */
+export async function fetchTelegramFile(fileId: string): Promise<{ blob: Blob; name: string }> {
+  const gf = await fetch(`${API()}/getFile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_id: fileId }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const gj = (await gf.json().catch(() => ({}))) as {
+    ok?: boolean; result?: { file_path?: string; file_size?: number }; description?: string;
+  };
+  if (!gj.ok || !gj.result?.file_path) {
+    throw new Error(`getFile ${gf.status}: ${gj.description ?? 'no file_path'}`);
   }
+  const filePath = gj.result.file_path;
+  const r = await fetch(`${FILE_API()}/${filePath}`, { signal: AbortSignal.timeout(20_000) });
+  if (!r.ok) throw new Error(`download HTTP ${r.status} (${filePath})`);
+  const ab = await r.arrayBuffer();
+  const type = r.headers.get('content-type') || 'application/octet-stream';
+  return { blob: new Blob([ab], { type }), name: filePath.split('/').pop() || 'file' };
 }
 
 // ── inbound update shapes (only the fields we use) ──────────────────────────

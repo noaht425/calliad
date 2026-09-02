@@ -133,8 +133,14 @@ async function handleMessage(msg: TgMessage): Promise<void> {
   // voice note → transcribe
   const media = msg.voice ?? msg.audio;
   if (media?.file_id) {
-    const f = await fetchTelegramFile(media.file_id).catch(() => null);
-    if (!f) { await sendTelegram(chatId, "Couldn't pull that audio from Telegram — try again."); return; }
+    let f: { blob: Blob; name: string };
+    try {
+      f = await fetchTelegramFile(media.file_id);
+    } catch (err) {
+      await audit.log('error', 'system', String(chatId), { where: 'telegram.fetchFile', message: String(err) });
+      await sendTelegram(chatId, `Couldn't pull that audio — ${String(err).slice(0, 140)}`);
+      return;
+    }
     // Telegram voice notes are OGG/Opus but the file URL ends in `.oga`, which
     // Groq's format sniff rejects — force a known-good extension.
     const fname = msg.voice ? 'voice.ogg' : (/\.[a-z0-9]{2,4}$/i.test(f.name) ? f.name : 'audio.mp3');
