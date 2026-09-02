@@ -19,6 +19,7 @@ import { upsertLoop, RECUR_LABEL } from '@/lib/memory/loops';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
+import { isAutoAllowed, runAutoCreateEvent, isUndo, undoLastAuto } from '@/lib/actions/auto';
 import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo, isCalendarChange, extractCalendarChange, findEventByHint } from '@/lib/actions/detect';
 import { extractTask } from '@/lib/actions/task';
 import { classifyMedReply, recordMed, medContextLine } from '@/lib/health/meds';
@@ -146,6 +147,13 @@ export async function POST(req: NextRequest) {
   if (pending && (isYes(text) || isNo(text))) {
     const r = await decideAction(user.id, pending.id, isYes(text) ? 'approved' : 'rejected', conversationId);
     return say(r.message, 'action-decided');
+  }
+
+  // ── undo the last auto-action (trust ladder) ──────────────────────────
+  if (!pending && isUndo(text)) {
+    const msg = await undoLastAuto(user.id, conversationId).catch(() => null);
+    if (msg) return say(msg, 'auto-undo');
+    // nothing recent to undo → fall through to the brain
   }
 
   // ── medication check-in reply ─────────────────────────────────────────
@@ -603,16 +611,27 @@ export async function POST(req: NextRequest) {
     return say(`Update **${e.title}** (${whenLabel(e.start_at)}) — ${bits.join(', ')}? Say yes and I'll change it.`, 'action-proposed');
   }
 
-  // ── confirm tier: calendar write → propose, wait for yes ────────────────
+  // ── calendar write → auto-add if trusted, else propose and wait for yes ──
   if (isCalendarWrite(text)) {
     const ev = await extractEvent(text).catch(() => null);
     if (!ev) return say(`I can put that on your calendar — when, exactly?`, 'calendar-write-underspecified');
+    const when = whenLabel(ev.start_at, ev.all_day);
+    if (await isAutoAllowed('create_event').catch(() => false)) {
+      const r = await runAutoCreateEvent(user.id, ev, conversationId).catch(() => ({ ok: false }));
+      if (r.ok) {
+        return say(
+          `Added **${ev.title}** — **${when}**${ev.location ? ` (${ev.location})` : ''}. Say "undo" if that's wrong.`,
+          'calendar-auto',
+        );
+      }
+      // couldn't write → fall through to the confirm path
+    }
     await proposeAction({
       userId: user.id, kind: 'create_event', riskTier: 'confirm',
-      summary: `${ev.title} — ${whenLabel(ev.start_at, ev.all_day)}`,
+      summary: `${ev.title} — ${when}`,
       payload: { ...ev }, createdBy: conversationId,
     });
-    return say(`Put **${ev.title}** on your calendar for **${whenLabel(ev.start_at, ev.all_day)}**${ev.location ? ` (${ev.location})` : ''}? Say yes and I'll add it.`, 'action-proposed');
+    return say(`Put **${ev.title}** on your calendar for **${when}**${ev.location ? ` (${ev.location})` : ''}? Say yes and I'll add it.`, 'action-proposed');
   }
 
   // ── confirm tier: draft an email → compose, show it, wait for yes ───────

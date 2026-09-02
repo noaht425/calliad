@@ -406,6 +406,46 @@ function Subscriptions({ token }: { token: string }) {
   );
 }
 
+function Automations({ token }: { token: string }) {
+  const [kinds, setKinds] = useState<{ kind: string; label: string; help: string }[]>([]);
+  const [allow, setAllow] = useState<Record<string, boolean>>({});
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const load = useCallback(async () => {
+    const r = await fetch('/api/automations', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) { const j = await r.json(); setKinds(j.kinds ?? []); setAllow(j.allow ?? {}); }
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = async (kind: string, on: boolean) => {
+    setAllow((a) => ({ ...a, [kind]: on }));
+    const r = await fetch('/api/automations', { method: 'PATCH', headers: h, body: JSON.stringify({ kind, on }) });
+    if (r.ok) setAllow((await r.json()).allow ?? {});
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-[var(--text-muted)]">
+        When on, Calliad does these without asking first. Only reversible things — you can always say
+        &ldquo;undo&rdquo; right after. Sending, buying, and deleting always ask.
+      </p>
+      {kinds.map((k) => (
+        <label key={k.kind} className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!allow[k.kind]}
+            onChange={(e) => toggle(k.kind, e.target.checked)}
+            className="mt-1 h-4 w-4 shrink-0 accent-[var(--accent)]"
+          />
+          <span>
+            <span className="text-sm font-medium text-[var(--text-body)]">{k.label}</span>
+            <span className="block text-xs text-[var(--text-muted)]">{k.help}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function ThemePicker() {
   const { theme, setTheme } = useTheme();
   return (
@@ -778,6 +818,12 @@ export default function SettingsPage() {
       <section className="mb-8">
         <h2 className={label}>Personality</h2>
         <Personality token={session.access_token} />
+      </section>
+
+      {/* ── Automations ─────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>Automations</h2>
+        <Automations token={session.access_token} />
       </section>
 
       {/* ── Appearance ──────────────────────────────────────────────── */}
