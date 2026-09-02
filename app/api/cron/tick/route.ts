@@ -25,7 +25,13 @@ function authed(req: NextRequest): boolean {
 }
 
 async function handle(req: NextRequest) {
-  if (!authed(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!authed(req)) {
+    // booleans only, no values — so you can tell "unset" from "wrong value"
+    return NextResponse.json(
+      { error: 'Forbidden', env: { TICK_SECRET: !!process.env.TICK_SECRET, CRON_SECRET: !!process.env.CRON_SECRET } },
+      { status: 403 },
+    );
+  }
 
   const kill = await config.get('killswitch_level').catch(() => 'off');
   if (kill === 'pause_all') {
