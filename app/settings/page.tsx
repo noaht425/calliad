@@ -406,6 +406,35 @@ function Subscriptions({ token }: { token: string }) {
   );
 }
 
+function VoiceSettings() {
+  const [converse, setConverse] = useState(false);
+  useEffect(() => {
+    try { setConverse(localStorage.getItem('calliad:converse') === '1'); } catch { /* no storage */ }
+  }, []);
+  return (
+    <div className="space-y-3">
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={converse}
+          onChange={(e) => {
+            setConverse(e.target.checked);
+            try { localStorage.setItem('calliad:converse', e.target.checked ? '1' : '0'); } catch { /* no storage */ }
+          }}
+          className="mt-1 h-4 w-4 shrink-0 accent-[var(--accent)]"
+        />
+        <span>
+          <span className="text-sm font-medium text-[var(--text-body)]">Hands-free conversation mode</span>
+          <span className="block text-xs text-[var(--text-muted)]">
+            The mic button becomes tap-to-start. Calliad listens, replies, speaks the reply aloud, then listens
+            again — recording auto-stops after a short silence. Tap ■ to end. Uses your device voice (free).
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 function Automations({ token }: { token: string }) {
   const [kinds, setKinds] = useState<{ kind: string; label: string; help: string }[]>([]);
   const [allow, setAllow] = useState<Record<string, boolean>>({});
@@ -1039,6 +1068,12 @@ export default function SettingsPage() {
       <section className="mb-8">
         <h2 className={label}>Medication</h2>
         <MedLog token={session.access_token} />
+      </section>
+
+      {/* ── Voice ───────────────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>Voice</h2>
+        <VoiceSettings />
       </section>
 
       {/* ── Notifications ────────────────────────────────────────────── */}

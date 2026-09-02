@@ -33,6 +33,7 @@ export async function transcribe(
   // Otherwise let whisper-large-v3-turbo auto-detect — it's fully multilingual,
   // and Noah switches between English and Italian.
   if (opts.language) fd.append('language', opts.language);
+  fd.append('prompt', 'Calliad'); // biases Whisper toward the app name
   fd.append('response_format', 'verbose_json'); // carries .duration for cost
 
   const r = await fetch(ENDPOINT, {
@@ -51,7 +52,7 @@ export async function transcribe(
     duration?: number;
     segments?: { no_speech_prob?: number; avg_logprob?: number }[];
   };
-  let text = (j.text ?? '').trim();
+  let text = (j.text ?? '').trim().replace(/\b[CK]a+l+[iy]+a[dt]\b/gi, 'Calliad'); // fix common mishearings
   const durationSec = j.duration ?? 0;
   const costUsd = (durationSec / 3600) * PRICE_PER_HOUR;
 

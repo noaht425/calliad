@@ -68,7 +68,17 @@ export function GlobalChatPanel() {
   const speakerRef = useRef<SentenceSpeaker>(null);
   if (!speakerRef.current) speakerRef.current = new SentenceSpeaker();
 
-  useEffect(() => { try { if (localStorage.getItem('calliad:tts') === '1') setTtsOn(true); } catch { /* no storage */ } }, []);
+  const [converseEnabled, setConverseEnabled] = useState(false);
+  const [inConvo, setInConvo] = useState(false);
+  const inConvoRef = useRef(false);
+  inConvoRef.current = inConvo;
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('calliad:tts') === '1') setTtsOn(true);
+      setConverseEnabled(localStorage.getItem('calliad:converse') === '1');
+    } catch { /* no storage */ }
+  }, []);
   const toggleTts = useCallback(() => {
     speakerRef.current!.cancel();
     setTtsOn((v) => {
@@ -173,7 +183,14 @@ export function GlobalChatPanel() {
           onDone: (full, meta) => {
             markTurnDone();
             setMode(meta?.mode && MODE_LABEL[meta.mode] ? meta.mode : undefined);
-            if (ttsRef.current && full) speakerRef.current!.flush(full);
+            if (inConvoRef.current) {
+              speakerRef.current!.whenDone(() => {
+                if (inConvoRef.current) setTimeout(() => { if (inConvoRef.current) void micStartRef.current?.({ vad: true }); }, 350);
+              });
+              speakerRef.current!.flush(full || '');
+            } else if (ttsRef.current && full) {
+              speakerRef.current!.flush(full);
+            }
           },
         },
         convRef.current,
@@ -216,6 +233,31 @@ export function GlobalChatPanel() {
     (t) => { setInput(''); void runTurn(t); },
     { conversationId: convRef.current },
   );
+  const micStartRef = useRef(micStart);
+  micStartRef.current = micStart;
+
+  const enterConvo = useCallback(() => {
+    primeSpeech();
+    setTtsOn(true);
+    try { localStorage.setItem('calliad:tts', '1'); } catch { /* no storage */ }
+    inConvoRef.current = true;
+    setInConvo(true);
+    setChatH((h) => (h < snapsRef.current[2] ? snapsRef.current[2] : h));
+    void micStart({ vad: true });
+  }, [micStart]);
+
+  const exitConvo = useCallback(() => {
+    inConvoRef.current = false;
+    setInConvo(false);
+    micStop();
+    speakerRef.current!.cancel();
+    navigator.vibrate?.(30);
+  }, [micStop]);
+
+  // Closing the panel ends an active voice conversation.
+  useEffect(() => {
+    if (chatH === CLOSED && inConvo) exitConvo();
+  }, [chatH, inConvo, exitConvo]);
 
   const { state: songState, start: songStart, stop: songStop } = useVoiceInput(
     (block) => {
@@ -472,7 +514,30 @@ export function GlobalChatPanel() {
                 </svg>
               </button>
             )}
-            {micSupported && !input.trim() && !pendingImages.length && (
+            {micSupported && !input.trim() && !pendingImages.length && converseEnabled && (
+              <button
+                onClick={() => (inConvo ? exitConvo() : voiceState === 'idle' && enterConvo())}
+                disabled={songState !== 'idle'}
+                className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all disabled:opacity-40 select-none ${inConvo ? 'animate-pulse scale-110' : ''}`}
+                style={
+                  inConvo
+                    ? { background: '#EF4444', color: '#fff' }
+                    : { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }
+                }
+                aria-label={inConvo ? 'End conversation' : 'Start a voice conversation'}
+                title={inConvo ? 'End conversation' : 'Hands-free conversation'}
+              >
+                {inConvo ? (
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                ) : (
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" /><path d="M8 23h8" />
+                  </svg>
+                )}
+              </button>
+            )}
+            {micSupported && !input.trim() && !pendingImages.length && !converseEnabled && (
               <button
                 onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId); micStart(); }}
                 onPointerUp={() => micStop()}

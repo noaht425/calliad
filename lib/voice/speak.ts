@@ -32,9 +32,27 @@ export class SentenceSpeaker {
   private spokenLen = 0;
   private active = false;
   private keepAlive: ReturnType<typeof setInterval> | null = null;
+  private doneCb: (() => void) | null = null;
+  private flushed = false;
 
   get speaking() {
     return this.active;
+  }
+
+  /** Fires once when the queue fully drains after flush() — for conversation mode. */
+  whenDone(cb: () => void) {
+    this.doneCb = cb;
+  }
+
+  private checkDone() {
+    if (typeof window === 'undefined') return;
+    const s = window.speechSynthesis;
+    if (this.flushed && s && !s.speaking && !s.pending) {
+      this.flushed = false;
+      const cb = this.doneCb;
+      this.doneCb = null;
+      cb?.();
+    }
   }
 
   private startKeepAlive() {
@@ -60,8 +78,9 @@ export class SentenceSpeaker {
     u.onend = () => {
       this.active = s.speaking;
       if (!this.active) this.stopKeepAlive();
+      this.checkDone();
     };
-    u.onerror = () => { this.active = s.speaking; if (!this.active) this.stopKeepAlive(); };
+    u.onerror = () => { this.active = s.speaking; if (!this.active) this.stopKeepAlive(); this.checkDone(); };
     this.active = true;
     s.resume();      // in case it self-paused
     s.speak(u);
@@ -82,8 +101,10 @@ export class SentenceSpeaker {
   /** Speak whatever's left after the stream ends. */
   flush(fullText: string) {
     const rest = fullText.slice(this.spokenLen);
-    if (rest.trim()) this.say(rest);
     this.spokenLen = fullText.length;
+    this.flushed = true;
+    if (rest.trim()) this.say(rest);
+    else this.checkDone(); // nothing left — fire whenDone immediately if idle
   }
 
   /** Speak one whole string now, interrupting anything in progress (tap-to-read). */
@@ -97,5 +118,7 @@ export class SentenceSpeaker {
     this.stopKeepAlive();
     this.spokenLen = 0;
     this.active = false;
+    this.flushed = false;
+    this.doneCb = null;
   }
 }
