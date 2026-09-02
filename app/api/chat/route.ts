@@ -17,7 +17,7 @@ import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
 import { upsertLoop, RECUR_LABEL } from '@/lib/memory/loops';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
-import { isNoteCapture, extractNote, saveNote, isRecallQuestion, searchNotes, notesRecallBlock } from '@/lib/memory/notes';
+import { isNoteCapture, extractNote, saveNote, isRecallQuestion, isLookupQuestion, searchNotes, notesRecallBlock, maybeIndexTurn } from '@/lib/memory/notes';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isAutoAllowed, runAutoCreateEvent, isUndo, undoLastAuto } from '@/lib/actions/auto';
@@ -871,6 +871,13 @@ export async function POST(req: NextRequest) {
     toolResult = `## Song ID\nNoah wants to identify a song that's playing but sent no audio. Tell him to hold the ♪ button in the composer while it plays — a few seconds is enough.`;
   }
 
+  // Fallback: an unanswered factual lookup ("what's the storage code") — check
+  // Noah's own notes before the brain guesses.
+  if (!toolResult && isLookupQuestion(text)) {
+    const hits = (await searchNotes(user.id, text, 5).catch(() => [])).filter((hh) => hh.similarity >= 0.6);
+    if (hits.length) toolResult = notesRecallBlock(hits);
+  }
+
   const state: TurnState = {
     now: new Date(), tz: TZ, recent, integrations, loops,
     mode: effectiveMode === 'default' ? undefined : effectiveMode,
@@ -933,6 +940,8 @@ export async function POST(req: NextRequest) {
         console.error('[chat] loop detect', e),
       ),
     );
+    // auto-index a durable fact/detail from this turn into the knowledge base
+    waitUntil(maybeIndexTurn(user.id, text, finalText).catch((e) => console.error('[chat] note index', e)));
   }();
 
   return streamResponse(conversationId, body$);

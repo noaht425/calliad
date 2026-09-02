@@ -1,6 +1,7 @@
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { embed } from '@/lib/memory/embed';
+import { t1Json } from '@/lib/llm/gemini';
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 
@@ -31,6 +32,14 @@ const RECALL =
   /\b(what (did|have) i (say|said|mention|note|write|tell you)\b.*\b(about|regarding|on|re)\b|when did i\b|did i ever\b|have i (mentioned|noted|told you|written|said anything)|what do i know about|remind me what i\b|what was that (thing|note|detail) about|look ?up my notes?|search my notes?|did i (write|note) (down |anything )?about|according to my notes|check my notes)\b/i;
 
 export const isRecallQuestion = (t: string) => RECALL.test(t);
+
+// Broader: any factual lookup ("what's the storage code", "where's the spare
+// key", "when's the deadline for X"). Used only as a fallback when nothing else
+// answered the turn — so a loose match is fine.
+const LOOKUP_Q =
+  /^(what|where|when|which|who|how (much|many|long|old))\b.*\?\s*$|^(what|where|when|which|who)('| i)?s?\s+(the|my|our|his|her|their)\b/i;
+
+export const isLookupQuestion = (t: string) => LOOKUP_Q.test(t.trim());
 
 // ── store / search ──────────────────────────────────────────────────────
 export async function saveNote(
@@ -99,4 +108,41 @@ export async function listNotes(userId: string, limit = 200): Promise<{ id: stri
 
 export async function deleteNote(userId: string, id: string): Promise<void> {
   await adminClient.from('notes').delete().eq('user_id', userId).eq('id', id);
+}
+
+// ── auto-index a chat turn (waitUntil tail) ─────────────────────────────
+const NORM = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/** If the user's message states a durable fact/detail, save a concise note so
+ *  "what's the storage code" works later without them saying "note that…". */
+export async function maybeIndexTurn(userId: string, userText: string, assistantText: string): Promise<void> {
+  const t = userText.trim();
+  if (t.length < 25) return;
+  if (/^\s*(yes|yeah|yep|no|nope|ok|okay|sure|thanks|thank you|nvm|never ?mind|undo|stop)\b/i.test(t)) return;
+  if (/\?\s*$/.test(t) && t.length < 90) return; // a short question, not a statement
+
+  const j = await t1Json<{ worth: boolean; note: string }>(
+    'note_index',
+    `In a chat with their assistant, the user said:\n"${t.slice(0, 700)}"\n` +
+      (assistantText ? `Assistant replied: "${assistantText.slice(0, 250)}"\n\n` : '\n') +
+      `Does the user's message state a DURABLE personal fact or detail worth remembering long-term — ` +
+      `a name, number, code, address, date, login hint, preference, plan, decision, or relationship detail ` +
+      `("X is at Y", "the code is Z", "we decided…", "my … is …")? ` +
+      `Ignore small talk, questions, one-off requests, and anything transient. ` +
+      `If yes, write it as one concise standalone note (≤200 chars, third person, keep the specifics). ` +
+      `Reply JSON: {"worth": boolean, "note": "..."}`,
+    { maxOutputTokens: 200 },
+  );
+  if (!j?.worth || !j.note?.trim()) return;
+  const note = j.note.trim().slice(0, 400);
+
+  const { data: recent } = await adminClient
+    .from('notes')
+    .select('content')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(40);
+  if ((recent ?? []).some((r) => NORM(r.content as string) === NORM(note))) return;
+
+  await saveNote(userId, note, { kind: 'chat', source: 'auto', meta: { from: t.slice(0, 200) } });
 }
