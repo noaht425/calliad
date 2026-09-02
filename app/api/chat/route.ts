@@ -17,6 +17,7 @@ import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
 import { upsertLoop, RECUR_LABEL } from '@/lib/memory/loops';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
+import { isNoteCapture, extractNote, saveNote, isRecallQuestion, searchNotes, notesRecallBlock } from '@/lib/memory/notes';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isAutoAllowed, runAutoCreateEvent, isUndo, undoLastAuto } from '@/lib/actions/auto';
@@ -609,6 +610,16 @@ export async function POST(req: NextRequest) {
     // not actually a media reaction → fall through
   }
 
+  // ── silent tier: "note that…" / "jot this down" → a searchable note ────
+  if (isNoteCapture(text)) {
+    const body = extractNote(text);
+    if (body.length >= 3) {
+      const ok = await saveNote(user.id, body, { source: 'chat' }).catch(() => false);
+      if (ok) return say('Noted.', 'note-saved');
+    }
+    // nothing substantive to save → fall through
+  }
+
   // ── silent tier: "from now on, always ask before…" → a standing behavior rule ──
   if (isBehaviorRuleStatement(text) && !isCalendarWrite(text) && !isCalendarChange(text)) {
     const rule = await saveExplicitRule(user.id, text).catch(() => null);
@@ -817,6 +828,9 @@ export async function POST(req: NextRequest) {
     toolResult = target
       ? await runWebFetch(target, text).catch(() => undefined)
       : `## Web fetch\nNoah asked about a saved link but his reading list is empty.`;
+  } else if (isRecallQuestion(text)) {
+    const hits = await searchNotes(user.id, text).catch(() => []);
+    toolResult = notesRecallBlock(hits);
   } else if (isSubscriptionQuery(text)) {
     toolResult = await subscriptionsSummary(user.id).catch(() => undefined);
   } else if (isWatchQuery(text)) {
