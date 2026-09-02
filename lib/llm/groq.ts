@@ -63,9 +63,12 @@ export async function transcribe(
   const meanNoSpeech = segs.length ? segs.reduce((a, s) => a + (s.no_speech_prob ?? 0), 0) / segs.length : 0;
   const meanLogprob = segs.length ? segs.reduce((a, s) => a + (s.avg_logprob ?? 0), 0) / segs.length : 0;
   const stripped = text.replace(/[\s.,!?¿¡…"'’()\-–—]/g, '').toLowerCase();
+  // Note: some containers (Telegram's streamed OGG/Opus) come back with
+  // duration 0 — that means "not reported", not "empty clip", so only treat a
+  // *positive* sub-0.5s duration as silence.
   const noSpeech =
     stripped.length === 0 ||
-    durationSec < 0.5 ||
+    (durationSec > 0 && durationSec < 0.5) ||
     meanNoSpeech >= 0.65 ||
     (segs.length > 0 && meanNoSpeech >= 0.45 && meanLogprob < -0.85 && stripped.length <= 20);
   if (noSpeech) text = '';

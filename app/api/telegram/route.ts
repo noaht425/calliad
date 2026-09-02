@@ -131,18 +131,25 @@ async function handleMessage(msg: TgMessage): Promise<void> {
   const images: string[] = [];
 
   // voice note → transcribe
-  const voice = msg.voice ?? msg.audio;
-  if (voice?.file_id) {
-    const f = await fetchTelegramFile(voice.file_id).catch(() => null);
-    if (f) {
-      try {
-        const { text: t } = await transcribe(f.blob, f.name || 'voice.ogg', {});
-        if (t.trim()) text = t.trim();
-      } catch (err) {
-        await audit.log('error', 'system', String(chatId), { where: 'telegram.transcribe', message: String(err) });
-      }
+  const media = msg.voice ?? msg.audio;
+  if (media?.file_id) {
+    const f = await fetchTelegramFile(media.file_id).catch(() => null);
+    if (!f) { await sendTelegram(chatId, "Couldn't pull that audio from Telegram — try again."); return; }
+    // Telegram voice notes are OGG/Opus but the file URL ends in `.oga`, which
+    // Groq's format sniff rejects — force a known-good extension.
+    const fname = msg.voice ? 'voice.ogg' : (/\.[a-z0-9]{2,4}$/i.test(f.name) ? f.name : 'audio.mp3');
+    try {
+      const { text: t, durationSec } = await transcribe(f.blob, fname, {});
+      await audit.log('tool_call', 'calliad', String(chatId), {
+        where: 'telegram.transcribe', chars: t.length, secs: media.duration, reported: durationSec,
+      });
+      if (t.trim()) text = t.trim();
+    } catch (err) {
+      await audit.log('error', 'system', String(chatId), { where: 'telegram.transcribe', message: String(err) });
+      await sendTelegram(chatId, "That voice note didn't transcribe — try again, or type it.");
+      return;
     }
-    if (!text.trim()) { await sendTelegram(chatId, "Didn't catch that — try again."); return; }
+    if (!text.trim()) { await sendTelegram(chatId, "Didn't catch any speech in that — try again."); return; }
   }
 
   // photo → attach the largest rendition

@@ -95,8 +95,8 @@ export interface TgMessage {
   date: number;
   text?: string;
   caption?: string;
-  voice?: { file_id: string; duration: number; mime_type?: string };
-  audio?: { file_id: string; mime_type?: string };
+  voice?: { file_id: string; duration?: number; mime_type?: string };
+  audio?: { file_id: string; duration?: number; mime_type?: string };
   photo?: { file_id: string; width: number; height: number; file_size?: number }[];
 }
 export interface TgUpdate {
