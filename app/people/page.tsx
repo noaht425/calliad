@@ -8,9 +8,24 @@ import { PageShell, PageHeader, PageBody } from '@/components/PageLayout';
 export const dynamic = 'force-dynamic';
 
 type Rel = 'family' | 'friend' | 'colleague' | 'acquaintance' | null;
+type Cadence = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly' | null;
 interface Contact {
   id: string; name: string; org: string | null; birthday: string | null;
   relationship: Rel; relationship_note: string | null; emails: string[]; phones: string[];
+  anniversary?: string | null; last_contact_at?: string | null; contact_cadence?: Cadence;
+}
+
+const CADENCE_OPTS: { value: string; label: string }[] = [
+  { value: '', label: 'no reminder' },
+  { value: 'weekly', label: 'weekly' },
+  { value: 'biweekly', label: 'every 2 weeks' },
+  { value: 'monthly', label: 'monthly' },
+  { value: 'quarterly', label: 'every few months' },
+  { value: 'yearly', label: 'yearly' },
+];
+function agoDays(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  return Math.floor((Date.now() - Date.parse(iso)) / 86400000);
 }
 interface Counts { all: number; family: number; friend: number; colleague: number; acquaintance: number; unfiled: number }
 
@@ -60,7 +75,7 @@ export default function PeoplePage() {
   const [counts, setCounts] = useState<Counts | null>(null);
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ name: string; birthday: string }>({ name: '', birthday: '' });
+  const [draft, setDraft] = useState<{ name: string; birthday: string; anniversary: string }>({ name: '', birthday: '', anniversary: '' });
 
   useEffect(() => { if (!loading && !session) router.push('/login'); }, [loading, session, router]);
 
@@ -166,14 +181,28 @@ export default function PeoplePage() {
                         <input
                           value={draft.birthday}
                           onChange={(e) => setDraft({ ...draft, birthday: e.target.value })}
-                          placeholder="YYYY-MM-DD or MM-DD"
+                          placeholder="Birthday — YYYY-MM-DD or MM-DD"
+                          className="rounded border px-2 py-1 text-xs"
+                          style={{ borderColor: 'var(--border)', background: 'var(--paper)', color: 'var(--text)' }}
+                        />
+                        <input
+                          value={draft.anniversary}
+                          onChange={(e) => setDraft({ ...draft, anniversary: e.target.value })}
+                          placeholder="Anniversary — MM-DD (optional)"
                           className="rounded border px-2 py-1 text-xs"
                           style={{ borderColor: 'var(--border)', background: 'var(--paper)', color: 'var(--text)' }}
                         />
                         <div className="flex gap-2 text-xs">
                           <button
                             className="underline"
-                            onClick={() => { patch(c.id, { name: draft.name.trim(), birthday: draft.birthday.trim() || null }); setEditing(null); }}
+                            onClick={() => {
+                              patch(c.id, {
+                                name: draft.name.trim(),
+                                birthday: draft.birthday.trim() || null,
+                                anniversary: draft.anniversary.trim() || null,
+                              });
+                              setEditing(null);
+                            }}
                           >save</button>
                           <button className="underline" style={{ color: 'var(--text-muted)' }} onClick={() => setEditing(null)}>cancel</button>
                         </div>
@@ -181,13 +210,21 @@ export default function PeoplePage() {
                     ) : (
                       <>
                         <p className="text-sm truncate" style={{ color: 'var(--text)' }}>{c.name}</p>
-                        {(bd || c.org) && (
+                        {(bd || c.org || fmtBday(c.anniversary ?? null)) && (
                           <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                            {bd}{bd && soon != null ? ` · ${soon === 0 ? 'today' : `in ${soon}d`}` : ''}
-                            {!bd && c.org ? c.org : ''}
+                            {bd ? `🎂 ${bd}${soon != null ? ` · ${soon === 0 ? 'today' : `in ${soon}d`}` : ''}` : ''}
+                            {fmtBday(c.anniversary ?? null) ? `${bd ? '  ·  ' : ''}💍 ${fmtBday(c.anniversary ?? null)}` : ''}
+                            {!bd && !fmtBday(c.anniversary ?? null) && c.org ? c.org : ''}
                           </p>
                         )}
-                        <div className="flex items-center gap-2 mt-1">
+                        {c.contact_cadence && (
+                          <p className="text-[11px]" style={{ color: agoDays(c.last_contact_at) != null && agoDays(c.last_contact_at)! > 45 ? '#b45309' : 'var(--text-muted)' }}>
+                            {agoDays(c.last_contact_at) == null
+                              ? `no contact logged · reminder: ${c.contact_cadence}`
+                              : `last talked ${agoDays(c.last_contact_at)}d ago · ${c.contact_cadence}`}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <select
                             value={c.relationship ?? ''}
                             onChange={(e) => setRel(c, e.target.value)}
@@ -197,10 +234,24 @@ export default function PeoplePage() {
                           >
                             {REL_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                           </select>
+                          <select
+                            value={c.contact_cadence ?? ''}
+                            onChange={(e) => patch(c.id, { contact_cadence: e.target.value || null })}
+                            className="rounded-md border px-1.5 py-1 text-[11px]"
+                            style={{ borderColor: 'var(--border)', background: 'var(--paper)', color: c.contact_cadence ? 'var(--accent)' : 'var(--text-muted)' }}
+                            aria-label="Keep-in-touch reminder"
+                          >
+                            {CADENCE_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
                           <button
                             className="text-[11px] underline"
                             style={{ color: 'var(--text-muted)' }}
-                            onClick={() => { setEditing(c.id); setDraft({ name: c.name, birthday: c.birthday ?? '' }); }}
+                            onClick={() => patch(c.id, { logContact: true })}
+                          >talked today</button>
+                          <button
+                            className="text-[11px] underline"
+                            style={{ color: 'var(--text-muted)' }}
+                            onClick={() => { setEditing(c.id); setDraft({ name: c.name, birthday: c.birthday ?? '', anniversary: c.anniversary ?? '' }); }}
                           >edit</button>
                           <button
                             className="text-[11px] underline"

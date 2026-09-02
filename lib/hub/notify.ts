@@ -73,12 +73,16 @@ export interface QueueInput {
 /** Queue a proactive message. De-dupes against unsent rows with the same key. */
 export async function enqueueNotification(userId: string, n: QueueInput): Promise<'queued' | 'duplicate'> {
   if (n.dedupeKey) {
+    // skip if the same key is still pending, or was already delivered in the last ~24h
+    const dayAgo = new Date(Date.now() - 24 * 3600_000).toISOString();
     const { data: dup } = await adminClient
       .from('notifications')
-      .select('id')
+      .select('id, status, created_at')
       .eq('user_id', userId)
       .eq('dedupe_key', n.dedupeKey)
-      .in('status', ['queued', 'held'])
+      .in('status', ['queued', 'held', 'sent'])
+      .gte('created_at', dayAgo)
+      .limit(1)
       .maybeSingle();
     if (dup) return 'duplicate';
   }

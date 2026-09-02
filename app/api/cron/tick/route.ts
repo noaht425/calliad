@@ -4,6 +4,7 @@ import { config } from '@/lib/hub/config';
 import { drainNotifications } from '@/lib/hub/notify';
 import { runDueWatchers } from '@/lib/watch/check';
 import { runEventNudges } from '@/lib/nudge/events';
+import { runPeopleNudges } from '@/lib/nudge/people';
 import { runBehaviorMaintenance } from '@/lib/brain/behavior';
 
 export const runtime = 'nodejs';
@@ -51,6 +52,10 @@ async function handle(req: NextRequest) {
     console.error('[tick] runEventNudges', e);
     return { enqueued: 0 };
   });
+  const people = await runPeopleNudges().catch((e) => {
+    console.error('[tick] runPeopleNudges', e);
+    return { enqueued: 0 };
+  });
   const behavior = await runBehaviorMaintenance().catch((e) => {
     console.error('[tick] runBehaviorMaintenance', e);
     return {} as { reflection?: number; compiler?: number };
@@ -60,8 +65,8 @@ async function handle(req: NextRequest) {
     return { sent: 0, held: 0, failed: 0 };
   });
 
-  const result = { ok: true, watchers, events, behavior, notifications, ms: Date.now() - started };
-  if (watchers.changed || events.enqueued || behavior.reflection || behavior.compiler || notifications.sent || notifications.failed) {
+  const result = { ok: true, watchers, events, people, behavior, notifications, ms: Date.now() - started };
+  if (watchers.changed || events.enqueued || people.enqueued || behavior.reflection || behavior.compiler || notifications.sent || notifications.failed) {
     await audit.log('trigger_fired', 'cron', 'tick', result);
   }
   return NextResponse.json(result);

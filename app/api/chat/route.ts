@@ -42,7 +42,7 @@ import { getCommanderRecs, recDiff, recBlock, isEdhrecQuery } from '@/lib/tools/
 import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
 import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
 import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock, isRestaurantTasteQuery, restaurantTasteBlock } from '@/lib/tools/beli';
-import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine } from '@/lib/integrations/icloud-contacts';
+import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine, detectContactLog, logContact, occasionsContextLine } from '@/lib/integrations/icloud-contacts';
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
 import { isTidyRequest, scanForTidy, applyTidyItems, type TidyItem } from '@/lib/memory/tidy';
 import {
@@ -400,6 +400,19 @@ export async function POST(req: NextRequest) {
       return say(`A few matches for ${relMention.name}: ${exact.map((c) => c.name + (c.org ? ` (${c.org})` : '')).join(', ')}. Which one?`, 'relationship-ambiguous');
     }
     // 0 matches or already correct → fall through; the brain still gets contact context
+  }
+
+  // ── silent tier: "talked to Mom today" / "had lunch with Dave" → log contact ──
+  {
+    const who = detectContactLog(text);
+    if (who) {
+      const c = (await findContacts(user.id, who).catch(() => []))[0];
+      if (c && (c.name.toLowerCase() === who.toLowerCase() || (c.first_name ?? '').toLowerCase() === who.toLowerCase().split(' ')[0])) {
+        await logContact(user.id, c.id).catch(() => {});
+        return say(`Noted — last caught up with ${c.name.split(' ')[0]} today.`, 'contact-logged');
+      }
+      // no known contact by that name → fall through to the brain
+    }
   }
 
   // ── a Beli screenshot → extract restaurants into restaurant_prefs ───────
@@ -764,7 +777,7 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, behaviorLine, rapport, userPreset] = await Promise.all([
+  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, behaviorLine, occasionsLine, rapport, userPreset] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
@@ -774,6 +787,7 @@ export async function POST(req: NextRequest) {
     tripsContextLine(user.id).catch(() => ''),
     locationContextLine(user.id).catch(() => ''),
     behaviorContextLine(user.id).catch(() => ''),
+    occasionsContextLine(user.id).catch(() => ''),
     personaExtra(user.id).catch(() => ''),
     config.get('personality_preset').catch(() => 'default'),
   ]);
@@ -889,6 +903,7 @@ export async function POST(req: NextRequest) {
     trips: tripsLine || undefined,
     location: locationLine || undefined,
     behaviorRules: behaviorLine || undefined,
+    occasions: occasionsLine || undefined,
     personaExtra: rapport || undefined,
     presetOverlay: presetOverlay(activePreset) || undefined,
     practiceOverlay: modeState.practiceLang ? practiceOverlay(modeState.practiceLang as PracticeLang) : undefined,

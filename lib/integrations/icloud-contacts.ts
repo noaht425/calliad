@@ -22,6 +22,9 @@ export interface Contact {
   relationship: Relationship | null;
   relationship_note: string | null;
   hidden?: boolean;
+  anniversary?: string | null;
+  last_contact_at?: string | null;
+  contact_cadence?: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly' | null;
 }
 
 async function client(userId: string): Promise<DAVClient | null> {
@@ -127,7 +130,7 @@ export async function syncContacts(userId: string): Promise<{ synced: number; re
 }
 
 // ── lookup ───────────────────────────────────────────────────────────────
-const SEL = 'id, uid, name, first_name, last_name, emails, phones, org, birthday, groups, note, relationship, relationship_note, hidden';
+const SEL = 'id, uid, name, first_name, last_name, emails, phones, org, birthday, groups, note, relationship, relationship_note, hidden, anniversary, last_contact_at, contact_cadence';
 
 export async function findContacts(userId: string, query: string): Promise<Contact[]> {
   const q = query.trim().toLowerCase();
@@ -203,13 +206,127 @@ export async function hideContact(userId: string, id: string, hidden: boolean): 
 export async function updateContactFields(
   userId: string,
   id: string,
-  fields: { name?: string; birthday?: string | null; relationship_note?: string | null },
+  fields: {
+    name?: string; birthday?: string | null; relationship_note?: string | null;
+    anniversary?: string | null; contact_cadence?: string | null;
+  },
 ): Promise<void> {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (fields.name !== undefined) patch.name = fields.name;
   if (fields.birthday !== undefined) patch.birthday = fields.birthday;
   if (fields.relationship_note !== undefined) patch.relationship_note = fields.relationship_note;
+  if (fields.anniversary !== undefined) patch.anniversary = fields.anniversary;
+  if (fields.contact_cadence !== undefined) {
+    patch.contact_cadence =
+      ['weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'].includes(fields.contact_cadence ?? '')
+        ? fields.contact_cadence
+        : null;
+  }
   await adminClient.from('contacts').update(patch).eq('user_id', userId).eq('id', id);
+}
+
+/** Mark that Noah just talked to someone — resets the cadence clock. */
+export async function logContact(userId: string, id: string): Promise<Contact | null> {
+  const { data } = await adminClient
+    .from('contacts')
+    .update({ last_contact_at: new Date().toISOString(), cadence_nudged_at: null, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('id', id)
+    .select(SEL)
+    .maybeSingle();
+  return (data as Contact) ?? null;
+}
+
+// "talked to Mom today" / "called Sarah" / "had lunch with Dave" / "caught up with Priya"
+const CONTACT_LOG =
+  /\b(?:talked (?:to|with)|spoke (?:to|with)|called|rang|caught up with|met(?: up)?(?: with)?|saw|hung out with|had (?:lunch|dinner|coffee|drinks|a call|a chat) with|texted|messaged|facetimed|video ?called|checked in with)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/;
+
+export function detectContactLog(text: string): string | null {
+  const m = text.match(CONTACT_LOG);
+  return m ? m[1] : null;
+}
+
+// ── occasions + cadence ────────────────────────────────────────────────
+type Occasion = { id: string; name: string; kind: 'birthday' | 'anniversary'; date: string; daysUntil: number };
+
+function daysUntilMMDD(mmdd: string, now = new Date()): { date: Date; days: number } | null {
+  const m = mmdd.match(/(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [, mo, d] = m;
+  let year = now.getFullYear();
+  let target = new Date(year, +mo - 1, +d, 12, 0, 0);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+  if (target < today) { year += 1; target = new Date(year, +mo - 1, +d, 12, 0, 0); }
+  return { date: target, days: Math.round((target.getTime() - today.getTime()) / 86_400_000) };
+}
+
+export async function upcomingOccasions(userId: string, withinDays = 14): Promise<Occasion[]> {
+  const { data } = await adminClient
+    .from('contacts')
+    .select('id, name, birthday, anniversary, hidden')
+    .eq('user_id', userId);
+  const out: Occasion[] = [];
+  for (const c of data ?? []) {
+    if (c.hidden) continue;
+    for (const [kind, raw] of [['birthday', c.birthday], ['anniversary', c.anniversary]] as const) {
+      if (!raw) continue;
+      const u = daysUntilMMDD(String(raw));
+      if (u && u.days >= 0 && u.days <= withinDays) {
+        out.push({
+          id: c.id as string, name: c.name as string, kind,
+          date: u.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          daysUntil: u.days,
+        });
+      }
+    }
+  }
+  return out.sort((a, b) => a.daysUntil - b.daysUntil);
+}
+
+export async function occasionsContextLine(userId: string): Promise<string> {
+  const occ = await upcomingOccasions(userId, 14);
+  if (!occ.length) return '';
+  const lines = occ.map((o) => {
+    const when = o.daysUntil === 0 ? 'today' : o.daysUntil === 1 ? 'tomorrow' : `in ${o.daysUntil} days`;
+    return `- ${o.name}'s ${o.kind} — ${o.date} (${when})`;
+  });
+  return `## Upcoming — people\n${lines.join('\n')}\nMention these if relevant; don't force it.`;
+}
+
+const CADENCE_DAYS: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30, quarterly: 91, yearly: 365 };
+
+/** Contacts with a cadence set that Noah is overdue to reach out to. */
+export async function cadenceOverdue(
+  userId: string,
+): Promise<{ id: string; name: string; cadence: string; sinceDays: number }[]> {
+  const { data } = await adminClient
+    .from('contacts')
+    .select('id, name, contact_cadence, last_contact_at, cadence_nudged_at, hidden')
+    .eq('user_id', userId)
+    .not('contact_cadence', 'is', null);
+  const now = Date.now();
+  const out: { id: string; name: string; cadence: string; sinceDays: number }[] = [];
+  for (const c of data ?? []) {
+    if (c.hidden) continue;
+    const cad = String(c.contact_cadence);
+    const interval = (CADENCE_DAYS[cad] ?? 30) * 86_400_000;
+    const last = c.last_contact_at ? Date.parse(c.last_contact_at as string) : 0;
+    const since = last ? now - last : Infinity;
+    if (since < interval * 1.3) continue; // still within a reasonable window
+    const nudgedRecently = c.cadence_nudged_at && now - Date.parse(c.cadence_nudged_at as string) < interval;
+    if (nudgedRecently) continue;
+    out.push({
+      id: c.id as string,
+      name: c.name as string,
+      cadence: cad,
+      sinceDays: last ? Math.round(since / 86_400_000) : 0,
+    });
+  }
+  return out;
+}
+
+export async function markCadenceNudged(userId: string, id: string): Promise<void> {
+  await adminClient.from('contacts').update({ cadence_nudged_at: new Date().toISOString() }).eq('user_id', userId).eq('id', id);
 }
 
 // ── kinship term → relationship bucket ───────────────────────────────────

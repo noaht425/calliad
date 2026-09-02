@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { adminClient } from '@/lib/supabase.server';
 import {
-  findContacts, setRelationship, listContacts, contactCounts, hideContact, updateContactFields,
+  findContacts, setRelationship, listContacts, contactCounts, hideContact, updateContactFields, logContact,
   type Relationship,
 } from '@/lib/integrations/icloud-contacts';
 
@@ -42,15 +42,22 @@ export async function PATCH(req: NextRequest) {
   const b = (await req.json().catch(() => ({}))) as {
     id?: string; relationship?: string | null; note?: string | null;
     name?: string; birthday?: string | null; hidden?: boolean;
+    anniversary?: string | null; contact_cadence?: string | null; logContact?: boolean;
   };
   if (!b.id) return NextResponse.json({ error: 'id required' }, { status: 400 });
 
+  if (b.logContact) {
+    const row = await logContact(user.id, b.id);
+    return NextResponse.json({ ok: true, contact: row });
+  }
   if (typeof b.hidden === 'boolean') {
     await hideContact(user.id, b.id, b.hidden);
     return NextResponse.json({ ok: true });
   }
-  if (b.name !== undefined || b.birthday !== undefined) {
-    await updateContactFields(user.id, b.id, { name: b.name, birthday: b.birthday });
+  if (b.name !== undefined || b.birthday !== undefined || b.anniversary !== undefined || b.contact_cadence !== undefined) {
+    await updateContactFields(user.id, b.id, {
+      name: b.name, birthday: b.birthday, anniversary: b.anniversary, contact_cadence: b.contact_cadence,
+    });
     return NextResponse.json({ ok: true });
   }
   if (b.relationship === null) {
