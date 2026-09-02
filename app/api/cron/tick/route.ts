@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { audit } from '@/lib/hub/audit';
 import { config } from '@/lib/hub/config';
-import { checkSecret } from '@/lib/hub/guard';
 import { drainNotifications } from '@/lib/hub/notify';
 import { runDueWatchers } from '@/lib/watch/check';
 import { runEventNudges } from '@/lib/nudge/events';
@@ -11,12 +10,22 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 // The heartbeat. Vercel Hobby cron only fires once a day, so this is driven
-// externally — Supabase pg_cron (or a GitHub Actions schedule) hits it every
-// ~10 minutes with TICK_SECRET. It drains the notification queue now; Phase 2
-// adds watcher checks here.
+// externally — Supabase pg_cron (or a GitHub Actions / cron-job.org schedule)
+// hits it every ~10 minutes. Accepts either TICK_SECRET or the existing
+// CRON_SECRET, via `x-tick-secret` / `x-cron-secret` / `Authorization: Bearer`.
+function authed(req: NextRequest): boolean {
+  const secrets = [process.env.TICK_SECRET, process.env.CRON_SECRET].filter(Boolean);
+  if (!secrets.length) return false; // fail closed
+  const presented = [
+    req.headers.get('x-tick-secret'),
+    req.headers.get('x-cron-secret'),
+    req.headers.get('authorization')?.replace(/^Bearer\s+/i, ''),
+  ].filter(Boolean);
+  return presented.some((p) => secrets.includes(p!));
+}
+
 async function handle(req: NextRequest) {
-  const denied = checkSecret(req, 'TICK_SECRET', ['x-tick-secret']);
-  if (denied) return denied;
+  if (!authed(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const kill = await config.get('killswitch_level').catch(() => 'off');
   if (kill === 'pause_all') {
