@@ -33,8 +33,16 @@ export function riddleOfTheDay(d = new Date()): { id: number; q: string; a: stri
 }
 export const isRiddleRequest = (t: string) =>
   /\b(riddle( me)?( this| of the day)?|brain ?teaser|give me a (riddle|puzzle)|puzzle of the day|today'?s riddle)\b/i.test(t);
-export const isRiddleReveal = (t: string) =>
-  /\b(give up|i give up|reveal|the answer|what'?s the answer|tell me( the answer)?|show( me)? the answer|i don'?t know|no idea|stumped)\b/i.test(t);
+// A give-up on the riddle — either an explicit riddle reference, or a SHORT
+// standalone message. "…so I don't know if I have it or not" is neither.
+export function isRiddleReveal(t: string): boolean {
+  const s = t.trim();
+  if (/\briddle\b.*\b(answer|solution|give ?up|reveal|tell me|show me|stumped|no idea|dunno)\b|\b(give ?up|reveal|tell me|show me|what'?s)\b.*\briddle\b/i.test(s)) {
+    return true;
+  }
+  if (s.split(/\s+/).length > 7) return false; // buried in conversation, not a give-up
+  return /^(i give up|give ?up|answer|the answer|what'?s the answer|reveal( it)?|tell me( the answer)?|show me( the answer)?|i (really )?(don'?t|do not) know|no idea|dunno|stumped|i'?m stumped|pass|skip( it)?)[.!?]*$/i.test(s);
+}
 
 // Openers that mean "this is conversation, not a riddle guess" — questions,
 // greetings, fillers (incl. a few Italian ones, since practice runs in-thread).
