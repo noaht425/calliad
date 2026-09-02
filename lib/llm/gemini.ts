@@ -74,3 +74,34 @@ export async function t1Json<T>(
     return null;
   }
 }
+
+/** Plain-text T1 call, optionally with inline file parts (e.g. a PDF to read). */
+export async function t1Text(
+  purpose: string,
+  prompt: string,
+  parts: { inlineData: { mimeType: string; data: string } }[] = [],
+  opts: { maxOutputTokens?: number } = {},
+): Promise<string | null> {
+  const g = genai();
+  if (!g) return null;
+  const started = Date.now();
+  try {
+    const model = g.getGenerativeModel({
+      model: MODEL,
+      generationConfig: { maxOutputTokens: opts.maxOutputTokens ?? 6000 },
+    });
+    const res = await model.generateContent([prompt, ...parts]);
+    const text = res.response.text().trim();
+    const um = res.response.usageMetadata;
+    const cost = ((um?.promptTokenCount ?? 0) * PRICE.input + (um?.candidatesTokenCount ?? 0) * PRICE.output) / 1_000_000;
+    await audit.modelCall({
+      conversation_id: null, purpose, tier: 'T1', model: MODEL,
+      input_tokens: um?.promptTokenCount ?? 0, cached_read_tokens: 0, cache_write_tokens: 0,
+      output_tokens: um?.candidatesTokenCount ?? 0, cost_usd: cost, latency_ms: Date.now() - started,
+    });
+    return text || null;
+  } catch (err) {
+    console.error('[t1text]', purpose, err);
+    return null;
+  }
+}

@@ -23,6 +23,9 @@ const SEED: Record<string, string> = {
   // Learned behavior rules: when reflection / the rule compiler last ran.
   behavior_reflection_at: '',
   behavior_compiler_at: '',
+  // Knowledge base: one-time backfill of old chat history into notes.
+  notes_backfill_cursor: '',
+  notes_backfill_done: '',
 };
 
 export async function getConfig(key: string): Promise<string> {

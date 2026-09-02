@@ -1,7 +1,9 @@
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
+import { config } from '@/lib/hub/config';
 import { embed } from '@/lib/memory/embed';
 import { t1Json } from '@/lib/llm/gemini';
+import { ownerUserIds } from '@/lib/hub/owner';
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 
@@ -110,6 +112,37 @@ export async function deleteNote(userId: string, id: string): Promise<void> {
   await adminClient.from('notes').delete().eq('user_id', userId).eq('id', id);
 }
 
+// ── document ingest (paste / .txt / .md / PDF-extracted text) ───────────
+function chunkText(text: string, size = 1400, overlap = 150): string[] {
+  const clean = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (clean.length <= size) return clean ? [clean] : [];
+  const out: string[] = [];
+  let i = 0;
+  while (i < clean.length) {
+    let end = Math.min(i + size, clean.length);
+    if (end < clean.length) {
+      const brk = Math.max(clean.lastIndexOf('\n', end), clean.lastIndexOf('. ', end), clean.lastIndexOf(' ', end));
+      if (brk > i + size * 0.5) end = brk;
+    }
+    out.push(clean.slice(i, end).trim());
+    if (end >= clean.length) break;
+    i = Math.max(i + 1, end - overlap); // always move forward
+  }
+  return out.filter((c) => c.length > 20);
+}
+
+export async function ingestDocument(userId: string, title: string, text: string): Promise<{ chunks: number }> {
+  const t = (title || 'Untitled').trim().slice(0, 120);
+  const parts = chunkText(text);
+  let n = 0;
+  for (let idx = 0; idx < parts.length; idx++) {
+    const label = parts.length > 1 ? `[${t} — ${idx + 1}/${parts.length}]` : `[${t}]`;
+    if (await saveNote(userId, `${label}\n${parts[idx]}`, { kind: 'doc', source: 'upload', meta: { title: t, part: idx + 1, of: parts.length } })) n++;
+  }
+  await audit.log('tool_call', 'calliad', null, { tool: 'doc_ingest', title: t, chunks: n });
+  return { chunks: n };
+}
+
 // ── auto-index a chat turn (waitUntil tail) ─────────────────────────────
 const NORM = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
@@ -145,4 +178,38 @@ export async function maybeIndexTurn(userId: string, userText: string, assistant
   if ((recent ?? []).some((r) => NORM(r.content as string) === NORM(note))) return;
 
   await saveNote(userId, note, { kind: 'chat', source: 'auto', meta: { from: t.slice(0, 200) } });
+}
+
+// ── one-time backfill of existing chat history (tick worker) ────────────
+export async function backfillNotes(limit = 20): Promise<{ processed: number; done: boolean }> {
+  if ((await config.get('notes_backfill_done').catch(() => '')) === '1') return { processed: 0, done: true };
+  const [userId] = await ownerUserIds();
+  if (!userId) return { processed: 0, done: false };
+
+  const cursor = await config.get('notes_backfill_cursor').catch(() => '');
+  let q = adminClient
+    .from('messages')
+    .select('role, content, created_at')
+    .order('created_at', { ascending: true })
+    .limit(limit * 3);
+  if (cursor) q = q.gt('created_at', cursor);
+  const { data: msgs } = await q;
+  if (!msgs?.length) {
+    await config.set('notes_backfill_done', '1');
+    return { processed: 0, done: true };
+  }
+
+  let processed = 0;
+  let lastAt = cursor;
+  for (let i = 0; i < msgs.length && processed < limit; i++) {
+    lastAt = msgs[i].created_at as string;
+    if (msgs[i].role !== 'user') continue;
+    const assistantText = msgs[i + 1]?.role === 'assistant' ? String(msgs[i + 1].content) : '';
+    processed++;
+    await maybeIndexTurn(userId, String(msgs[i].content), assistantText).catch(() => {});
+  }
+  await config.set('notes_backfill_cursor', lastAt);
+  // caught up to (roughly) the present — the live indexer handles new turns
+  if (Date.parse(lastAt) > Date.now() - 3 * 3600_000) await config.set('notes_backfill_done', '1');
+  return { processed, done: false };
 }

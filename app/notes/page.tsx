@@ -20,6 +20,10 @@ export default function NotesPage() {
   const [draft, setDraft] = useState('');
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState(false);
+  const [docTitle, setDocTitle] = useState('');
+  const [docText, setDocText] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState('');
 
   useEffect(() => { if (!loading && !session) router.push('/login'); }, [loading, session, router]);
   const h = useMemo(
@@ -53,6 +57,35 @@ export default function NotesPage() {
     setNotes((n) => n.filter((x) => x.id !== id));
   };
 
+  const ingestPaste = async () => {
+    if (!session || !docText.trim()) return;
+    setUploading(true); setUploadMsg('');
+    const r = await fetch('/api/notes/upload', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: docTitle.trim() || 'Untitled', text: docText }),
+    });
+    const j = await r.json().catch(() => ({}));
+    setUploading(false);
+    if (r.ok) { setUploadMsg(`Added — ${j.chunks} chunk${j.chunks === 1 ? '' : 's'}.`); setDocText(''); setDocTitle(''); void load(); }
+    else setUploadMsg(j.error ?? 'Failed.');
+  };
+
+  const ingestFile = async (file: File) => {
+    if (!session) return;
+    setUploading(true); setUploadMsg('');
+    const fd = new FormData();
+    fd.append('file', file);
+    if (docTitle.trim()) fd.append('title', docTitle.trim());
+    const r = await fetch('/api/notes/upload', {
+      method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` }, body: fd,
+    });
+    const j = await r.json().catch(() => ({}));
+    setUploading(false);
+    if (r.ok) { setUploadMsg(`${j.title} — ${j.chunks} chunk${j.chunks === 1 ? '' : 's'}.`); setDocTitle(''); void load(); }
+    else setUploadMsg(j.error ?? 'Failed.');
+  };
+
   return (
     <PageShell>
       <PageHeader title="Notes" count={!searching && notes.length ? notes.length : undefined} />
@@ -82,6 +115,49 @@ export default function NotesPage() {
               Save note
             </button>
           </div>
+
+          <details className="rounded-xl mb-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <summary className="px-3 py-2 text-sm cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+              Import a document
+            </summary>
+            <div className="px-3 pb-3 space-y-2">
+              <input
+                value={docTitle}
+                onChange={(e) => setDocTitle(e.target.value)}
+                placeholder="Title (optional)"
+                className="w-full rounded-lg px-3 py-1.5 text-sm outline-none"
+                style={{ background: 'var(--paper)', border: '1px solid var(--border)', color: 'var(--text)' }}
+              />
+              <textarea
+                value={docText}
+                onChange={(e) => setDocText(e.target.value)}
+                placeholder="Paste text here…"
+                rows={3}
+                className="w-full resize-none rounded-lg px-3 py-2 text-sm outline-none"
+                style={{ background: 'var(--paper)', border: '1px solid var(--border)', color: 'var(--text)' }}
+              />
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => void ingestPaste()}
+                  disabled={uploading || !docText.trim()}
+                  className="rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-40"
+                  style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
+                >
+                  {uploading ? 'Working…' : 'Import pasted text'}
+                </button>
+                <label className="text-sm underline cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+                  or pick a file (.txt .md .pdf)
+                  <input
+                    type="file"
+                    accept=".txt,.md,.markdown,text/plain,application/pdf"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) void ingestFile(f); e.target.value = ''; }}
+                  />
+                </label>
+              </div>
+              {uploadMsg && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{uploadMsg}</p>}
+            </div>
+          </details>
 
           <div className="flex gap-2 mb-3">
             <input

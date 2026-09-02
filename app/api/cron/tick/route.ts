@@ -6,6 +6,7 @@ import { runDueWatchers } from '@/lib/watch/check';
 import { runEventNudges } from '@/lib/nudge/events';
 import { runPeopleNudges } from '@/lib/nudge/people';
 import { runBehaviorMaintenance } from '@/lib/brain/behavior';
+import { backfillNotes } from '@/lib/memory/notes';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,13 +61,17 @@ async function handle(req: NextRequest) {
     console.error('[tick] runBehaviorMaintenance', e);
     return {} as { reflection?: number; compiler?: number };
   });
+  const kb = await backfillNotes().catch((e) => {
+    console.error('[tick] backfillNotes', e);
+    return { processed: 0, done: false };
+  });
   const notifications = await drainNotifications().catch((e) => {
     console.error('[tick] drainNotifications', e);
     return { sent: 0, held: 0, failed: 0 };
   });
 
-  const result = { ok: true, watchers, events, people, behavior, notifications, ms: Date.now() - started };
-  if (watchers.changed || events.enqueued || people.enqueued || behavior.reflection || behavior.compiler || notifications.sent || notifications.failed) {
+  const result = { ok: true, watchers, events, people, behavior, kb, notifications, ms: Date.now() - started };
+  if (watchers.changed || events.enqueued || people.enqueued || behavior.reflection || behavior.compiler || kb.processed || notifications.sent || notifications.failed) {
     await audit.log('trigger_fired', 'cron', 'tick', result);
   }
   return NextResponse.json(result);
