@@ -11,6 +11,7 @@ export const dynamic = 'force-dynamic';
 const LINKS: { href: string; label: string; sub: string }[] = [
   { href: '/reading', label: 'Reading & watch', sub: 'Saved articles, books, links' },
   { href: '/watch', label: 'Watch list', sub: 'TV & film — progress, ratings, what’s airing' },
+  { href: '/watchers', label: 'Watchers', sub: 'Pages & weather Calliad checks on a schedule' },
   { href: '/unsubscribes', label: 'Unsubscribes', sub: 'Newsletters you’ve dropped — did they stop?' },
   { href: '/settings', label: 'Settings', sub: 'About you, integrations, notifications' },
 ];

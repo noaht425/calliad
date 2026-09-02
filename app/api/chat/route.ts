@@ -60,6 +60,11 @@ import {
   upgradeWatchRowViaWeb, looksVague,
   applyWatchUpdate, listWatch, watchListBlock, watchContextLine,
 } from '@/lib/tools/watchlist';
+import {
+  isWatchPageAdd, extractPageWatch, isWeatherWatchAdd, extractWeatherWatch,
+  isWatcherList, isWatcherRemove, extractWatcherRemoveHint,
+} from '@/lib/watch/detect';
+import { createWatcher, listWatchers, matchWatcher, removeWatcher } from '@/lib/watch/watchers';
 import type { TurnState } from '@/lib/brain/prompt';
 import { personaExtra, presetOverlay, resolvePreset, detectPresetSwitch, PRESETS } from '@/lib/brain/persona';
 import { detectPracticeLang, detectPracticeExit, practiceOverlay, type PracticeLang } from '@/lib/brain/practice';
@@ -474,6 +479,52 @@ export async function POST(req: NextRequest) {
   if (isUnsubscribeMention(text)) {
     const msg = await noteUnsubscribeFromChat(user.id, text).catch(() => null);
     if (msg) return say(msg, 'unsub-noted');
+  }
+
+  // ── silent tier: watchers — page / weather / list / remove ────────────
+  if (isWatcherRemove(text)) {
+    const hint = extractWatcherRemoveHint(text);
+    const w = hint ? await matchWatcher(user.id, hint).catch(() => null) : null;
+    if (w) {
+      await removeWatcher(user.id, w.id);
+      return say(`Stopped watching **${w.label}**.`, 'watcher-remove');
+    }
+    if (hint) return say(`I'm not watching anything matching "${hint}". Say "what are you watching" to see the list.`, 'watcher-remove-nomatch');
+  }
+  if (isWatcherList(text)) {
+    const rows = (await listWatchers(user.id).catch(() => [])).filter((r) => r.status !== 'done');
+    if (!rows.length) return say(`Not watching anything right now.`, 'watcher-list');
+    const line = rows.map((r) => `• ${r.label}${r.status === 'paused' ? ' (paused)' : ''}`).join('\n');
+    return say(`Watching:\n${line}`, 'watcher-list');
+  }
+  if (isWatchPageAdd(text)) {
+    const p = extractPageWatch(text);
+    if (p) {
+      let host = p.url;
+      try { host = new URL(p.url).hostname.replace(/^www\./, ''); } catch { /* keep raw */ }
+      const label = p.forWhat ? `${host} — ${p.forWhat}` : `${host} (any change)`;
+      const w = await createWatcher(user.id, {
+        kind: 'page', label, spec: { url: p.url, ...(p.forWhat ? { for: p.forWhat } : {}) }, intervalMin: 60,
+      }).catch(() => null);
+      return say(
+        w
+          ? `Watching **${host}**${p.forWhat ? ` for ${p.forWhat}` : ' for changes'} — I'll ping you here when it moves. (checks hourly)`
+          : `Already watching that page.`,
+        'watcher-page-add',
+      );
+    }
+  }
+  if (isWeatherWatchAdd(text)) {
+    const { days, label } = extractWeatherWatch(text);
+    const w = await createWatcher(user.id, {
+      kind: 'weather_event', label, spec: { days }, intervalMin: 240,
+    }).catch(() => null);
+    return say(
+      w
+        ? `Done — I'll watch the forecast against your calendar for the next ${days === 1 ? 'day' : `${days} days`} and warn you if rain or snow lands on a timed event.`
+        : `Already watching the weather over your plans.`,
+      'watcher-weather-add',
+    );
   }
 
   // ── silent tier: watch list — add / update / query ────────────────────

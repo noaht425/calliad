@@ -3,6 +3,7 @@ import { audit } from '@/lib/hub/audit';
 import { config } from '@/lib/hub/config';
 import { checkSecret } from '@/lib/hub/guard';
 import { drainNotifications } from '@/lib/hub/notify';
+import { runDueWatchers } from '@/lib/watch/check';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,13 +23,19 @@ async function handle(req: NextRequest) {
   }
 
   const started = Date.now();
+
+  // Watchers first — a change this tick can then go out in the same drain.
+  const watchers = await runDueWatchers().catch((e) => {
+    console.error('[tick] runDueWatchers', e);
+    return { checked: 0, changed: 0 };
+  });
   const notifications = await drainNotifications().catch((e) => {
     console.error('[tick] drainNotifications', e);
     return { sent: 0, held: 0, failed: 0 };
   });
 
-  const result = { ok: true, notifications, ms: Date.now() - started };
-  if (notifications.sent || notifications.failed) {
+  const result = { ok: true, watchers, notifications, ms: Date.now() - started };
+  if (watchers.changed || notifications.sent || notifications.failed) {
     await audit.log('trigger_fired', 'cron', 'tick', result);
   }
   return NextResponse.json(result);
