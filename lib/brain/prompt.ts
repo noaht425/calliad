@@ -77,6 +77,7 @@ export interface TurnState {
   contacts?: string;                // known contacts referenced this turn
   trips?: string;                   // upcoming trips (for prep-aware answers)
   location?: string;                // where Noah is / was, if recent (from iOS geofences)
+  behaviorRules?: string;           // learned + explicit "how to act" rules
   personaExtra?: string;            // rapport: familiarity line + voice profile (cached layer)
   presetOverlay?: string;           // stance preset overlay (fresh layer)
   practiceOverlay?: string;         // "reply in language X for practice" overlay
@@ -159,6 +160,7 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
   if (extra) system.push({ type: 'text', text: `## About Noah — relevant to this turn\n\n${extra}` });
   if (state.learned) system.push({ type: 'text', text: state.learned });
   if (state.medStatus) system.push({ type: 'text', text: state.medStatus });
+  if (state.behaviorRules) system.push({ type: 'text', text: state.behaviorRules });
   if (state.contacts) system.push({ type: 'text', text: state.contacts });
   if (state.trips) system.push({ type: 'text', text: state.trips });
   if (state.location) system.push({ type: 'text', text: state.location });

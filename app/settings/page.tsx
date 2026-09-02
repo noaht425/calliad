@@ -406,6 +406,69 @@ function Subscriptions({ token }: { token: string }) {
   );
 }
 
+function BehaviorRules({ token }: { token: string }) {
+  const [rules, setRules] = useState<{ id: string; rule_text: string; source: string; status: string }[]>([]);
+  const [draft, setDraft] = useState('');
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const load = useCallback(async () => {
+    const r = await fetch('/api/behavior-rules', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.ok) setRules((await r.json()).rules ?? []);
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+
+  const add = async () => {
+    if (!draft.trim()) return;
+    await fetch('/api/behavior-rules', { method: 'POST', headers: h, body: JSON.stringify({ rule_text: draft.trim() }) });
+    setDraft(''); load();
+  };
+  const toggle = async (id: string, status: string) => {
+    await fetch('/api/behavior-rules', { method: 'PATCH', headers: h, body: JSON.stringify({ id, status: status === 'active' ? 'paused' : 'active' }) });
+    load();
+  };
+  const del = async (id: string) => {
+    await fetch(`/api/behavior-rules?id=${id}`, { method: 'DELETE', headers: h });
+    load();
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-[var(--text-muted)]">
+        Standing instructions Calliad follows. It also proposes these on its own when it notices you
+        correcting the same behaviour twice.
+      </p>
+      {rules.length > 0 && (
+        <ul className="space-y-1.5">
+          {rules.map((r) => (
+            <li key={r.id} className="flex items-start gap-2 text-sm">
+              <span className="flex-1" style={{ color: r.status === 'paused' ? 'var(--text-muted)' : 'var(--text-body)' }}>
+                {r.rule_text}
+                <span className="text-[10px] ml-1.5 text-[var(--text-quiet)]">
+                  {r.source === 'learned' ? 'learned' : ''}{r.status === 'paused' ? ' · paused' : ''}
+                </span>
+              </span>
+              <button className="text-xs underline text-[var(--text-muted)]" onClick={() => toggle(r.id, r.status)}>
+                {r.status === 'active' ? 'pause' : 'resume'}
+              </button>
+              <button className="text-xs underline" style={{ color: '#dc2626' }} onClick={() => del(r.id)}>delete</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex flex-wrap gap-2 items-center">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void add(); }}
+          placeholder="e.g. Always ask before adding a calendar event"
+          className="flex-1 min-w-[12rem] rounded border px-2 py-1 text-xs"
+          style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+        />
+        <button className="underline text-xs" onClick={() => void add()}>add</button>
+      </div>
+    </div>
+  );
+}
+
 function VoiceSettings() {
   const [converse, setConverse] = useState(false);
   useEffect(() => {
@@ -847,6 +910,12 @@ export default function SettingsPage() {
       <section className="mb-8">
         <h2 className={label}>Personality</h2>
         <Personality token={session.access_token} />
+      </section>
+
+      {/* ── Behavior rules ─────────────────────────────────────────── */}
+      <section className="mb-8">
+        <h2 className={label}>Behavior rules</h2>
+        <BehaviorRules token={session.access_token} />
       </section>
 
       {/* ── Automations ─────────────────────────────────────────────── */}

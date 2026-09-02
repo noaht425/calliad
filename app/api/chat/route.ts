@@ -55,6 +55,10 @@ import { RIDDLES } from '@/lib/games/riddles';
 import { ROOTS } from '@/lib/games/roots';
 import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/travel/trips';
 import { locationContextLine } from '@/lib/location/rules';
+import {
+  behaviorContextLine, isBehaviorRuleStatement, saveExplicitRule,
+  pendingRulePrompt, resolveRulePrompt,
+} from '@/lib/brain/behavior';
 import { isUnsubscribeMention, noteUnsubscribeFromChat } from '@/lib/mail/unsubscribes';
 import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
 import {
@@ -157,6 +161,16 @@ export async function POST(req: NextRequest) {
     const msg = await undoLastAuto(user.id, conversationId).catch(() => null);
     if (msg) return say(msg, 'auto-undo');
     // nothing recent to undo → fall through to the brain
+  }
+
+  // ── yes/no on a proposed learned behavior rule ───────────────────────
+  if (!pending && (isYes(text) || isNo(text) || /\b(make it a rule|do it|go ahead|leave it|don'?t bother)\b/i.test(text))) {
+    const rp = await pendingRulePrompt(user.id).catch(() => null);
+    if (rp) {
+      const accept = isYes(text) || /\b(make it a rule|do it|go ahead|sure|ok(ay)?)\b/i.test(text);
+      const msg = await resolveRulePrompt(user.id, accept).catch(() => null);
+      if (msg) return say(msg, 'behavior-rule-resolve');
+    }
   }
 
   // ── medication check-in reply ─────────────────────────────────────────
@@ -595,6 +609,13 @@ export async function POST(req: NextRequest) {
     // not actually a media reaction → fall through
   }
 
+  // ── silent tier: "from now on, always ask before…" → a standing behavior rule ──
+  if (isBehaviorRuleStatement(text) && !isCalendarWrite(text) && !isCalendarChange(text)) {
+    const rule = await saveExplicitRule(user.id, text).catch(() => null);
+    if (rule) return say(`Noted — standing rule: "${rule}"`, 'behavior-rule-add');
+    // LLM says it's not a real preference → fall through
+  }
+
   // ── silent tier: "remember that I…" → confirmed profile_fact, no gate ────
   if (isExplicitRemember(text) && !isCalendarWrite(text)) {
     const saved = await saveFactFromText(user.id, text).catch(() => null);
@@ -732,7 +753,7 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, rapport, userPreset] = await Promise.all([
+  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, behaviorLine, rapport, userPreset] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
@@ -741,6 +762,7 @@ export async function POST(req: NextRequest) {
     contactContextLine(user.id, text).catch(() => ''),
     tripsContextLine(user.id).catch(() => ''),
     locationContextLine(user.id).catch(() => ''),
+    behaviorContextLine(user.id).catch(() => ''),
     personaExtra(user.id).catch(() => ''),
     config.get('personality_preset').catch(() => 'default'),
   ]);
@@ -845,6 +867,7 @@ export async function POST(req: NextRequest) {
     contacts: contactsLine || undefined,
     trips: tripsLine || undefined,
     location: locationLine || undefined,
+    behaviorRules: behaviorLine || undefined,
     personaExtra: rapport || undefined,
     presetOverlay: presetOverlay(activePreset) || undefined,
     practiceOverlay: modeState.practiceLang ? practiceOverlay(modeState.practiceLang as PracticeLang) : undefined,

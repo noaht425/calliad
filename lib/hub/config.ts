@@ -20,6 +20,9 @@ const SEED: Record<string, string> = {
   personality_axes: JSON.stringify({ warmth: 3, directness: 3, wit: 3, verbosity: 3, proactivity: 3 }),
   // Trust ladder: which confirm-tier action kinds run without asking first.
   auto_actions: '{}',
+  // Learned behavior rules: when reflection / the rule compiler last ran.
+  behavior_reflection_at: '',
+  behavior_compiler_at: '',
 };
 
 export async function getConfig(key: string): Promise<string> {

@@ -4,6 +4,7 @@ import { config } from '@/lib/hub/config';
 import { drainNotifications } from '@/lib/hub/notify';
 import { runDueWatchers } from '@/lib/watch/check';
 import { runEventNudges } from '@/lib/nudge/events';
+import { runBehaviorMaintenance } from '@/lib/brain/behavior';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,13 +51,17 @@ async function handle(req: NextRequest) {
     console.error('[tick] runEventNudges', e);
     return { enqueued: 0 };
   });
+  const behavior = await runBehaviorMaintenance().catch((e) => {
+    console.error('[tick] runBehaviorMaintenance', e);
+    return {} as { reflection?: number; compiler?: number };
+  });
   const notifications = await drainNotifications().catch((e) => {
     console.error('[tick] drainNotifications', e);
     return { sent: 0, held: 0, failed: 0 };
   });
 
-  const result = { ok: true, watchers, events, notifications, ms: Date.now() - started };
-  if (watchers.changed || events.enqueued || notifications.sent || notifications.failed) {
+  const result = { ok: true, watchers, events, behavior, notifications, ms: Date.now() - started };
+  if (watchers.changed || events.enqueued || behavior.reflection || behavior.compiler || notifications.sent || notifications.failed) {
     await audit.log('trigger_fired', 'cron', 'tick', result);
   }
   return NextResponse.json(result);
