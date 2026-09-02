@@ -32,8 +32,9 @@ export async function POST(req: NextRequest) {
 
   const name = (audio instanceof File && audio.name) || 'note.m4a';
 
-  // Pin the language only when the conversation is explicitly in a language mode;
-  // otherwise auto-detect so English/Italian both transcribe correctly.
+  // Pin the language. A language-practice / Italian-tutor conversation wins;
+  // otherwise default to English. (Auto-detect on a short clip sends Whisper
+  // wandering into Icelandic etc. — Noah speaks English by default.)
   const explicit = (form.get('language') as string) || '';
   let language = /^(it|en|es|fr|de|pt|nl|la|el|grc?)$/i.test(explicit) ? explicit.toLowerCase() : undefined;
   if (!language && conversationId) {
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest) {
     if (pl && /^[a-z]{2}$/.test(pl)) language = pl;
     else if (data?.mode === 'italian-tutor') language = 'it';
   }
+  if (!language) language = 'en';
 
   try {
     const { text, durationSec, costUsd } = await transcribe(audio, name, { conversationId, language });

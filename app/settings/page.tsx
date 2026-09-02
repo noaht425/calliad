@@ -471,11 +471,39 @@ function BehaviorRules({ token }: { token: string }) {
 
 function VoiceSettings() {
   const [converse, setConverse] = useState(false);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [voiceName, setVoiceName] = useState('');
+
   useEffect(() => {
-    try { setConverse(localStorage.getItem('calliad:converse') === '1'); } catch { /* no storage */ }
+    try {
+      setConverse(localStorage.getItem('calliad:converse') === '1');
+      setVoiceName(localStorage.getItem('calliad_voice_name') ?? '');
+    } catch { /* no storage */ }
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    const load = () => {
+      const all = window.speechSynthesis.getVoices();
+      if (all.length) setVoices(all.filter((v) => v.lang.toLowerCase().startsWith('en')));
+    };
+    load();
+    window.speechSynthesis.addEventListener('voiceschanged', load);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', load);
   }, []);
+
+  const chooseVoice = (name: string) => {
+    setVoiceName(name);
+    try { name ? localStorage.setItem('calliad_voice_name', name) : localStorage.removeItem('calliad_voice_name'); } catch { /* no storage */ }
+    if (name && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance('This is how I sound.');
+      const v = window.speechSynthesis.getVoices().find((x) => x.name === name);
+      if (v) { u.voice = v; u.lang = v.lang; }
+      u.rate = 1.05;
+      window.speechSynthesis.speak(u);
+    }
+  };
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <label className="flex items-start gap-3 cursor-pointer">
         <input
           type="checkbox"
@@ -494,6 +522,33 @@ function VoiceSettings() {
           </span>
         </span>
       </label>
+
+      <div>
+        <p className="text-sm font-medium text-[var(--text-body)] mb-1">Spoken voice</p>
+        {voices.length === 0 ? (
+          <p className="text-xs text-[var(--text-muted)]">No voices available on this device yet.</p>
+        ) : (
+          <>
+            <select
+              value={voiceName}
+              onChange={(e) => chooseVoice(e.target.value)}
+              className="w-full rounded border px-2 py-1.5 text-sm"
+              style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+            >
+              <option value="">Device default</option>
+              {voices.map((v) => (
+                <option key={v.name} value={v.name}>
+                  {v.name}{v.localService ? '' : ' (network)'}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-[var(--text-muted)] mt-1">
+              These are your phone&apos;s system voices. Download higher-quality ones in iOS Settings →
+              Accessibility → Spoken Content → Voices, then they&apos;ll show up here.
+            </p>
+          </>
+        )}
+      </div>
     </div>
   );
 }

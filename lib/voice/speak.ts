@@ -69,12 +69,24 @@ export class SentenceSpeaker {
     if (this.keepAlive) { clearInterval(this.keepAlive); this.keepAlive = null; }
   }
 
+  private pickVoice(): SpeechSynthesisVoice | null {
+    try {
+      const name = localStorage.getItem('calliad_voice_name');
+      if (!name) return null;
+      return window.speechSynthesis.getVoices().find((v) => v.name === name) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private say(chunk: string) {
     const t = chunk.trim();
     if (!t || typeof window === 'undefined' || !window.speechSynthesis) return;
     const s = window.speechSynthesis;
     const u = new SpeechSynthesisUtterance(t);
     u.rate = 1.05;
+    const v = this.pickVoice();
+    if (v) { u.voice = v; u.lang = v.lang; }
     u.onend = () => {
       this.active = s.speaking;
       if (!this.active) this.stopKeepAlive();
