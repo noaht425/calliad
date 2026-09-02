@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server';
 import { waitUntil } from '@vercel/functions';
-import { randomUUID } from 'node:crypto';
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import {
@@ -8,6 +7,7 @@ import {
   type TgUpdate, type TgMessage,
 } from '@/lib/integrations/telegram';
 import { transcribe } from '@/lib/llm/groq';
+import { currentThreadId } from '@/lib/chat/thread';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,23 +40,6 @@ function senderAllowed(msg: TgMessage): boolean {
   if (uid && String(from.id) === uid) return true;
   // If neither gate is configured, allow the first person to message (single-user setup).
   return !uname && !uid;
-}
-
-/** One durable Telegram thread, reused across messages. */
-async function telegramConversationId(): Promise<string> {
-  const { data } = await adminClient
-    .from('conversations')
-    .select('id')
-    .eq('surface', 'telegram')
-    .order('last_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (data?.id) return data.id as string;
-  const id = randomUUID();
-  await adminClient.from('conversations').insert({
-    id, surface: 'telegram', started_at: new Date().toISOString(), last_at: new Date().toISOString(),
-  });
-  return id;
 }
 
 /** Run a turn through the same orchestrator the PWA uses; collect the reply. */
@@ -171,7 +154,7 @@ async function handleMessage(msg: TgMessage): Promise<void> {
   if (!text && !images.length) return;
 
   await sendChatAction(chatId, 'typing');
-  const conversationId = await telegramConversationId();
+  const conversationId = await currentThreadId('telegram');
   const reply = await runBrainTurn(userId, conversationId, text, images).catch(
     () => "Something broke on my end — try that again in a minute.",
   );
