@@ -1,9 +1,37 @@
-// Calliad service worker — push notifications (with action buttons) + click routing
+// Calliad service worker — push notifications (with action buttons) + click
+// routing, plus a bare offline fallback. It deliberately does NOT precache app
+// pages (that served stale HTML after deploys) — the only cached asset is a
+// static /offline.html shown when a navigation request fails with no network.
 
-// No fetch handler here, so taking over immediately is safe and gets new
-// versions (e.g. action buttons) live without waiting for every tab to close.
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+const OFFLINE_CACHE = 'calliad-offline-v1';
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(OFFLINE_CACHE).then((c) => c.addAll(['/offline.html', '/icons/icon-192.png'])),
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    Promise.all([
+      self.clients.claim(),
+      caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== OFFLINE_CACHE).map((k) => caches.delete(k)))),
+    ]),
+  );
+});
+
+// Only intervene on page navigations that fail — everything else goes straight
+// to the network (no caching of API responses, JS, or real pages).
+self.addEventListener('fetch', (event) => {
+  if (event.request.mode !== 'navigate') return;
+  event.respondWith(
+    fetch(event.request).catch(async () => {
+      const cached = await caches.match('/offline.html', { cacheName: OFFLINE_CACHE });
+      return cached || new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });
+    }),
+  );
+});
 
 self.addEventListener('push', (event) => {
   if (!event.data) return;

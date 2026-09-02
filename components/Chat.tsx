@@ -58,6 +58,20 @@ export function Chat() {
     });
   }, []);
 
+  // Text shared into the app via the PWA share target lands here as ?shared=…
+  useEffect(() => {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const shared = q.get('shared');
+      if (shared) {
+        setInput((cur) => (cur ? `${cur}\n${shared}` : shared));
+        q.delete('shared');
+        window.history.replaceState(null, '', `${window.location.pathname}${q.toString() ? `?${q}` : ''}`);
+        inputRef.current?.focus();
+      }
+    } catch { /* no window */ }
+  }, []);
+
   // On load, show today's brief (if there is one) and let replies continue it.
   useEffect(() => {
     if (!session) return;

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Calliad — offline</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0; min-height: 100dvh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 14px; padding: 32px; text-align: center;
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: #fafaf8; color: #1a1a17;
+    }
+    @media (prefers-color-scheme: dark) { body { background: #0a0a0a; color: #e8e8e6; } }
+    .badge {
+      width: 40px; height: 40px; border-radius: 999px; display: flex; align-items: center;
+      justify-content: center; background: #2f6f5e; color: #fff; font-weight: 700; font-size: 15px;
+    }
+    h1 { font-size: 1rem; margin: 4px 0 0; }
+    p { margin: 0; color: #6b6b64; max-width: 30ch; }
+    @media (prefers-color-scheme: dark) { p { color: #9a9a92; } }
+    button {
+      margin-top: 8px; padding: 8px 18px; border-radius: 10px; border: 0; font-size: 14px;
+      background: #2f6f5e; color: #fff; font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="badge">C</div>
+  <h1>You're offline</h1>
+  <p>Calliad needs a connection. Your Telegram thread still works if you have signal there.</p>
+  <button onclick="location.reload()">Try again</button>
+</body>
+</html>

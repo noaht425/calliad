@@ -474,20 +474,34 @@ function VoiceSettings() {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voiceName, setVoiceName] = useState('');
 
+  const loadVoices = useCallback(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    // getVoices() sometimes returns [] on the first call, then fills in
+    const grab = () => {
+      const all = window.speechSynthesis.getVoices();
+      if (all.length) setVoices(all.filter((v) => /^en\b|^en[-_]/i.test(v.lang)));
+    };
+    grab();
+    setTimeout(grab, 400);
+  }, []);
+
   useEffect(() => {
     try {
       setConverse(localStorage.getItem('calliad:converse') === '1');
       setVoiceName(localStorage.getItem('calliad_voice_name') ?? '');
     } catch { /* no storage */ }
+    loadVoices();
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    const load = () => {
-      const all = window.speechSynthesis.getVoices();
-      if (all.length) setVoices(all.filter((v) => v.lang.toLowerCase().startsWith('en')));
+    const onFocus = () => loadVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
     };
-    load();
-    window.speechSynthesis.addEventListener('voiceschanged', load);
-    return () => window.speechSynthesis.removeEventListener('voiceschanged', load);
-  }, []);
+  }, [loadVoices]);
 
   const chooseVoice = (name: string) => {
     setVoiceName(name);
@@ -525,29 +539,29 @@ function VoiceSettings() {
 
       <div>
         <p className="text-sm font-medium text-[var(--text-body)] mb-1">Spoken voice</p>
-        {voices.length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)]">No voices available on this device yet.</p>
-        ) : (
-          <>
-            <select
-              value={voiceName}
-              onChange={(e) => chooseVoice(e.target.value)}
-              className="w-full rounded border px-2 py-1.5 text-sm"
-              style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
-            >
-              <option value="">Device default</option>
-              {voices.map((v) => (
-                <option key={v.name} value={v.name}>
-                  {v.name}{v.localService ? '' : ' (network)'}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-[var(--text-muted)] mt-1">
-              These are your phone&apos;s system voices. Download higher-quality ones in iOS Settings →
-              Accessibility → Spoken Content → Voices, then they&apos;ll show up here.
-            </p>
-          </>
-        )}
+        <div className="flex items-center gap-2">
+          <select
+            value={voiceName}
+            onChange={(e) => chooseVoice(e.target.value)}
+            className="flex-1 rounded border px-2 py-1.5 text-sm"
+            style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+          >
+            <option value="">Device default</option>
+            {voices.map((v) => (
+              <option key={v.name} value={v.name}>
+                {v.name}{v.localService ? '' : ' (network)'}
+              </option>
+            ))}
+          </select>
+          <button className="text-xs underline text-[var(--text-muted)] shrink-0" onClick={loadVoices}>rescan</button>
+        </div>
+        <p className="text-xs text-[var(--text-muted)] mt-1">
+          {voices.length === 0 ? 'No voices detected yet — tap rescan. ' : ''}
+          This list is your phone&apos;s system voices. After downloading a new one (iOS Settings →
+          Accessibility → Spoken Content → Voices), <strong>fully close and reopen Calliad</strong> — iOS
+          only refreshes the list on a fresh launch. Note: the Enhanced/Premium and Siri voices aren&apos;t
+          available to web apps; only the standard ones show here.
+        </p>
       </div>
     </div>
   );

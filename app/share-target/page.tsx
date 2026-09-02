@@ -16,9 +16,18 @@ export default function ShareTargetPage() {
     if (!session) { router.replace('/login'); return; }
 
     const q = new URLSearchParams(window.location.search);
-    const raw = q.get('url') || q.get('text') || q.get('title') || '';
+    const text = (q.get('text') || '').trim();
+    const title = (q.get('title') || '').trim();
+    const raw = q.get('url') || text || title || '';
     const url = raw.match(/https?:\/\/[^\s<>"')]+/)?.[0];
-    if (!url) { setState('nourl'); return; }
+
+    // Shared plain text with no link → hand it to the chat composer.
+    if (!url) {
+      const shared = [title, text].filter(Boolean).join('\n').trim();
+      if (shared) { router.replace(`/?shared=${encodeURIComponent(shared.slice(0, 4000))}`); return; }
+      setState('nourl');
+      return;
+    }
 
     fetch('/api/capture', {
       method: 'POST',
