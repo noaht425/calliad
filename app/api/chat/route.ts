@@ -77,11 +77,22 @@ const sse = (obj: unknown) => enc.encode(`data: ${JSON.stringify(obj)}\n\n`);
 export async function POST(req: NextRequest) {
   const token = req.headers.get('authorization')?.replace('Bearer ', '');
   if (!token) return json({ error: 'Unauthorized' }, 401);
-  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-  if (authErr || !user) return json({ error: 'Unauthorized' }, 401);
 
-  let body: { text?: string; conversationId?: string; image?: string; images?: string[] };
+  // Internal callers (the Telegram bridge, the tick worker) present TICK_SECRET
+  // plus an x-calliad-user header instead of a Supabase session JWT.
+  const svcUser = req.headers.get('x-calliad-user');
+  let user: { id: string };
+  if (process.env.TICK_SECRET && token === process.env.TICK_SECRET && svcUser) {
+    user = { id: svcUser };
+  } else {
+    const { data: { user: authed }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !authed) return json({ error: 'Unauthorized' }, 401);
+    user = authed;
+  }
+
+  let body: { text?: string; conversationId?: string; image?: string; images?: string[]; surface?: string };
   try { body = await req.json(); } catch { return json({ error: 'Body must be JSON' }, 400); }
+  const surface = body.surface === 'telegram' ? 'telegram' : 'pwa';
 
   // optional attached photos — data URLs "data:image/jpeg;base64,…". Accept the
   // legacy single `image` too. Cap at 8 shots and ~5MB raw each.
@@ -108,18 +119,18 @@ export async function POST(req: NextRequest) {
   if (!conversationId) {
     conversationId = randomUUID();
     await adminClient.from('conversations').insert({
-      id: conversationId, surface: 'pwa', started_at: new Date().toISOString(), last_at: new Date().toISOString(),
+      id: conversationId, surface, started_at: new Date().toISOString(), last_at: new Date().toISOString(),
     });
   }
 
   const loggedText = text || (images.length ? `📷 (${images.length === 1 ? 'photo' : `${images.length} photos`})` : text);
-  await audit.log('inbound_message', 'noah', conversationId, { text: loggedText, images: images.length, surface: 'pwa' });
+  await audit.log('inbound_message', 'noah', conversationId, { text: loggedText, images: images.length, surface });
   await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'user', content: loggedText });
   await adminClient.from('conversations').update({ last_at: new Date().toISOString() }).eq('id', conversationId);
 
   const say = async (reply: string, reason: string) => {
     await adminClient.from('messages').insert({ conversation_id: conversationId!, role: 'assistant', content: reply });
-    await audit.log('outbound_message', 'calliad', conversationId!, { text: reply, surface: 'pwa', reason });
+    await audit.log('outbound_message', 'calliad', conversationId!, { text: reply, surface, reason });
     return streamResponse(conversationId!, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
   };
 
@@ -576,7 +587,7 @@ export async function POST(req: NextRequest) {
     const r = await addQuizItem(user.id, { lang: langMap[qm[1]?.toLowerCase() ?? ''] ?? 'lat', prompt: qm[2], answer: qm[3] });
     const reply = r === 'added' ? `Added to your quiz deck: ${qm[2]} → ${qm[3]}.` : r === 'exists' ? `Already in the deck.` : `Couldn't add that.`;
     await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply });
-    await audit.log('outbound_message', 'calliad', conversationId, { text: reply, surface: 'pwa', reason: 'quiz-add' });
+    await audit.log('outbound_message', 'calliad', conversationId, { text: reply, surface, reason: 'quiz-add' });
     return streamResponse(conversationId, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
   }
 
@@ -596,7 +607,7 @@ export async function POST(req: NextRequest) {
         : `Filed under ${r.item.kind}: ${r.item.title ?? r.item.url}.${r.item.descriptor ? ` ${r.item.descriptor}` : ''}`
       : `Couldn't grab that link — ${r.error}.`;
     await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply });
-    await audit.log('outbound_message', 'calliad', conversationId, { text: reply, surface: 'pwa', reason: 'capture' });
+    await audit.log('outbound_message', 'calliad', conversationId, { text: reply, surface, reason: 'capture' });
     return streamResponse(conversationId, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
   }
 
@@ -617,7 +628,7 @@ export async function POST(req: NextRequest) {
     const reply = decision.directReply ?? '';
     if (reply) {
       await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply });
-      await audit.log('outbound_message', 'calliad', conversationId, { text: reply, surface: 'pwa', reason: decision.reason });
+      await audit.log('outbound_message', 'calliad', conversationId, { text: reply, surface, reason: decision.reason });
     }
     return streamResponse(conversationId, async function* () {
       if (reply) yield sse({ delta: reply });
@@ -779,7 +790,7 @@ export async function POST(req: NextRequest) {
     const finalText = meta.text || 'Something broke on my end — try that again in a minute.';
     await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: finalText });
     await audit.log('outbound_message', 'calliad', conversationId, {
-      text: finalText, surface: 'pwa', tier: meta.tier, model: meta.model, cost_usd: meta.costUsd, capped: meta.capped,
+      text: finalText, surface, tier: meta.tier, model: meta.model, cost_usd: meta.costUsd, capped: meta.capped,
     });
     yield sse({ done: true, costUsd: meta.costUsd, mode: effectiveMode });
     // T1 pass: file any open loop this exchange opened. waitUntil keeps the

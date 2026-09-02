@@ -3,7 +3,7 @@ import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { config } from '@/lib/hub/config';
 import { checkSecret } from '@/lib/hub/guard';
-import { sendPush } from '@/lib/hub/push';
+import { notifyUser } from '@/lib/hub/notify';
 import { composeBrief } from '@/lib/brief/compose';
 import { syncCalendarEvents, recentCalendarChanges } from '@/lib/integrations/icloud-calendar';
 import { syncContacts } from '@/lib/integrations/icloud-contacts';
@@ -116,13 +116,13 @@ async function handle(req: NextRequest) {
         .update({ mode_state: { riddle: { id: riddle.id, revealed: false, at: Date.now() } } })
         .eq('id', brief.conversationId)
         .then(() => {}, () => {});
-      const push = await sendPush(userId, {
+      const push = await notifyUser(userId, {
         title: 'Morning brief',
         body: brief.text.slice(0, 160),
         url: '/',
         tag: 'brief',
       });
-      results.push({ userId, costUsd: brief.costUsd, pushed: push.sent, med });
+      results.push({ userId, costUsd: brief.costUsd, pushed: push.push, med });
     } catch (err) {
       console.error('[cron/brief]', userId, err);
       await audit.log('error', 'system', 'brief', { userId, message: String(err) });

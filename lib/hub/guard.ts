@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
  */
 export function checkSecret(
   req: NextRequest,
-  envVar: 'ADMIN_SECRET' | 'WEBHOOK_SECRET' | 'CRON_SECRET',
+  envVar: 'ADMIN_SECRET' | 'WEBHOOK_SECRET' | 'CRON_SECRET' | 'TICK_SECRET',
   headers: string[],
 ): NextResponse | null {
   const expected = process.env[envVar];

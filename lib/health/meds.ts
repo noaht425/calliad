@@ -1,6 +1,6 @@
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
-import { sendPush } from '@/lib/hub/push';
+import { notifyUser } from '@/lib/hub/notify';
 import { signAction } from '@/lib/hub/push-token';
 
 // Active daily medication check-in. Persona: "a light spoken check-in lands
@@ -51,7 +51,7 @@ export async function medCheckin(
     sent === 0
       ? 'Did you take your meds today?'
       : 'Still checking — meds today? (last one, then I’ll drop it)';
-  const push = await sendPush(userId, {
+  const push = await notifyUser(userId, {
     title: 'Meds',
     body,
     url: '/',
@@ -73,7 +73,7 @@ export async function medCheckin(
     },
     { onConflict: 'user_id,day' },
   );
-  await audit.log('outbound_message', 'calliad', null, { kind: 'med_checkin', send: sent + 1, pushed: push.sent });
+  await audit.log('outbound_message', 'calliad', null, { kind: 'med_checkin', send: sent + 1, pushed: push.push });
   return { sent: true, reason: `checkin #${sent + 1}` };
 }
 

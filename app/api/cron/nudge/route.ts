@@ -3,7 +3,7 @@ import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { config } from '@/lib/hub/config';
 import { checkSecret } from '@/lib/hub/guard';
-import { sendPush } from '@/lib/hub/push';
+import { notifyUser } from '@/lib/hub/notify';
 import { composeNudge } from '@/lib/nudge/compose';
 import { medCheckin } from '@/lib/health/meds';
 import { tripPrepNudges, markPrepSent } from '@/lib/travel/trips';
@@ -39,9 +39,9 @@ async function handle(req: NextRequest) {
 
     const preps = await tripPrepNudges(userId).catch(() => []);
     for (const p of preps) {
-      const push = await sendPush(userId, { title: 'Trip prep', body: p.message.slice(0, 300), url: '/', tag: `trip-${p.key}` });
+      const push = await notifyUser(userId, { title: 'Trip prep', body: p.message.slice(0, 300), url: '/', tag: `trip-${p.key}` });
       await markPrepSent(p.tripId, p.key).catch(() => {});
-      tripResults.push({ userId, key: p.key, pushed: push.sent });
+      tripResults.push({ userId, key: p.key, pushed: push.push });
     }
   }
 
@@ -59,8 +59,8 @@ async function handle(req: NextRequest) {
       const n = await composeNudge(userId);
       if (!n) { results.push({ userId, nudged: false }); continue; }
       if (n.deferred) { results.push({ userId, deferred: true }); continue; }
-      const push = await sendPush(userId, { title: 'Heads up', body: n.text.slice(0, 160), url: '/', tag: 'nudge' });
-      results.push({ userId, loop: n.loopTitle, pushed: push.sent, costUsd: n.costUsd });
+      const push = await notifyUser(userId, { title: 'Heads up', body: n.text.slice(0, 160), url: '/', tag: 'nudge' });
+      results.push({ userId, loop: n.loopTitle, pushed: push.push, costUsd: n.costUsd });
     } catch (err) {
       console.error('[cron/nudge]', userId, err);
       await audit.log('error', 'system', 'nudge', { userId, message: String(err) });
