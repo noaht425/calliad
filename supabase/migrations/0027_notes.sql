@@ -27,7 +27,7 @@ create or replace function match_notes(
 returns table (id uuid, content text, kind text, created_at timestamptz, similarity float)
 language sql
 stable
-set search_path = public
+set search_path = public, extensions
 as $$
   select n.id, n.content, n.kind, n.created_at,
          1 - (n.embedding <=> query_embedding) as similarity
