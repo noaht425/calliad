@@ -9,13 +9,15 @@ export const dynamic = 'force-dynamic';
 
 interface Row {
   id: string;
-  kind: 'page' | 'weather_event';
+  kind: 'page' | 'weather_event' | 'flight';
   label: string;
-  spec: { url?: string; for?: string; days?: number };
+  spec: { url?: string; for?: string; days?: number; flightNo?: string; date?: string };
   status: 'active' | 'paused' | 'done';
   last_checked_at: string | null;
   last_change_at: string | null;
 }
+
+const KIND_LABEL: Record<Row['kind'], string> = { page: 'Page', weather_event: 'Weather', flight: 'Flight' };
 
 function ago(iso: string | null): string {
   if (!iso) return 'not yet';
@@ -134,7 +136,7 @@ export default function WatchersPage() {
                       {r.label}{r.status === 'paused' ? <span style={{ color: 'var(--text-muted)' }}> · paused</span> : null}
                     </p>
                     <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      {r.kind === 'page' ? 'Page' : 'Weather'} · checked {ago(r.last_checked_at)}
+                      {KIND_LABEL[r.kind]} · checked {ago(r.last_checked_at)}
                       {r.last_change_at ? ` · last change ${ago(r.last_change_at)}` : ''}
                     </p>
                     {r.spec.url && (

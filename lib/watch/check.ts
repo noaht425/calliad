@@ -4,6 +4,7 @@ import { fetchReadable } from '@/lib/tools/webfetch';
 import { t1Json } from '@/lib/llm/gemini';
 import { enqueueNotification } from '@/lib/hub/notify';
 import { getWeatherLocation } from '@/lib/weather/location';
+import { fetchFlightStatus, flightChanged, flightLine, type FlightStatus } from '@/lib/watch/flight';
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 
@@ -143,6 +144,33 @@ async function checkWeatherEvent(w: DueRow): Promise<CheckResult> {
   };
 }
 
+// ── flight status watcher ────────────────────────────────────────────────
+async function checkFlight(w: DueRow): Promise<CheckResult & { done?: boolean }> {
+  const no = String(w.spec?.flightNo ?? '').toUpperCase();
+  const date = String(w.spec?.date ?? '');
+  if (!no || !date) return { done: true };
+
+  // retire it a day after the flight date
+  if (Date.parse(`${date}T23:59:59`) < Date.now() - 24 * 3600_000) return { done: true };
+
+  const s = await fetchFlightStatus(no, date);
+  if (!s) return {}; // transient / not found yet — keep old state
+
+  const prev = (w.last_state ?? null) as Partial<FlightStatus> | null;
+  const state = {
+    status: s.status, depGate: s.depGate, depTime: s.depTime, arrTime: s.arrTime, delayMin: s.delayMin,
+  };
+  const changeMsg = flightChanged(prev, s);
+  const done = /landed|arrived|canceled|cancelled/i.test(s.status);
+
+  if (!changeMsg) return { state, done };
+  return {
+    state,
+    done,
+    change: { title: `Flight ${no}`, body: `${changeMsg} ${flightLine(no, s)}`, key: `${s.status}|${s.depGate}|${s.depTime}` },
+  };
+}
+
 // ── runner (called by the tick worker) ───────────────────────────────────
 export async function runDueWatchers(limit = 10): Promise<{ checked: number; changed: number }> {
   const { data: due } = await adminClient
@@ -163,9 +191,13 @@ export async function runDueWatchers(limit = 10): Promise<{ checked: number; cha
       next_check_at: new Date(Date.now() + interval).toISOString(),
     };
     try {
-      const res: CheckResult =
-        w.kind === 'page' ? await checkPage(w) : w.kind === 'weather_event' ? await checkWeatherEvent(w) : {};
+      const res: CheckResult & { done?: boolean } =
+        w.kind === 'page' ? await checkPage(w)
+        : w.kind === 'weather_event' ? await checkWeatherEvent(w)
+        : w.kind === 'flight' ? await checkFlight(w)
+        : {};
       const patch: Record<string, unknown> = { ...base };
+      if (res.done) patch.status = 'done';
       if (res.state !== undefined) patch.last_state = res.state;
       if (res.change) {
         patch.last_change_at = new Date().toISOString();

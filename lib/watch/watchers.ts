@@ -1,7 +1,7 @@
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 
-export type WatcherKind = 'page' | 'weather_event';
+export type WatcherKind = 'page' | 'weather_event' | 'flight';
 export type WatcherStatus = 'active' | 'paused' | 'done';
 
 export interface Watcher {
@@ -25,6 +25,7 @@ const SEL =
 const DEFAULT_INTERVAL: Record<WatcherKind, number> = {
   page: 60,
   weather_event: 240,
+  flight: 25,
 };
 
 export async function createWatcher(

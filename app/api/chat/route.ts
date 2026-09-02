@@ -63,9 +63,11 @@ import {
 } from '@/lib/tools/watchlist';
 import {
   isWatchPageAdd, extractPageWatch, isWeatherWatchAdd, extractWeatherWatch,
+  isFlightWatch, extractFlightWatch,
   isWatcherList, isWatcherRemove, extractWatcherRemoveHint,
 } from '@/lib/watch/detect';
 import { createWatcher, listWatchers, matchWatcher, removeWatcher } from '@/lib/watch/watchers';
+import { flightStatusAvailable } from '@/lib/watch/flight';
 import type { TurnState } from '@/lib/brain/prompt';
 import { personaExtra, presetOverlay, resolvePreset, detectPresetSwitch, PRESETS } from '@/lib/brain/persona';
 import { detectPracticeLang, detectPracticeExit, practiceOverlay, type PracticeLang } from '@/lib/brain/practice';
@@ -533,6 +535,27 @@ export async function POST(req: NextRequest) {
         : `Already watching the weather over your plans.`,
       'watcher-weather-add',
     );
+  }
+  if (isFlightWatch(text)) {
+    if (!flightStatusAvailable()) {
+      return say(
+        `I can track flights once a flight-status key is set (RAPIDAPI_KEY — AeroDataBox on RapidAPI, free tier). Add that and ask again.`,
+        'watcher-flight-nokey',
+      );
+    }
+    const f = extractFlightWatch(text);
+    if (f) {
+      const nice = new Date(`${f.date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ });
+      const w = await createWatcher(user.id, {
+        kind: 'flight', label: `Flight ${f.flightNo} · ${nice}`, spec: { flightNo: f.flightNo, date: f.date }, intervalMin: 25,
+      }).catch(() => null);
+      return say(
+        w
+          ? `Tracking **${f.flightNo}** on ${nice} — I'll ping you on a delay, gate change, or cancellation, and drop it once it lands.`
+          : `Already tracking ${f.flightNo} that day.`,
+        'watcher-flight-add',
+      );
+    }
   }
 
   // ── silent tier: watch list — add / update / query ────────────────────

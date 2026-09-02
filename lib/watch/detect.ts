@@ -64,6 +64,74 @@ export function extractWeatherWatch(t: string): { days: number; label: string } 
   return { days, label };
 }
 
+// "watch my flight AA123 friday", "track flight UA 456", "let me know if my
+// flight DL9 is delayed"
+const FLIGHT_STOPWORDS = /^(on|at|in|is|it|be|to|of|by|or|as|so|do|go|my|no|us|we|he|hi|ok|an|am|if|the|for)$/i;
+
+function findFlightNo(t: string): string | null {
+  let m = t.match(/\bflight\s+(?:(?:number|no|#)\.?\s*)?([A-Za-z]{2,3}|[A-Za-z]\d|\d[A-Za-z])\s?(\d{1,4})\b/i);
+  if (m) return `${m[1].toUpperCase()}${m[2]}`;
+  m = t.match(/\b([A-Za-z]\d|\d[A-Za-z])\s?(\d{2,4})\b/); // B6 1234, 9W 22
+  if (m) return `${m[1].toUpperCase()}${m[2]}`;
+  m = t.match(/\b([A-Za-z]{2,3})\s?(\d{2,4})\b/); // AA1234
+  if (m && !FLIGHT_STOPWORDS.test(m[1])) return `${m[1].toUpperCase()}${m[2]}`;
+  return null;
+}
+
+const F_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const F_WD = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+function resolveFlightDate(t: string, now = new Date()): string {
+  const lc = t.toLowerCase();
+  const rollPast = (d: Date) => (d.getTime() < now.getTime() - 86_400_000 ? new Date(d.setFullYear(d.getFullYear() + 1)) : d);
+
+  const iso = lc.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (iso) return iso[1];
+
+  const md = lc.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (md) {
+    const y = md[3] ? (md[3].length === 2 ? 2000 + +md[3] : +md[3]) : now.getFullYear();
+    const d = new Date(Date.UTC(y, +md[1] - 1, +md[2], 12));
+    return (md[3] ? d : rollPast(d)).toISOString().slice(0, 10);
+  }
+
+  const mon = lc.match(
+    /\b(\d{1,2})(?:st|nd|rd|th)?\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?\b/,
+  );
+  if (mon) {
+    const day = +(mon[1] ?? mon[4]);
+    const mi = F_MONTHS.indexOf((mon[2] ?? mon[3]).slice(0, 3));
+    return rollPast(new Date(Date.UTC(now.getFullYear(), mi, day, 12))).toISOString().slice(0, 10);
+  }
+
+  if (/\btomorrow\b/.test(lc)) return new Date(now.getTime() + 86_400_000).toISOString().slice(0, 10);
+  if (/\b(today|tonight|this evening)\b/.test(lc)) return now.toISOString().slice(0, 10);
+
+  for (let i = 0; i < 7; i++) {
+    if (new RegExp(`\\b${F_WD[i]}\\b`).test(lc)) {
+      const d = new Date(now);
+      d.setHours(12, 0, 0, 0);
+      let add = (i - d.getDay() + 7) % 7;
+      if (add === 0) add = 7;
+      d.setDate(d.getDate() + add);
+      return d.toISOString().slice(0, 10);
+    }
+  }
+  return now.toISOString().slice(0, 10);
+}
+
+export function isFlightWatch(t: string): boolean {
+  if (!/\bflight\b/i.test(t)) return false;
+  if (!/\b(watch|track|keep an eye on|keep tabs on|monitor|follow|let me know|tell me|ping me|alert me|notify me|status of|delayed|on time|updates? on)\b/i.test(t)) return false;
+  return findFlightNo(t) !== null;
+}
+
+export function extractFlightWatch(t: string, now = new Date()): { flightNo: string; date: string } | null {
+  const flightNo = findFlightNo(t);
+  if (!flightNo) return null;
+  return { flightNo, date: resolveFlightDate(t, now) };
+}
+
 export const isWatcherList = (t: string) =>
   /\b(what('?s| is| are you)?\s*(am i|are you)?\s*watching( for me)?\??$|my watchers?\b|what are you (keeping an eye on|monitoring|tracking)|list (my )?watchers?)\b/i.test(t) &&
   !/\b(watch ?list|to watch|want to watch|tv|show|movie|film|series|episode)\b/i.test(t);
