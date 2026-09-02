@@ -76,6 +76,7 @@ export interface TurnState {
   medStatus?: string;               // today's medication check-in state, if unsettled
   contacts?: string;                // known contacts referenced this turn
   trips?: string;                   // upcoming trips (for prep-aware answers)
+  location?: string;                // where Noah is / was, if recent (from iOS geofences)
   personaExtra?: string;            // rapport: familiarity line + voice profile (cached layer)
   presetOverlay?: string;           // stance preset overlay (fresh layer)
   practiceOverlay?: string;         // "reply in language X for practice" overlay
@@ -160,6 +161,7 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
   if (state.medStatus) system.push({ type: 'text', text: state.medStatus });
   if (state.contacts) system.push({ type: 'text', text: state.contacts });
   if (state.trips) system.push({ type: 'text', text: state.trips });
+  if (state.location) system.push({ type: 'text', text: state.location });
 
   if (state.integrations) {
     system.push({ type: 'text', text: renderIntegrations(state.integrations, state.tz) });

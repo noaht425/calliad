@@ -9,6 +9,7 @@ import { PageShell, PageHeader, PageBody } from '@/components/PageLayout';
 export const dynamic = 'force-dynamic';
 
 const LINKS: { href: string; label: string; sub: string }[] = [
+  { href: '/pulse', label: 'Pulse', sub: 'Live view — location, weather, flights, watchers' },
   { href: '/reading', label: 'Reading & watch', sub: 'Saved articles, books, links' },
   { href: '/watch', label: 'Watch list', sub: 'TV & film — progress, ratings, what’s airing' },
   { href: '/watchers', label: 'Watchers', sub: 'Pages & weather Calliad checks on a schedule' },

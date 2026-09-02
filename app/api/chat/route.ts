@@ -54,6 +54,7 @@ import {
 import { RIDDLES } from '@/lib/games/riddles';
 import { ROOTS } from '@/lib/games/roots';
 import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/travel/trips';
+import { locationContextLine } from '@/lib/location/rules';
 import { isUnsubscribeMention, noteUnsubscribeFromChat } from '@/lib/mail/unsubscribes';
 import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
 import {
@@ -731,7 +732,7 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine, rapport, userPreset] = await Promise.all([
+  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, rapport, userPreset] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
@@ -739,6 +740,7 @@ export async function POST(req: NextRequest) {
     learnedFacts(user.id).catch(() => ''),
     contactContextLine(user.id, text).catch(() => ''),
     tripsContextLine(user.id).catch(() => ''),
+    locationContextLine(user.id).catch(() => ''),
     personaExtra(user.id).catch(() => ''),
     config.get('personality_preset').catch(() => 'default'),
   ]);
@@ -842,6 +844,7 @@ export async function POST(req: NextRequest) {
     medStatus: medLine || undefined,
     contacts: contactsLine || undefined,
     trips: tripsLine || undefined,
+    location: locationLine || undefined,
     personaExtra: rapport || undefined,
     presetOverlay: presetOverlay(activePreset) || undefined,
     practiceOverlay: modeState.practiceLang ? practiceOverlay(modeState.practiceLang as PracticeLang) : undefined,
