@@ -5,11 +5,11 @@ import { fetchReadable } from '@/lib/tools/webfetch';
 // "Send this recipe to A Bent Fork" — POST an external recipe URL to Noah's
 // recipe site (noaht425/abentfork), which parses it into a `pending` recipe for
 // admin approval. Contract: POST {ABENTFORK_URL}/api/webhook/recipe
-//   header  x-webhook-secret: <ABENTFORK_WEBHOOK_SECRET>   (== CALLIAD_WEBHOOK_SECRET on that deploy)
+//   header  x-webhook-secret: <CALLIAD_WEBHOOK_SECRET>   (same value on the abentfork deploy)
 //   body    { capture_id, url, title, notes? }
 
 const SITE = () => (process.env.ABENTFORK_URL || 'https://abentfork.com').replace(/\/$/, '');
-export const abentforkShareAvailable = () => Boolean(process.env.ABENTFORK_WEBHOOK_SECRET);
+export const abentforkShareAvailable = () => Boolean(process.env.CALLIAD_WEBHOOK_SECRET);
 
 const URL_RE = /https?:\/\/[^\s<>"')]+/i;
 
@@ -55,7 +55,7 @@ export interface ShareResult {
 
 export async function shareRecipeToAbentfork(rawUrl: string, notes?: string): Promise<ShareResult> {
   if (!abentforkShareAvailable()) {
-    return { ok: false, message: "Recipe sharing isn't set up — add ABENTFORK_WEBHOOK_SECRET (must match CALLIAD_WEBHOOK_SECRET on A Bent Fork)." };
+    return { ok: false, message: "Recipe sharing isn't set up — set CALLIAD_WEBHOOK_SECRET (same value as on A Bent Fork)." };
   }
   const url = normalizeUrl(rawUrl);
   if (!/^https?:\/\//i.test(url)) return { ok: false, message: "That doesn't look like a recipe URL." };
@@ -67,7 +67,7 @@ export async function shareRecipeToAbentfork(rawUrl: string, notes?: string): Pr
   try {
     res = await fetch(`${SITE()}/api/webhook/recipe`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-webhook-secret': process.env.ABENTFORK_WEBHOOK_SECRET! },
+      headers: { 'Content-Type': 'application/json', 'x-webhook-secret': process.env.CALLIAD_WEBHOOK_SECRET! },
       body: JSON.stringify({ capture_id, url, title, notes: notes?.trim() || undefined, submitted_at: new Date().toISOString() }),
       signal: AbortSignal.timeout(30_000),
     });
