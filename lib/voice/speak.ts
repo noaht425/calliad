@@ -69,12 +69,21 @@ export class SentenceSpeaker {
     if (this.keepAlive) { clearInterval(this.keepAlive); this.keepAlive = null; }
   }
 
-  private lang: string | null = null; // BCP-47 subtag of the current reply, e.g. "it", "fr"
+  private lang: string | null = null;    // short subtag, e.g. "it" — for matching getVoices()
+  private langTag: string | null = null; // region form, e.g. "it-IT" — the utterance.lang hint
+
+  // iOS often won't enumerate a language's voice in getVoices(), but setting
+  // utterance.lang to the region tag still makes the engine speak it correctly.
+  private static REGION: Record<string, string> = {
+    it: 'it-IT', fr: 'fr-FR', de: 'de-DE', es: 'es-ES', pt: 'pt-PT', nl: 'nl-NL', la: 'it-IT', el: 'el-GR',
+  };
 
   /** Tell the speaker what language the reply is in so it can pick a matching
    *  system voice. null / "en" → back to the user's chosen English voice. */
   setLang(code: string | null) {
-    this.lang = code && !/^en\b/i.test(code) ? code.toLowerCase().split(/[-_]/)[0] : null;
+    if (!code || /^en\b/i.test(code)) { this.lang = null; this.langTag = null; return; }
+    this.lang = code.toLowerCase().split(/[-_]/)[0];
+    this.langTag = SentenceSpeaker.REGION[this.lang] ?? (code.includes('-') ? code : this.lang);
   }
 
   private byName(name: string | null): SpeechSynthesisVoice | null {
@@ -109,7 +118,7 @@ export class SentenceSpeaker {
     u.rate = 1.05;
     const v = this.pickVoice();
     if (v) { u.voice = v; u.lang = v.lang; }
-    else if (this.lang) u.lang = this.lang; // hint the engine even with no explicit voice
+    else if (this.langTag) u.lang = this.langTag; // no enumerable voice — hint the engine by lang
     u.onend = () => {
       this.active = s.speaking;
       if (!this.active) this.stopKeepAlive();

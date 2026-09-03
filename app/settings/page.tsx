@@ -670,25 +670,23 @@ function VoiceSettings({ token }: { token: string }) {
         </div>
         <p className="text-xs text-[var(--text-muted)] mt-1">
           {voices.length === 0 ? 'No voices detected yet — tap rescan. ' : ''}
-          This list is your phone&apos;s system voices. After downloading a new one (iOS Settings →
-          Accessibility → Spoken Content → Voices), <strong>fully close and reopen Calliad</strong> — iOS
-          only refreshes the list on a fresh launch. Note: the Enhanced/Premium and Siri voices aren&apos;t
-          available to web apps; only the standard ones show here.
+          This is the fixed set of voices iOS exposes to web apps. Voices you download in iOS Settings
+          (Spoken Content / Personal Voice / Siri) <strong>do not appear here</strong> — that&apos;s a
+          Safari limitation, not a Calliad one. For a better voice, use the Gemini engine above.
         </p>
       </div>
 
-      {(['it', 'fr', 'de'] as const).some((l) => voices.some((v) => v.lang.toLowerCase().startsWith(l))) && (
-        <div className={engine === 'gemini' ? 'opacity-60' : ''}>
-          <p className="text-sm font-medium text-[var(--text-body)] mb-1">
-            Practice-mode voices{engine === 'gemini' ? ' (fallback)' : ''}
-          </p>
-          <div className="space-y-2">
-            {(['it', 'fr', 'de'] as const).map((lang) => {
-              const opts = voices.filter((v) => v.lang.toLowerCase().startsWith(lang));
-              if (!opts.length) return null;
-              return (
-                <div key={lang} className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-muted)] w-14 shrink-0">{LANG_META[lang].label}</span>
+      <div className={engine === 'gemini' ? 'opacity-60' : ''}>
+        <p className="text-sm font-medium text-[var(--text-body)] mb-1">
+          Practice-mode voices{engine === 'gemini' ? ' (fallback)' : ''}
+        </p>
+        <div className="space-y-2">
+          {(['it', 'fr', 'de'] as const).map((lang) => {
+            const opts = voices.filter((v) => v.lang.toLowerCase().startsWith(lang));
+            return (
+              <div key={lang} className="flex items-center gap-2">
+                <span className="text-xs text-[var(--text-muted)] w-14 shrink-0">{LANG_META[lang].label}</span>
+                {opts.length ? (
                   <select
                     value={langVoice[lang] ?? ''}
                     onChange={(e) => chooseLangVoice(lang, e.target.value)}
@@ -702,17 +700,23 @@ function VoiceSettings({ token }: { token: string }) {
                       </option>
                     ))}
                   </select>
-                </div>
-              );
-            })}
-          </div>
-          <p className="text-xs text-[var(--text-muted)] mt-1">
-            When Calliad replies in one of these languages (practice / tutor mode), it speaks with the
-            matching voice instead of your English one. &ldquo;Auto&rdquo; picks the best installed;
-            download better ones in iOS Settings → Accessibility → Spoken Content → Voices, then relaunch.
-          </p>
+                ) : (
+                  <span className="flex-1 text-xs text-[var(--text-muted)] italic">
+                    iOS isn&apos;t exposing a {LANG_META[lang].label} voice — Calliad will still speak it
+                    with the right accent via the language hint; use the Gemini engine for real quality.
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
-      )}
+        <p className="text-xs text-[var(--text-muted)] mt-1">
+          When Calliad replies in one of these languages (practice / tutor mode) it uses the matching
+          voice instead of your English one. On iOS the choices are just the one built-in voice per
+          language — downloaded voices never reach web apps. The <strong>Gemini engine</strong> is the
+          real fix for natural Italian/French speech (it auto-detects the language, no picker needed).
+        </p>
+      </div>
     </div>
   );
 }
