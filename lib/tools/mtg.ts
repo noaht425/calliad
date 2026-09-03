@@ -307,7 +307,7 @@ export function deckBlock(a: DeckAnalysis): string {
   }
   L.push(
     '\n### Instructions',
-    `Analyze as a strong Commander player would. Reason from the rules text above, not memory. Cover, as relevant: mana base and curve health, ramp/draw/interaction/wincon counts against what this deck wants to do, synergy clusters and anti-synergies, combo lines and their redundancy/fragility, clearly weak inclusions and what to cut, and 3–6 concrete adds with why. Every card you name as an add MUST be legal in this deck's colour identity ({${ci.join('}{') || 'C'}}) — double-check each one; a card with an off-colour identity is a hard error, not a suggestion. If Noah asked a specific question, lead with that. Be direct about tradeoffs; no hedging filler.`,
+    `Analyze as a strong Commander player would. Reason from the rules text above, not memory. Cover, as relevant: mana base and curve health, ramp/draw/interaction/wincon counts against what this deck wants to do, synergy clusters and anti-synergies, combo lines and their redundancy/fragility, clearly weak inclusions and what to cut, and 3–6 concrete adds with why. Every card you name as an add MUST be legal in this deck's colour identity ({${ci.join('}{') || 'C'}}) — double-check each one; a card with an off-colour identity is a hard error, not a suggestion. Do NOT dismiss tutors, fast mana, or card draw as "clunky" or "non-synergistic" just because they aren't part of a named synergy cluster — a tutor that fetches any card, or a rock that ramps, is a flexible consistency piece that serves the whole plan; judge them on speed and opportunity cost, not theme fit. If Noah asked a specific question, lead with that. Be direct about tradeoffs; no hedging filler.`,
   );
   return L.join('\n');
 }
