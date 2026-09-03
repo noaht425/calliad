@@ -172,6 +172,7 @@ export function GlobalChatPanel() {
       const { conversationId } = await streamChat(
         text,
         {
+          onLang: (code) => speakerRef.current?.setLang(code),
           onDelta: (d) => {
             acc += d;
             setMessages((m) => {
@@ -265,7 +266,7 @@ export function GlobalChatPanel() {
     (block) => {
       setChatH((h) => (h < snapsRef.current[2] ? snapsRef.current[2] : h));
       setMessages((m) => [...m, { role: 'assistant', text: block }]);
-      if (ttsRef.current) speakerRef.current!.flush(block.split('\n').find((l) => !l.startsWith('#') && l.trim()) ?? '');
+      if (ttsRef.current) { speakerRef.current!.setLang(null); speakerRef.current!.flush(block.split('\n').find((l) => !l.startsWith('#') && l.trim()) ?? ''); }
     },
     { endpoint: '/api/song/identify', pick: (j) => j.block as string | undefined },
   );

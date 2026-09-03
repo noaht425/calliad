@@ -109,6 +109,7 @@ export function Chat() {
       const { conversationId } = await streamChat(
         text,
         {
+          onLang: (code) => speakerRef.current?.setLang(code),
           onDelta: (d) => {
             acc += d;
             setMessages((m) => {

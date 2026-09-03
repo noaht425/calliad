@@ -1013,8 +1013,15 @@ export async function POST(req: NextRequest) {
     images,
   });
 
+  // Language this reply will be in — so the client can pick a matching TTS voice
+  // before the first sentence is spoken. null for ordinary English turns.
+  const replyLang =
+    (modeState.practiceLang as { code?: string } | undefined)?.code ??
+    (effectiveMode === 'italian-tutor' ? 'it' : null);
+
   const body$ = async function* () {
     try {
+      yield sse({ lang: replyLang });
       for await (const delta of stream) yield sse({ delta });
     } catch (err) {
       yield sse({ error: String(err) });

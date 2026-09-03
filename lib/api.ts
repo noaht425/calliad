@@ -11,6 +11,9 @@ export interface StreamChatHandlers {
   onDelta: (text: string) => void;
   onDone?: (full: string, meta?: { mode?: string }) => void;
   onError?: (err: unknown) => void;
+  /** Fired once, before the first delta: the language this reply is in (BCP-47
+   *  subtag) or null for ordinary English. Lets TTS pick a matching voice. */
+  onLang?: (code: string | null) => void;
 }
 
 /**
@@ -52,6 +55,7 @@ export async function streamChat(
       if (!line) continue;
       try {
         const payload = JSON.parse(line.slice(5).trim());
+        if ('lang' in payload && !payload.delta) handlers.onLang?.(payload.lang ?? null);
         if (payload.delta) { full += payload.delta; handlers.onDelta(payload.delta); }
         if (payload.error) handlers.onError?.(new Error(payload.error));
         if (payload.done) doneMeta = { mode: payload.mode };

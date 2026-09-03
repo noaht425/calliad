@@ -69,11 +69,33 @@ export class SentenceSpeaker {
     if (this.keepAlive) { clearInterval(this.keepAlive); this.keepAlive = null; }
   }
 
+  private lang: string | null = null; // BCP-47 subtag of the current reply, e.g. "it", "fr"
+
+  /** Tell the speaker what language the reply is in so it can pick a matching
+   *  system voice. null / "en" → back to the user's chosen English voice. */
+  setLang(code: string | null) {
+    this.lang = code && !/^en\b/i.test(code) ? code.toLowerCase().split(/[-_]/)[0] : null;
+  }
+
+  private byName(name: string | null): SpeechSynthesisVoice | null {
+    if (!name) return null;
+    return window.speechSynthesis.getVoices().find((v) => v.name === name) ?? null;
+  }
+
+  /** English (or unset) → the localStorage pick. A foreign reply → an explicit
+   *  per-language pick if set, else the best-matching installed voice. */
   private pickVoice(): SpeechSynthesisVoice | null {
     try {
-      const name = localStorage.getItem('calliad_voice_name');
-      if (!name) return null;
-      return window.speechSynthesis.getVoices().find((v) => v.name === name) ?? null;
+      if (this.lang) {
+        const chosen = this.byName(localStorage.getItem(`calliad_voice_${this.lang}`));
+        if (chosen) return chosen;
+        const matches = window.speechSynthesis
+          .getVoices()
+          .filter((v) => v.lang.toLowerCase().startsWith(this.lang!));
+        if (matches.length) return matches.find((v) => v.localService) ?? matches[0];
+        return null; // no voice for this language installed — fall back to default
+      }
+      return this.byName(localStorage.getItem('calliad_voice_name'));
     } catch {
       return null;
     }
@@ -87,6 +109,7 @@ export class SentenceSpeaker {
     u.rate = 1.05;
     const v = this.pickVoice();
     if (v) { u.voice = v; u.lang = v.lang; }
+    else if (this.lang) u.lang = this.lang; // hint the engine even with no explicit voice
     u.onend = () => {
       this.active = s.speaking;
       if (!this.active) this.stopKeepAlive();
@@ -163,6 +186,8 @@ export class GeminiSpeaker {
   get speaking() { return this.playing; }
   whenDone(cb: () => void) { this.doneCb = cb; }
   setAuth(token: string | null) { this.token = token; }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  setLang(_code: string | null) { /* Gemini TTS auto-detects the language */ }
 
   private el(): HTMLAudioElement {
     if (!this.audio) {

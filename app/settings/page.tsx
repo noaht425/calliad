@@ -478,13 +478,15 @@ function VoiceSettings({ token }: { token: string }) {
   const [gVoice, setGVoice] = useState('');
   const [gBusy, setGBusy] = useState(false);
   const gAudioRef = useRef<HTMLAudioElement | null>(null);
+  // per-language device-voice overrides for practice mode (it / fr / de)
+  const [langVoice, setLangVoice] = useState<Record<string, string>>({});
 
   const loadVoices = useCallback(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     // getVoices() sometimes returns [] on the first call, then fills in
     const grab = () => {
       const all = window.speechSynthesis.getVoices();
-      if (all.length) setVoices(all.filter((v) => /^en\b|^en[-_]/i.test(v.lang)));
+      if (all.length) setVoices(all); // keep all — English picker filters at render
     };
     grab();
     setTimeout(grab, 400);
@@ -496,6 +498,9 @@ function VoiceSettings({ token }: { token: string }) {
       setVoiceName(localStorage.getItem('calliad_voice_name') ?? '');
       setEngine(localStorage.getItem('calliad_tts_engine') === 'gemini' ? 'gemini' : 'device');
       setGVoice(localStorage.getItem('calliad_gemini_voice') ?? '');
+      setLangVoice(Object.fromEntries(
+        (['it', 'fr', 'de'] as const).map((l) => [l, localStorage.getItem(`calliad_voice_${l}`) ?? '']),
+      ));
     } catch { /* no storage */ }
     fetch('/api/tts', { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : null))
@@ -543,17 +548,32 @@ function VoiceSettings({ token }: { token: string }) {
     }
   };
 
+  const speakSample = (name: string, sample: string) => {
+    if (!name || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(sample);
+    const v = window.speechSynthesis.getVoices().find((x) => x.name === name);
+    if (v) { u.voice = v; u.lang = v.lang; }
+    u.rate = 1.05;
+    window.speechSynthesis.speak(u);
+  };
+
   const chooseVoice = (name: string) => {
     setVoiceName(name);
     try { name ? localStorage.setItem('calliad_voice_name', name) : localStorage.removeItem('calliad_voice_name'); } catch { /* no storage */ }
-    if (name && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance('This is how I sound.');
-      const v = window.speechSynthesis.getVoices().find((x) => x.name === name);
-      if (v) { u.voice = v; u.lang = v.lang; }
-      u.rate = 1.05;
-      window.speechSynthesis.speak(u);
-    }
+    speakSample(name, 'This is how I sound.');
+  };
+
+  const LANG_META: Record<string, { label: string; sample: string }> = {
+    it: { label: 'Italian', sample: 'Ecco come suono in italiano.' },
+    fr: { label: 'French', sample: 'Voici comment je sonne en français.' },
+    de: { label: 'German', sample: 'So klinge ich auf Deutsch.' },
+  };
+
+  const chooseLangVoice = (lang: string, name: string) => {
+    setLangVoice((m) => ({ ...m, [lang]: name }));
+    try { name ? localStorage.setItem(`calliad_voice_${lang}`, name) : localStorage.removeItem(`calliad_voice_${lang}`); } catch { /* no storage */ }
+    speakSample(name, LANG_META[lang]?.sample ?? 'This is how I sound.');
   };
 
   return (
@@ -640,7 +660,7 @@ function VoiceSettings({ token }: { token: string }) {
             style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
           >
             <option value="">Device default</option>
-            {voices.map((v) => (
+            {voices.filter((v) => /^en\b|^en[-_]/i.test(v.lang)).map((v) => (
               <option key={v.name} value={v.name}>
                 {v.name}{v.localService ? '' : ' (network)'}
               </option>
@@ -656,6 +676,43 @@ function VoiceSettings({ token }: { token: string }) {
           available to web apps; only the standard ones show here.
         </p>
       </div>
+
+      {(['it', 'fr', 'de'] as const).some((l) => voices.some((v) => v.lang.toLowerCase().startsWith(l))) && (
+        <div className={engine === 'gemini' ? 'opacity-60' : ''}>
+          <p className="text-sm font-medium text-[var(--text-body)] mb-1">
+            Practice-mode voices{engine === 'gemini' ? ' (fallback)' : ''}
+          </p>
+          <div className="space-y-2">
+            {(['it', 'fr', 'de'] as const).map((lang) => {
+              const opts = voices.filter((v) => v.lang.toLowerCase().startsWith(lang));
+              if (!opts.length) return null;
+              return (
+                <div key={lang} className="flex items-center gap-2">
+                  <span className="text-xs text-[var(--text-muted)] w-14 shrink-0">{LANG_META[lang].label}</span>
+                  <select
+                    value={langVoice[lang] ?? ''}
+                    onChange={(e) => chooseLangVoice(lang, e.target.value)}
+                    className="flex-1 rounded border px-2 py-1.5 text-sm"
+                    style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+                  >
+                    <option value="">Auto (best installed)</option>
+                    {opts.map((v) => (
+                      <option key={v.name} value={v.name}>
+                        {v.name}{v.localService ? '' : ' (network)'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            When Calliad replies in one of these languages (practice / tutor mode), it speaks with the
+            matching voice instead of your English one. &ldquo;Auto&rdquo; picks the best installed;
+            download better ones in iOS Settings → Accessibility → Spoken Content → Voices, then relaunch.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
