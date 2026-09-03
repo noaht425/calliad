@@ -125,11 +125,17 @@ function cleanName(s: string): string {
 }
 
 // ── deck URL → decklist text ───────────────────────────────────────────────
-// Archidekt: documented API. Moxfield: undocumented api2.moxfield.com, gated by
-// Cloudflare + a User-Agent policy — set MOXFIELD_UA (Moxfield asks you to email
-// support@moxfield.com for an approved string; a descriptive one often works).
-const MOX_UA =
-  process.env.MOXFIELD_UA || 'Calliad/1.0 (personal MTG deck assistant; +https://calliad-psi.vercel.app)';
+// Archidekt: documented API. Moxfield: undocumented api2.moxfield.com, and the
+// whole host sits behind Cloudflare bot management that scores on the TLS/HTTP-2
+// fingerprint — a plain Node `fetch` gets a 403 challenge page no matter the
+// headers or source IP (verified: 403 from Vercel AND from a residential IP; a
+// real browser on the same IP gets 200). `got-scraping` presents a real Chrome
+// TLS + header profile and clears it. It's pure JS (no native deps) and loaded
+// lazily so it never touches the per-turn chat path.
+//   MOXFIELD_UA — if Moxfield ever approves a User-Agent for you (email
+//   support@moxfield.com) or ships an official API, set it and we try a plain
+//   fetch with it first, skipping got-scraping when that succeeds.
+const MOX_UA = process.env.MOXFIELD_UA;
 
 function moxParse(j: Record<string, unknown>): string | null {
   const boards = (j.boards as Record<string, unknown>) ?? j; // v3 nests under boards, v2 is flat
@@ -150,17 +156,37 @@ function moxParse(j: Record<string, unknown>): string | null {
   return lines.length ? lines.join('\n') : null;
 }
 
+async function moxFetchJson(url: string): Promise<Record<string, unknown> | null> {
+  // 1. Approved-UA / official-API fast path (only when MOXFIELD_UA is set).
+  if (MOX_UA) {
+    try {
+      const r = await fetch(url, {
+        headers: { 'User-Agent': MOX_UA, Accept: 'application/json' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (r.ok) return (await r.json()) as Record<string, unknown>;
+    } catch { /* fall through to got-scraping */ }
+  }
+  // 2. Browser-fingerprint fetch — clears Cloudflare's TLS/HTTP-2 gate.
+  try {
+    const { gotScraping } = await import('got-scraping');
+    const r = await gotScraping({
+      url,
+      timeout: { request: 15000 },
+      throwHttpErrors: false,
+      headers: { accept: 'application/json', origin: 'https://www.moxfield.com', referer: 'https://www.moxfield.com/' },
+    });
+    if (r.statusCode >= 200 && r.statusCode < 300) return JSON.parse(r.body) as Record<string, unknown>;
+  } catch { /* give up */ }
+  return null;
+}
+
 async function fetchMoxfield(publicId: string): Promise<string | null> {
   for (const v of ['v3', 'v2']) {
-    try {
-      const r = await fetch(`https://api2.moxfield.com/${v}/decks/all/${publicId}`, {
-        headers: { 'User-Agent': MOX_UA, Accept: 'application/json' },
-        signal: AbortSignal.timeout(12000),
-      });
-      if (!r.ok) continue;
-      const parsed = moxParse((await r.json()) as Record<string, unknown>);
-      if (parsed) return parsed;
-    } catch { /* try next version */ }
+    const j = await moxFetchJson(`https://api2.moxfield.com/${v}/decks/all/${publicId}`);
+    if (!j) continue;
+    const parsed = moxParse(j);
+    if (parsed) return parsed;
   }
   return null;
 }

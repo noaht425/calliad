@@ -7,6 +7,10 @@ import type { NextConfig } from "next";
 // The app is online-only, so there's no offline layer to lose.
 const nextConfig: NextConfig = {
   turbopack: {},
+  // got-scraping (lazy-loaded in lib/tools/mtg.ts for Moxfield deck import) ships
+  // JSON fingerprint data and leans on Node's HTTP internals — let Node require it
+  // straight from node_modules instead of bundling/transforming it.
+  serverExternalPackages: ["got-scraping"],
   outputFileTracingIncludes: {
     "/api/**": ["./content/**"],
   },

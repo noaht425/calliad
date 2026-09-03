@@ -832,7 +832,7 @@ export async function POST(req: NextRequest) {
       toolResult = block;
     } else {
       toolResult = moxUrl
-        ? `## Deck analysis\nCouldn't pull that Moxfield deck (it may be private, or Moxfield rejected the request). If it keeps failing, Noah can set MOXFIELD_UA (email support@moxfield.com for an approved user-agent) — or paste the list (Moxfield: "..." menu → Export → copy).`
+        ? `## Deck analysis\nCouldn't pull that Moxfield deck — it's almost certainly private or unlisted (public decks import fine). Ask Noah to make it public, or paste the list (Moxfield: "..." menu → Export → copy).`
         : `## Deck analysis\nCouldn't read a decklist from that${deckUrl ? ' link' : ''}. Ask Noah to paste the list or an Archidekt / Moxfield URL.`;
     }
   } else if (isEdhrecQuery(text)) {
