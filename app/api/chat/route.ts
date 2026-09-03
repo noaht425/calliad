@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { supabase } from '@/lib/supabase';
 import { adminClient } from '@/lib/supabase.server';
 import { route, type Mode } from '@/lib/router/route';
+import { classifyIntent, type Intent, type IntentGuess } from '@/lib/router/intent';
 import { call } from '@/lib/brain/call';
 import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
@@ -340,6 +341,22 @@ export async function POST(req: NextRequest) {
     return say(recap, 'tidy-apply');
   }
 
+  // ── inference net ─────────────────────────────────────────────────────
+  // One cheap T1 pass names the action behind a message the regex guards below
+  // would miss ("I'm going to a concert Friday" → calendar.create). Lazy +
+  // memoised: it runs at most once, and only when a guard actually consults it
+  // — never when an earlier handler already returned or its own regex matched.
+  // Handlers still do their own extraction + the trust-ladder gate; this only
+  // widens what reaches them.
+  let _intentGuess: IntentGuess | null | undefined;
+  const inferred = async (want: Intent): Promise<boolean> => {
+    if (modeState.practiceLang) return false; // language practice — never route commands out of it
+    if (_intentGuess === undefined) {
+      _intentGuess = await classifyIntent(text, await recentTurns(conversationId, text), conversationId).catch(() => null);
+    }
+    return _intentGuess?.intent === want && (_intentGuess?.confidence ?? 0) >= 0.7;
+  };
+
   // ── "tidy up / any duplicates" → scan + propose ──────────────────────
   if (isTidyRequest(text)) {
     const items = await scanForTidy(user.id).catch(() => []);
@@ -417,7 +434,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── "send this recipe to A Bent Fork" → POST to the recipe site ────────
-  if (isRecipeShare(text)) {
+  if (isRecipeShare(text) || await inferred('recipe.share')) {
     const url = extractShareUrl(text);
     if (url) {
       const notes = text.replace(url, '').replace(/\b(share|send|add|put|post|submit|save|this|the|recipe|to|on|with|into|a[- ]?bent[- ]?fork|abentfork|can you|please|:)\b/gi, ' ').replace(/\s+/g, ' ').trim();
@@ -480,7 +497,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── silent tier: add a task → open loop (tagged 'task'), no gate ────────
-  if (isTaskAdd(text) && !isSubscriptionAdd(text)) {
+  if ((isTaskAdd(text) || await inferred('task.add')) && !isSubscriptionAdd(text)) {
     const { title, due_at, recur } = await extractTask(text).catch(() => ({ title: text.trim(), due_at: null, recur: null }));
     if (title) {
       // "remind me to watch <show>" with no time attached is really a watch-list add
@@ -601,7 +618,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── silent tier: watch list — add / update / query ────────────────────
-  if (isWatchAdd(text)) {
+  if (isWatchAdd(text) || await inferred('watchlist.add')) {
     const w = extractWatchTitle(text);
     if (w) {
       const r = await addWatchFromText(user.id, w.raw, w.status, text).catch(() => null);
@@ -637,7 +654,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── silent tier: "note that…" / "jot this down" → a searchable note ────
-  if (isNoteCapture(text)) {
+  if (isNoteCapture(text) || await inferred('note.remember')) {
     const body = extractNote(text);
     if (body.length >= 3) {
       const ok = await saveNote(user.id, body, { source: 'chat' }).catch(() => false);
@@ -661,7 +678,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── confirm / named-consequence: change or cancel a calendar event ──────
-  if (isCalendarChange(text) && !isCalendarWrite(text)) {
+  if ((isCalendarChange(text) || await inferred('calendar.change')) && !isCalendarWrite(text)) {
     const ch = await extractCalendarChange(text).catch(() => null);
     if (!ch) return say(`Which event do you mean — name it and the day?`, 'cal-change-underspecified');
     const found = await findEventByHint(user.id, ch.match).catch(() => ({ none: true as const }));
@@ -694,7 +711,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── calendar write → auto-add if trusted, else propose and wait for yes ──
-  if (isCalendarWrite(text)) {
+  if (isCalendarWrite(text) || await inferred('calendar.create')) {
     const ev = await extractEvent(text).catch(() => null);
     if (!ev) return say(`I can put that on your calendar — when, exactly?`, 'calendar-write-underspecified');
     const when = whenLabel(ev.start_at, ev.all_day);
