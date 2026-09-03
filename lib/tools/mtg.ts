@@ -125,8 +125,46 @@ function cleanName(s: string): string {
 }
 
 // ── deck URL → decklist text ───────────────────────────────────────────────
-// Archidekt only. Moxfield put their API behind Cloudflare (403 to any client
-// without an approved user-agent) — paste the list for those.
+// Archidekt: documented API. Moxfield: undocumented api2.moxfield.com, gated by
+// Cloudflare + a User-Agent policy — set MOXFIELD_UA (Moxfield asks you to email
+// support@moxfield.com for an approved string; a descriptive one often works).
+const MOX_UA =
+  process.env.MOXFIELD_UA || 'Calliad/1.0 (personal MTG deck assistant; +https://calliad-psi.vercel.app)';
+
+function moxParse(j: Record<string, unknown>): string | null {
+  const boards = (j.boards as Record<string, unknown>) ?? j; // v3 nests under boards, v2 is flat
+  const lines: string[] = [];
+  const pull = (board: unknown, prefix = '') => {
+    const b = board as { cards?: Record<string, unknown> } | Record<string, unknown> | undefined;
+    const cards = (b && 'cards' in b ? (b as { cards?: Record<string, unknown> }).cards : b) as
+      | Record<string, { quantity?: number; card?: { name?: string }; name?: string }>
+      | undefined;
+    if (!cards || typeof cards !== 'object') return;
+    for (const entry of Object.values(cards)) {
+      const name = entry?.card?.name ?? entry?.name;
+      if (name) lines.push(`${prefix}${entry?.quantity ?? 1} ${name}`);
+    }
+  };
+  pull(boards.commanders, 'Commander: ');
+  pull(boards.mainboard);
+  return lines.length ? lines.join('\n') : null;
+}
+
+async function fetchMoxfield(publicId: string): Promise<string | null> {
+  for (const v of ['v3', 'v2']) {
+    try {
+      const r = await fetch(`https://api2.moxfield.com/${v}/decks/all/${publicId}`, {
+        headers: { 'User-Agent': MOX_UA, Accept: 'application/json' },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) continue;
+      const parsed = moxParse((await r.json()) as Record<string, unknown>);
+      if (parsed) return parsed;
+    } catch { /* try next version */ }
+  }
+  return null;
+}
+
 export async function fetchDeckFromUrl(url: string): Promise<string | null> {
   try {
     const arch = url.match(/archidekt\.com\/(?:api\/)?decks\/(\d+)/);
@@ -138,6 +176,8 @@ export async function fetchDeckFromUrl(url: string): Promise<string | null> {
         .map((c) => `${c.categories?.includes('Commander') ? 'Commander: ' : ''}${c.quantity} ${c.card.oracleCard.name}`)
         .join('\n');
     }
+    const mox = url.match(/moxfield\.com\/decks\/([\w-]+)/i);
+    if (mox) return await fetchMoxfield(mox[1]);
   } catch { /* fall through */ }
   return null;
 }

@@ -812,13 +812,15 @@ export async function POST(req: NextRequest) {
     practice: !!modeState.practiceLang,
   });
 
-  const deckUrl = text.match(/https?:\/\/(?:www\.)?archidekt\.com\/(?:api\/)?decks\/\d+/)?.[0];
-  const moxUrl = /https?:\/\/(?:www\.)?moxfield\.com\/decks\/[\w-]+/.test(text);
+  const deckUrl =
+    text.match(/https?:\/\/(?:www\.)?archidekt\.com\/(?:api\/)?decks\/\d+/)?.[0] ??
+    text.match(/https?:\/\/(?:www\.)?moxfield\.com\/decks\/[\w-]+/i)?.[0];
+  const moxUrl = /moxfield\.com\/decks\//i.test(text);
   let toolResult = morphResult;
   if (effectiveMode === 'quiz') {
     const q = await quizTurn(user.id, conversationId, text, modeState).catch(() => null);
     if (q) toolResult = q.toolResult;
-  } else if (looksLikeDecklist(text) || (isDeckHelp(text) && (deckUrl || moxUrl))) {
+  } else if (looksLikeDecklist(text) || (isDeckHelp(text) && deckUrl)) {
     const listText = deckUrl ? await fetchDeckFromUrl(deckUrl).catch(() => null) : looksLikeDecklist(text) ? text : null;
     const a = listText ? await analyzeDeck(listText).catch(() => null) : null;
     if (a) {
@@ -830,8 +832,8 @@ export async function POST(req: NextRequest) {
       toolResult = block;
     } else {
       toolResult = moxUrl
-        ? `## Deck analysis\nMoxfield blocks automated access now, so Noah needs to paste the decklist text (Moxfield: "..." menu → Export → copy), or share an Archidekt link.`
-        : `## Deck analysis\nCouldn't read a decklist from that${deckUrl ? ' link' : ''}. Ask Noah to paste the list or an Archidekt URL.`;
+        ? `## Deck analysis\nCouldn't pull that Moxfield deck (it may be private, or Moxfield rejected the request). If it keeps failing, Noah can set MOXFIELD_UA (email support@moxfield.com for an approved user-agent) — or paste the list (Moxfield: "..." menu → Export → copy).`
+        : `## Deck analysis\nCouldn't read a decklist from that${deckUrl ? ' link' : ''}. Ask Noah to paste the list or an Archidekt / Moxfield URL.`;
     }
   } else if (isEdhrecQuery(text)) {
     const name = extractCardNames(text)[0];
