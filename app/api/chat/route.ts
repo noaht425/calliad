@@ -7,6 +7,7 @@ import { route, type Mode } from '@/lib/router/route';
 import { classifyIntent, type Intent, type IntentGuess } from '@/lib/router/intent';
 import { geocodePlace } from '@/lib/geo/place';
 import { sameDayConflict } from '@/lib/actions/geo-conflict';
+import { captureCorrection, correctionsBlock } from '@/lib/brain/corrections';
 import { call } from '@/lib/brain/call';
 import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
@@ -840,7 +841,7 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, behaviorLine, occasionsLine, rapport, userPreset] = await Promise.all([
+  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, behaviorLine, correctionsLine, occasionsLine, rapport, userPreset] = await Promise.all([
     recentTurns(conversationId, text),
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
@@ -850,6 +851,7 @@ export async function POST(req: NextRequest) {
     tripsContextLine(user.id).catch(() => ''),
     locationContextLine(user.id).catch(() => ''),
     behaviorContextLine(user.id).catch(() => ''),
+    correctionsBlock(user.id, text).catch(() => ''),
     occasionsContextLine(user.id).catch(() => ''),
     personaExtra(user.id).catch(() => ''),
     config.get('personality_preset').catch(() => 'default'),
@@ -971,6 +973,7 @@ export async function POST(req: NextRequest) {
     trips: tripsLine || undefined,
     location: locationLine || undefined,
     behaviorRules: behaviorLine || undefined,
+    corrections: correctionsLine || undefined,
     occasions: occasionsLine || undefined,
     personaExtra: rapport || undefined,
     presetOverlay: presetOverlay(activePreset) || undefined,
@@ -1025,6 +1028,15 @@ export async function POST(req: NextRequest) {
     );
     // auto-index a durable fact/detail from this turn into the knowledge base
     waitUntil(maybeIndexTurn(user.id, text, finalText).catch((e) => console.error('[chat] note index', e)));
+    // if this turn corrected the previous reply, capture what to know / do next time
+    waitUntil(
+      captureCorrection(
+        user.id,
+        recent.filter((m) => m.role === 'assistant').at(-1)?.content ?? '',
+        text,
+        conversationId,
+      ).catch((e) => console.error('[chat] correction capture', e)),
+    );
   }();
 
   return streamResponse(conversationId, body$);

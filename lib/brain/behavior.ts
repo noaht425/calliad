@@ -4,6 +4,7 @@ import { config } from '@/lib/hub/config';
 import { t1Json } from '@/lib/llm/gemini';
 import { enqueueNotification } from '@/lib/hub/notify';
 import { ownerUserIds } from '@/lib/hub/owner';
+import { saveNote } from '@/lib/memory/notes';
 
 // Learned behavior rules (ported from dougt425/calliad, adapted to our stack).
 //  - reflection: spot standing behavioral corrections in recent chat pairs,
@@ -115,10 +116,67 @@ export async function resolveRulePrompt(userId: string, accept: boolean): Promis
 }
 
 // ── reflection ──────────────────────────────────────────────────────────
-interface Pattern {
+export interface Pattern {
   pattern_key: string;
   pattern_description: string;
   proposed_rule: string;
+}
+
+/**
+ * Record one behavioural-correction pattern: bump its count, and at frequency
+ * ≥2 flip it to `proposed` and ask Noah (once) whether to make it a rule.
+ * Called both by the nightly reflection sweep and — in real time — the moment a
+ * correction lands in chat, so a repeat pattern reaches the threshold on the
+ * spot instead of a day later. Returns the candidate's status after the bump.
+ */
+export async function trackCorrectionCandidate(userId: string, p: Pattern): Promise<'tracking' | 'proposed' | null> {
+  if (!p.pattern_key || !p.proposed_rule) return null;
+
+  const { data: match } = await adminClient
+    .from('correction_candidates')
+    .select('id, frequency, status')
+    .eq('user_id', userId)
+    .eq('pattern_key', p.pattern_key)
+    .maybeSingle();
+
+  if (!match) {
+    await adminClient.from('correction_candidates').upsert(
+      {
+        user_id: userId,
+        pattern_key: p.pattern_key,
+        pattern_description: p.pattern_description,
+        proposed_rule: p.proposed_rule,
+        frequency: 1,
+        status: 'tracking',
+        last_seen_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,pattern_key', ignoreDuplicates: true },
+    );
+    return 'tracking';
+  }
+
+  if (match.status !== 'tracking') return match.status as 'proposed'; // already proposed / promoted / dismissed
+
+  const freq = (match.frequency as number) + 1;
+  await adminClient
+    .from('correction_candidates')
+    .update({ frequency: freq, last_seen_at: new Date().toISOString() })
+    .eq('id', match.id);
+
+  if (freq >= 2) {
+    await adminClient.from('correction_candidates').update({ status: 'proposed' }).eq('id', match.id);
+    await enqueueNotification(userId, {
+      kind: 'behavior',
+      title: 'A pattern I noticed',
+      body:
+        `You've corrected me a few times about ${p.pattern_description}. ` +
+        `Make it a standing rule? Reply "yes, make it a rule" or "no". ` +
+        `Proposed: "${p.proposed_rule}"`,
+      dedupeKey: `behavior:${match.id}`,
+    });
+    return 'proposed';
+  }
+  return 'tracking';
 }
 
 async function runReflectionForUser(userId: string): Promise<number> {
@@ -144,65 +202,50 @@ async function runReflectionForUser(userId: string): Promise<number> {
   }
   if (!pairs.length) return 0;
 
-  const patterns = await t1Json<Pattern[]>(
+  const out = await t1Json<{ behavioral: Pattern[]; factual: { note: string; topic: string }[] }>(
     'behavior_reflection',
-    `Conversation pairs between the user and their assistant Calliad. Identify where the user is ` +
-      `correcting Calliad's *behaviour* — how they want it to act differently as a standing preference. ` +
-      `Ignore factual fixes ("I meant Tuesday"), extra items in the same request, and plain confusion.\n\n` +
+    `Conversation pairs between the user and their assistant Calliad. Find where the user corrected Calliad.\n` +
+      `Two kinds:\n` +
+      `- behavioural: the user wants Calliad to ACT differently as a standing habit (ask first, be terser…).\n` +
+      `- factual: Calliad got something substantively wrong and the user set it straight — a fact, number, ` +
+      `name, OR a domain concept (what something is for, how a category works). "You called tutors ` +
+      `non-synergistic, but their job is consistency" is factual, not opinion. A REASON why Calliad's ` +
+      `characterisation is wrong makes it factual.\n` +
+      `Ignore the user fixing their OWN request ("I meant Tuesday"), extra items in one message, plain ` +
+      `confusion, and pure matters of taste with no right answer.\n\n` +
       pairs
         .slice(0, 25)
         .map((p, i) => `${i + 1}. Calliad: ${p.assistant}\n   User: ${p.user}`)
         .join('\n') +
-      `\n\nReturn a JSON array; group duplicates into one pattern. Each: ` +
-      `{"pattern_key":"short_snake_case_slug","pattern_description":"lowercase, e.g. 'adding calendar events without asking'","proposed_rule":"clear imperative instruction to Calliad, <=160 chars"}. ` +
-      `Return [] if there are no genuine behavioural corrections.`,
-    { maxOutputTokens: 500 },
+      `\n\nReply JSON: {"behavioral":[{"pattern_key":"short_snake_case_slug","pattern_description":"lowercase, e.g. 'adding calendar events without asking'","proposed_rule":"clear imperative to Calliad, <=160 chars"}],` +
+      `"factual":[{"note":"one standalone sentence — what Calliad got wrong and what's true, keep specifics, <=240 chars","topic":"2-5 words"}]}. ` +
+      `Group duplicates. Empty arrays if none.`,
+    { maxOutputTokens: 700 },
   );
-  if (!patterns?.length) return 0;
-
-  const { data: cands } = await adminClient
-    .from('correction_candidates')
-    .select('id, pattern_key, frequency')
-    .eq('user_id', userId)
-    .eq('status', 'tracking');
-  const existing = cands ?? [];
+  if (!out) return 0;
 
   let proposed = 0;
-  for (const p of patterns) {
-    if (!p.pattern_key || !p.proposed_rule) continue;
-    const match = existing.find((c) => c.pattern_key === p.pattern_key);
-    if (match) {
-      const freq = (match.frequency as number) + 1;
-      await adminClient
-        .from('correction_candidates')
-        .update({ frequency: freq, last_seen_at: new Date().toISOString() })
-        .eq('id', match.id);
-      if (freq >= 2) {
-        await adminClient.from('correction_candidates').update({ status: 'proposed' }).eq('id', match.id);
-        await enqueueNotification(userId, {
-          kind: 'behavior',
-          title: 'A pattern I noticed',
-          body:
-            `You've corrected me a few times about ${p.pattern_description}. ` +
-            `Make it a standing rule? Reply "yes, make it a rule" or "no". ` +
-            `Proposed: "${p.proposed_rule}"`,
-          dedupeKey: `behavior:${match.id}`,
-        });
-        proposed++;
-      }
-    } else {
-      await adminClient.from('correction_candidates').upsert(
-        {
-          user_id: userId,
-          pattern_key: p.pattern_key,
-          pattern_description: p.pattern_description,
-          proposed_rule: p.proposed_rule,
-          frequency: 1,
-          status: 'tracking',
-          last_seen_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id,pattern_key', ignoreDuplicates: true },
-      );
+  for (const p of out.behavioral ?? []) {
+    if ((await trackCorrectionCandidate(userId, p).catch(() => null)) === 'proposed') proposed++;
+  }
+
+  // factual corrections → correction notes (deduped against recent ones)
+  const facts = (out.factual ?? []).filter((f) => f?.note?.trim());
+  if (facts.length) {
+    const { data: recent } = await adminClient
+      .from('notes')
+      .select('content')
+      .eq('user_id', userId)
+      .eq('kind', 'correction')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const have = new Set((recent ?? []).map((r) => norm(r.content as string)));
+    for (const f of facts) {
+      const note = f.note.trim().slice(0, 400);
+      if (have.has(norm(note))) continue;
+      have.add(norm(note));
+      await saveNote(userId, note, { kind: 'correction', source: 'reflection', meta: { topic: f.topic ?? null } }).catch(() => {});
     }
   }
   return proposed;

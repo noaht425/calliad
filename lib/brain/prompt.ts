@@ -81,6 +81,7 @@ export interface TurnState {
   trips?: string;                   // upcoming trips (for prep-aware answers)
   location?: string;                // where Noah is / was, if recent (from iOS geofences)
   behaviorRules?: string;           // learned + explicit "how to act" rules
+  corrections?: string;             // past factual corrections that bear on this turn
   occasions?: string;               // upcoming birthdays / anniversaries
   personaExtra?: string;            // rapport: familiarity line + voice profile (cached layer)
   presetOverlay?: string;           // stance preset overlay (fresh layer)
@@ -165,6 +166,7 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
   if (state.learned) system.push({ type: 'text', text: state.learned });
   if (state.medStatus) system.push({ type: 'text', text: state.medStatus });
   if (state.behaviorRules) system.push({ type: 'text', text: state.behaviorRules });
+  if (state.corrections) system.push({ type: 'text', text: state.corrections });
   if (state.occasions) system.push({ type: 'text', text: state.occasions });
   if (state.contacts) system.push({ type: 'text', text: state.contacts });
   if (state.trips) system.push({ type: 'text', text: state.trips });
