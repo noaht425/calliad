@@ -1,11 +1,10 @@
 import { fenceUntrusted } from '@/lib/brain/prompt';
+import { fetchHtml } from '@/lib/net/fetch-html';
 
 // Web fetch — "what does this link say about X", "summarise this". Pulls the
 // readable text off a page and hands it to the brain as untrusted context.
-// NOT a browser: one GET, no JS, no crawl. HTML + plain text only.
+// One GET (with a browser-fingerprint retry on a bot wall), no JS, no crawl.
 
-const CHROME_UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36';
 const MAX_BYTES = 1_500_000;
 const MAX_WORDS = 4000;
 
@@ -67,28 +66,22 @@ export async function fetchReadable(rawUrl: string): Promise<FetchResult> {
   const u = safeUrl(rawUrl);
   if (!u) return { ok: false, url: rawUrl, reason: 'not a fetchable http(s) URL' };
   const url = u.toString();
-
-  let r: Response;
-  try {
-    r = await fetch(url, {
-      redirect: 'follow',
-      signal: AbortSignal.timeout(12_000),
-      headers: { 'user-agent': CHROME_UA, accept: 'text/html,application/xhtml+xml,text/plain' },
-    });
-  } catch {
-    return { ok: false, url, reason: 'could not reach the page (offline, slow, or blocking bots)' };
-  }
-  if (!r.ok) return { ok: false, url, reason: `the site returned ${r.status}` };
-
-  const ct = r.headers.get('content-type') ?? '';
-  if (!/text\/html|text\/plain|application\/xhtml/i.test(ct)) {
-    return { ok: false, url, reason: `can't read this content type (${ct.split(';')[0] || 'unknown'}) — HTML and plain text only` };
-  }
-
-  const raw = (await r.text()).slice(0, MAX_BYTES);
   const site = u.hostname.replace(/^www\./, '');
 
-  if (/text\/plain/i.test(ct)) {
+  // plain fetch → browser-fingerprint retry on a bot wall
+  const res = await fetchHtml(url, { timeoutMs: 12_000, maxBytes: MAX_BYTES });
+  if (!res.ok || !res.html) {
+    return {
+      ok: false,
+      url,
+      site,
+      reason: res.reason ?? 'no readable content (JS-rendered page or paywall)',
+    };
+  }
+  const raw = res.html;
+
+  // looks like plain text, not markup?
+  if (!/<[a-z!/]/i.test(raw.slice(0, 500))) {
     return { ok: true, url, site, text: raw.split(/\s+/).slice(0, MAX_WORDS).join(' ') };
   }
 

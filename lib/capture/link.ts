@@ -1,5 +1,6 @@
 import { adminClient } from '@/lib/supabase.server';
 import { t1Json, t1Available } from '@/lib/llm/gemini';
+import { fetchHtml } from '@/lib/net/fetch-html';
 
 export interface CapturedItem {
   id: string;
@@ -27,9 +28,6 @@ function parseMeta(html: string): Record<string, string> {
   }
   return out;
 }
-
-const CHROME_UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36';
 
 /** oEmbed title for hosts that hide OG tags from bots (YouTube, Vimeo). */
 async function oembedTitle(url: URL): Promise<string | null> {
@@ -77,12 +75,9 @@ export async function captureLink(
   let site: string | null = null;
   let ogType: string | null = null;
   try {
-    const r = await fetch(clean, {
-      signal: AbortSignal.timeout(8000),
-      headers: { 'user-agent': CHROME_UA, accept: 'text/html,application/xhtml+xml' },
-    });
-    if (r.ok) {
-      const html = (await r.text()).slice(0, 300_000);
+    const r = await fetchHtml(clean, { timeoutMs: 8000, maxBytes: 300_000 });
+    if (r.ok && r.html) {
+      const html = r.html;
       const m = parseMeta(html);
       const bareTitle = decode(html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ?? '');
       title = m['og:title'] ?? m['twitter:title'] ?? (bareTitle || null);
