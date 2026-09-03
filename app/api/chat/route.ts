@@ -41,6 +41,7 @@ import {
 import { getCommanderRecs, recDiff, recBlock, isEdhrecQuery } from '@/lib/tools/edhrec';
 import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
 import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
+import { isRecipeShare, extractShareUrl, shareRecipeToAbentfork } from '@/lib/tools/abentfork';
 import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock, isRestaurantTasteQuery, restaurantTasteBlock } from '@/lib/tools/beli';
 import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine, detectContactLog, logContact, occasionsContextLine } from '@/lib/integrations/icloud-contacts';
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
@@ -412,6 +413,18 @@ export async function POST(req: NextRequest) {
         return say(`Noted — last caught up with ${c.name.split(' ')[0]} today.`, 'contact-logged');
       }
       // no known contact by that name → fall through to the brain
+    }
+  }
+
+  // ── "send this recipe to A Bent Fork" → POST to the recipe site ────────
+  if (isRecipeShare(text)) {
+    const url = extractShareUrl(text);
+    if (url) {
+      const notes = text.replace(url, '').replace(/\b(share|send|add|put|post|submit|save|this|the|recipe|to|on|with|into|a[- ]?bent[- ]?fork|abentfork|can you|please|:)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+      const r = await shareRecipeToAbentfork(url, notes.length > 4 ? notes : undefined).catch(
+        () => ({ ok: false, message: "Something broke sending that to A Bent Fork." }),
+      );
+      return say(r.message, r.ok ? 'abentfork-share' : 'abentfork-share-failed');
     }
   }
 
