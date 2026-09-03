@@ -10,7 +10,7 @@ import type { TurnState } from '@/lib/brain/prompt';
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 
-const COMMON = `Follow the "Morning brief" example in the persona: a short greeting, today's schedule from the Live data block, anything due soon, a birthday if one falls within about three weeks, and anything from the recent conversation or watched mail that needs a decision. Then a one-line weather note for today, and 2–3 news headlines from the last day — just the gist, no editorializing, skip any that are trivial. One message; keep it tight. If the day is quiet, say so in one plain line — don't pad it, and don't list things that aren't on the calendar. Only mention events that are actually in the Live data. Match the greeting to the current time of day; don't comment on what time it is.`;
+const COMMON = `Follow the "Morning brief" example in the persona: a short greeting, today's schedule from the Live data block, anything due soon, a birthday if one falls within about three weeks, and anything from the recent conversation or watched mail that needs a decision. Then a one-line weather note for today, and 2–3 news headlines from the last day — just the gist, no editorializing, skip any that are trivial. If there's a genuinely notable gaming headline (a real release, a big announcement — not a review or a listicle), add one line for it; otherwise skip gaming entirely. One message; keep it tight. If the day is quiet, say so in one plain line — don't pad it, and don't list things that aren't on the calendar. Only mention events that are actually in the Live data. Match the greeting to the current time of day; don't comment on what time it is.`;
 
 function extrasBlock(w: Awaited<ReturnType<typeof getBriefExtras>>): string {
   const lines: string[] = ['## Weather + news (for the brief)'];
@@ -25,6 +25,11 @@ function extrasBlock(w: Awaited<ReturnType<typeof getBriefExtras>>): string {
     lines.push('</untrusted>');
   } else {
     lines.push('', 'Headlines: unavailable.');
+  }
+  if (w.gaming.length) {
+    lines.push('', 'Gaming headlines:', '<untrusted source="rss">');
+    for (const h of w.gaming) lines.push(`- ${h}`);
+    lines.push('</untrusted>');
   }
   return lines.join('\n');
 }
@@ -62,7 +67,7 @@ export async function composeBrief(
       .gte('created_at', dayAgo)
       .order('created_at', { ascending: false })
       .limit(8),
-    getBriefExtras().catch(() => ({ weather: null, headlines: [] as string[] })),
+    getBriefExtras().catch(() => ({ weather: null, headlines: [] as string[], gaming: [] as string[] })),
     relevantLoops(userId, { dueWithinDays: 14 }).catch(() => []),
   ]);
 

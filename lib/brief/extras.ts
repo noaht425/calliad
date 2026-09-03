@@ -10,10 +10,16 @@ const FEEDS = [
   'https://feeds.npr.org/1001/rss.xml',
   'https://feeds.bbci.co.uk/news/world/rss.xml',
 ];
+// Kept in its own bucket so gaming churn doesn't crowd world news out of the brief.
+const GAMING_FEEDS = [
+  'https://feeds.ign.com/ign/games-all',
+  'https://www.polygon.com/rss/index.xml',
+];
 
 export interface BriefExtras {
   weather: { label: string; summary: string; highF: number; lowF: number; precipPct: number } | null;
   headlines: string[];
+  gaming: string[];
 }
 
 const WMO: Record<number, string> = {
@@ -64,11 +70,11 @@ function parseFeed(xml: string, sinceMs: number): { title: string; ts: number }[
   return items;
 }
 
-async function getHeadlines(): Promise<string[]> {
+async function pullFeeds(urls: string[], cap: number): Promise<string[]> {
   const since = Date.now() - 30 * 3600 * 1000; // ~last day + buffer
   const all: { title: string; ts: number }[] = [];
   await Promise.all(
-    FEEDS.map(async (f) => {
+    urls.map(async (f) => {
       try {
         const r = await fetch(f, { signal: AbortSignal.timeout(8000), headers: { 'user-agent': 'Calliad/1.0' } });
         if (r.ok) all.push(...parseFeed(await r.text(), since));
@@ -84,11 +90,15 @@ async function getHeadlines(): Promise<string[]> {
       seen.add(k);
       return true;
     })
-    .slice(0, 6)
+    .slice(0, cap)
     .map((h) => h.title);
 }
 
 export async function getBriefExtras(): Promise<BriefExtras> {
-  const [weather, headlines] = await Promise.all([getWeather(), getHeadlines()]);
-  return { weather, headlines };
+  const [weather, headlines, gaming] = await Promise.all([
+    getWeather(),
+    pullFeeds(FEEDS, 6),
+    pullFeeds(GAMING_FEEDS, 4),
+  ]);
+  return { weather, headlines, gaming };
 }
