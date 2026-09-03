@@ -842,7 +842,10 @@ export async function POST(req: NextRequest) {
   } else if (isCardQuestion(text)) {
     const names = extractCardNames(text);
     const { found } = names.length ? await getCards(names) : { found: [] };
-    toolResult = found.length ? cardBlock(found) : `## Card data\nCouldn't identify which card(s) Noah means — ask him to name them exactly.`;
+    // only pin a tool result if Scryfall actually returned a card — otherwise
+    // leave it undefined so web search can pick up a just-spoiled / unreleased
+    // card instead of dead-ending.
+    if (found.length) toolResult = cardBlock(found);
   } else if (isTranscriptRequest(text)) {
     const { decks } = parseSimRequest(text);
     toolResult = await runTranscript(decks).catch(() => undefined);
@@ -931,7 +934,7 @@ export async function POST(req: NextRequest) {
   // answered the turn.
   const webSearch =
     !toolResult && effectiveMode === 'default' &&
-    /\b(search\b|google\b|look (it |this )?up|looking (it |this )?up|look (to see|into)|(go )?(find out|find me|check online)|can you (find|check|look)(?! (my|the calendar|your|at))|latest (on|news|from|version|release)|newest\b|most recent\b|what'?s the latest|any (news|updates?) (on|about|for)|news (on|about|for)|what'?s (going on|happening|new) (with|in|on)(?! my\b)|(coming|come) out\b|just (came out|released|announced|dropped)|recently (released|announced|came out|launched|added)|new releases?|as of (today|now|this)|up[ -]to[- ]date|right now\b|check (again|now)|try (again|now)|now try\b)/i.test(text);
+    /\b(search\b|google\b|look (it |this )?up|looking (it |this )?up|look (to see|into)|(go )?(find out|find me|check online)|can you (find|check|look)(?! (my|the calendar|your|at))|latest (on|news|from|version|release)|newest\b|most recent\b|what'?s the latest|any (news|updates?) (on|about|for)|news (on|about|for)|what'?s (going on|happening|new) (with|in|on)(?! my\b)|(coming|come) out\b|just (came out|released|announced|dropped)|recently (released|announced|came out|launched|added)|new releases?|as of (today|now|this)|up[ -]to[- ]date|right now\b|check (again|now)|try (again|now)|now try\b|\b(new|upcoming|latest|just[- ]?spoiled|recently spoiled|previewed) .{0,40}\b(card|set|precon|commander deck)\b|from the .{2,40}\bset\b|\bspoilers?\b)/i.test(text);
   const maxTokens = images.length || toolResult ? Math.min(4096, 1500 + Math.ceil((toolResult?.length ?? 3000) / 8)) : webSearch ? 2000 : 1200;
 
   const { meta, stream } = await call({

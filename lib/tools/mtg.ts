@@ -279,8 +279,12 @@ export const looksLikeDecklist = (t: string) => {
 };
 export const isDeckHelp = (t: string) =>
   /\b(my (deck|list|build)|this (deck|list|decklist)|analy[sz]e .*(deck|list)|what should i (cut|add|swap)|help me (build|tune|improve|cut)|rate my deck|deck ?doctor|is this deck)\b/i.test(t);
-export const isCardQuestion = (t: string) =>
-  /\b(what does .{2,60} do\b|how does .{2,60} (work|interact)|oracle text|rules text (for|of)|does .{2,50} (trigger|work with|combo with)|interaction between|combo with)\b/i.test(t);
+const CARD_Q_MECHANICS =
+  /\b(what does .{2,60} do\b|how does .{2,60} (work|interact)|oracle text|rules text (for|of)|does .{2,50} (trigger|work with|combo with)|interaction between|combo with)\b/i;
+const CARD_Q_OPINION =
+  /\b(what do (you|we|u) think (of|about)|thoughts on|how (good|playable) is|is .{2,50} (good|worth|playable|any good))\b.{0,70}\b(card|creature|planeswalker|artifact|enchantment|spell|deck|commander|cube|format|edh)\b|\b(what do (you|we) think of|thoughts on) the (new|upcoming|latest|just[- ]?spoiled) .{2,50}/i;
+
+export const isCardQuestion = (t: string) => CARD_Q_MECHANICS.test(t) || CARD_Q_OPINION.test(t);
 
 /** Card names from a question — quoted first, else Capitalized runs (comma/"and" separated). */
 export function extractCardNames(t: string): string[] {
