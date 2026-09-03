@@ -36,6 +36,15 @@ export function PushSetup() {
 
         if (Notification.permission !== 'granted') return;
 
+        // Ask the browser not to evict our storage / push subscription when the
+        // PWA goes unopened for a while. Granted automatically for an installed
+        // PWA with notification permission; a no-op where unsupported.
+        try {
+          if (navigator.storage?.persist && !(await navigator.storage.persisted?.())) {
+            await navigator.storage.persist();
+          }
+        } catch { /* not supported */ }
+
         // Re-sync EVERY load. A server row can vanish (410 prune, DB reset) while
         // the browser still holds the subscription — without this, getSubscription()
         // returns non-null forever and the server never hears about it again.

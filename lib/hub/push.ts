@@ -1,6 +1,8 @@
 import webpush from 'web-push';
 import { adminClient } from '@/lib/supabase.server';
 
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://calliad-psi.vercel.app';
+
 let configured = false;
 function ensureConfigured(): boolean {
   if (configured) return true;
@@ -32,20 +34,40 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<{ 
     .select('endpoint, p256dh, auth')
     .eq('user_id', userId);
 
+  // Absolute URL for `navigate` (required by Declarative Web Push).
+  const navigate = new URL(payload.url ?? '/', APP_URL).toString();
+  const actions = payload.actions?.length ? payload.actions.slice(0, 2) : undefined;
+  const tag = payload.tag ?? 'calliad';
+  // Dual shape: Safari 18.4+ reads `web_push` + `notification` and displays it
+  // WITHOUT waking the service worker (so a missed showNotification() can't get
+  // the subscription cancelled); every other browser's SW `push` handler reads
+  // the same `notification` object (see public/sw.js).
+  const body = JSON.stringify({
+    web_push: 8030,
+    notification: {
+      title: payload.title,
+      body: payload.body,
+      navigate,
+      tag,
+      ...(actions ? { actions } : {}),
+      data: { url: navigate, actionToken: payload.actionToken ?? null },
+    },
+    // legacy flat mirror — harmless for declarative UAs, kept for older clients
+    title: payload.title,
+    body: payload.body,
+    url: navigate,
+    tag,
+    ...(actions ? { actions } : {}),
+    ...(payload.actionToken ? { actionToken: payload.actionToken } : {}),
+  });
+
   let sent = 0;
   let pruned = 0;
   for (const s of subs ?? []) {
     try {
       await webpush.sendNotification(
         { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-        JSON.stringify({
-          title: payload.title,
-          body: payload.body,
-          url: payload.url ?? '/',
-          tag: payload.tag ?? 'calliad',
-          ...(payload.actions?.length ? { actions: payload.actions.slice(0, 2) } : {}),
-          ...(payload.actionToken ? { actionToken: payload.actionToken } : {}),
-        }),
+        body,
       );
       sent++;
     } catch (err: unknown) {

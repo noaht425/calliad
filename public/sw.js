@@ -33,17 +33,26 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+// On Safari 18.4+ the payload is Declarative Web Push and the browser shows it
+// itself — this handler doesn't run. Every other browser lands here; read the
+// nested `notification` object (what the server now sends), falling back to the
+// old flat shape.
 self.addEventListener('push', (event) => {
   if (!event.data) return;
-  const data = event.data.json();
+  const raw = event.data.json();
+  const n = raw.notification || raw;
+  const url = n.navigate || (n.data && n.data.url) || raw.url || '/';
+  const token = (n.data && n.data.actionToken) || raw.actionToken || null;
+  const actions = Array.isArray(n.actions) ? n.actions.slice(0, 2)
+    : Array.isArray(raw.actions) ? raw.actions.slice(0, 2) : undefined;
   event.waitUntil(
-    self.registration.showNotification(data.title ?? 'Calliad', {
-      body: data.body ?? '',
+    self.registration.showNotification(n.title ?? 'Calliad', {
+      body: n.body ?? '',
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
-      tag: data.tag ?? 'calliad-reminder',
-      data: { url: data.url ?? '/', actionToken: data.actionToken ?? null },
-      actions: Array.isArray(data.actions) ? data.actions.slice(0, 2) : undefined,
+      tag: n.tag ?? raw.tag ?? 'calliad-reminder',
+      data: { url: url, actionToken: token },
+      actions: actions,
     })
   );
 });
