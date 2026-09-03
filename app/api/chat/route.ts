@@ -63,7 +63,7 @@ import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/tra
 import { locationContextLine } from '@/lib/location/rules';
 import {
   behaviorContextLine, isBehaviorRuleStatement, saveExplicitRule,
-  pendingRulePrompt, resolveRulePrompt,
+  pendingRulePrompt, resolveRulePrompt, isRuleVeto, vetoRule,
 } from '@/lib/brain/behavior';
 import { isUnsubscribeMention, noteUnsubscribeFromChat } from '@/lib/mail/unsubscribes';
 import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
@@ -167,6 +167,13 @@ export async function POST(req: NextRequest) {
     const msg = await undoLastAuto(user.id, conversationId).catch(() => null);
     if (msg) return say(msg, 'auto-undo');
     // nothing recent to undo → fall through to the brain
+  }
+
+  // ── "stop doing that" → retire an active behavior rule ───────────────
+  if (!pending && isRuleVeto(text)) {
+    const msg = await vetoRule(user.id, text).catch(() => null);
+    if (msg) return say(msg, 'behavior-rule-veto');
+    // no rule matched → fall through to the brain
   }
 
   // ── yes/no on a proposed learned behavior rule ───────────────────────

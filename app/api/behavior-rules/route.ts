@@ -16,13 +16,13 @@ async function requireUser(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const user = await requireUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { data } = await adminClient
-    .from('behavior_rules')
-    .select('id, rule_text, source, status, created_at')
-    .eq('user_id', user.id)
-    .in('status', ['active', 'paused'])
-    .order('created_at');
-  return NextResponse.json({ rules: data ?? [] });
+  const sel = (cols: string) =>
+    adminClient.from('behavior_rules').select(cols).eq('user_id', user.id).in('status', ['active', 'paused']).order('created_at');
+  let res = await sel('id, rule_text, source, status, created_at, auto_activated');
+  if (res.error && /column .* does not exist/i.test(res.error.message ?? '')) {
+    res = await sel('id, rule_text, source, status, created_at');
+  }
+  return NextResponse.json({ rules: res.data ?? [] });
 }
 
 // POST { rule_text } → add an explicit rule

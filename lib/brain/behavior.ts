@@ -19,16 +19,19 @@ export interface BehaviorRule {
   source: 'explicit' | 'learned';
   status: string;
   created_at: string;
+  auto_activated?: boolean;
+  pattern_key?: string | null;
 }
 
 export async function activeRules(userId: string): Promise<BehaviorRule[]> {
-  const { data } = await adminClient
-    .from('behavior_rules')
-    .select('id, rule_text, source, status, created_at')
-    .eq('user_id', userId)
-    .eq('status', 'active')
-    .order('created_at');
-  return (data ?? []) as BehaviorRule[];
+  const sel = (cols: string) =>
+    adminClient.from('behavior_rules').select(cols).eq('user_id', userId).eq('status', 'active').order('created_at');
+  let res = await sel('id, rule_text, source, status, created_at, auto_activated, pattern_key');
+  // 0031 adds auto_activated/pattern_key; fall back if it isn't applied yet
+  if (res.error && /column .* does not exist/i.test(res.error.message ?? '')) {
+    res = await sel('id, rule_text, source, status, created_at');
+  }
+  return (res.data ?? []) as unknown as BehaviorRule[];
 }
 
 /** The prompt block. Empty string when there are no active rules. */
@@ -115,6 +118,51 @@ export async function resolveRulePrompt(userId: string, accept: boolean): Promis
   return `Okay — I won't make that a rule.`;
 }
 
+// ── veto an active rule ─────────────────────────────────────────────────
+const VETO =
+  /\b(stop doing that|stop that\b|don'?t do that( any ?more)?|quit doing that|forget (that|the last|that new) rule|drop (that|the last) rule|cancel that rule|undo that rule|scrap that rule|that rule('?s| is| was) (wrong|off|bad|not right)|stop (following|applying) (that|the last) rule|never ?mind (that|the) rule)\b/i;
+
+export function isRuleVeto(t: string): boolean {
+  return VETO.test(t.trim());
+}
+
+/**
+ * "stop doing that" → retire an active rule. A bare veto drops the most
+ * recently activated one (usually the one just announced); a veto that names a
+ * behaviour has T1 pick which active rule it means.
+ */
+export async function vetoRule(userId: string, text: string): Promise<string | null> {
+  const rules = await activeRules(userId);
+  if (!rules.length) return null;
+
+  const bare = /^(stop (doing )?that|stop that|don'?t do that( any ?more)?|forget (that|the last) rule|drop (that|the last) rule|undo that rule|scrap that rule)\.?\s*$/i.test(
+    text.trim(),
+  );
+
+  let target = rules[rules.length - 1]; // newest
+  if (bare) {
+    target = [...rules].reverse().find((r) => r.source === 'learned') ?? target;
+  } else {
+    const pick = await t1Json<{ id: string | null }>(
+      'behavior_rule_veto',
+      `The user wants to cancel one of Calliad's standing rules. Which one?\n` +
+        rules.map((r) => `[${r.id}] ${r.rule_text}`).join('\n') +
+        `\n\nUser said: "${text}"\nReply JSON: {"id":"<matching id, or null if none clearly matches>"}`,
+      { maxOutputTokens: 40 },
+    ).catch(() => null);
+    const hit = pick?.id ? rules.find((r) => r.id === pick.id) : null;
+    if (hit) target = hit;
+    else if (!bare) return null; // named a rule but nothing matched — let the brain handle it
+  }
+
+  await adminClient.from('behavior_rules').update({ status: 'dismissed', updated_at: new Date().toISOString() }).eq('id', target.id).eq('user_id', userId);
+  if (target.pattern_key) {
+    await adminClient.from('correction_candidates').update({ status: 'dismissed' }).eq('user_id', userId).eq('pattern_key', target.pattern_key);
+  }
+  await audit.log('tool_call', 'calliad', null, { tool: 'behavior_rule_veto', rule: target.rule_text });
+  return `Dropped that rule — "${target.rule_text}". I won't follow it any more.`;
+}
+
 // ── reflection ──────────────────────────────────────────────────────────
 export interface Pattern {
   pattern_key: string;
@@ -123,13 +171,16 @@ export interface Pattern {
 }
 
 /**
- * Record one behavioural-correction pattern: bump its count, and at frequency
- * ≥2 flip it to `proposed` and ask Noah (once) whether to make it a rule.
- * Called both by the nightly reflection sweep and — in real time — the moment a
- * correction lands in chat, so a repeat pattern reaches the threshold on the
- * spot instead of a day later. Returns the candidate's status after the bump.
+ * Record one behavioural-correction pattern. At frequency ≥2 it becomes a rule:
+ * a narrow, low-risk one activates on its own and Noah is told once ("I've
+ * started doing X — say stop if that's wrong"); a broad one still asks first.
+ * Called by the nightly sweep AND, in real time, the moment a correction lands
+ * in chat, so a repeat reaches the threshold on the spot, not a day later.
  */
-export async function trackCorrectionCandidate(userId: string, p: Pattern): Promise<'tracking' | 'proposed' | null> {
+export async function trackCorrectionCandidate(
+  userId: string,
+  p: Pattern,
+): Promise<'tracking' | 'proposed' | 'auto' | null> {
   if (!p.pattern_key || !p.proposed_rule) return null;
 
   const { data: match } = await adminClient
@@ -162,21 +213,60 @@ export async function trackCorrectionCandidate(userId: string, p: Pattern): Prom
     .from('correction_candidates')
     .update({ frequency: freq, last_seen_at: new Date().toISOString() })
     .eq('id', match.id);
+  if (freq < 2) return 'tracking';
 
-  if (freq >= 2) {
-    await adminClient.from('correction_candidates').update({ status: 'proposed' }).eq('id', match.id);
+  // already an active rule saying essentially this? just mark the candidate done.
+  const { data: dup } = await adminClient
+    .from('behavior_rules')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .ilike('rule_text', p.proposed_rule.slice(0, 60) + '%');
+  if (dup?.length) {
+    await adminClient.from('correction_candidates').update({ status: 'promoted' }).eq('id', match.id);
+    return 'auto';
+  }
+
+  // narrow + low-risk → activate now and tell him; broad → ask first
+  const j = await t1Json<{ narrow: boolean }>(
+    'behavior_rule_scope',
+    `Rule for the assistant Calliad: "${p.proposed_rule}"\n\n` +
+      `Is this NARROW and low-risk — a concrete do/don't tied to a specific recurring situation, safe to ` +
+      `just start following (e.g. "don't call tutors clunky", "ask before adding calendar events")? ` +
+      `Or BROAD — a sweeping change to tone, personality, or how Calliad works overall, worth confirming ` +
+      `first? Reply JSON: {"narrow": boolean}`,
+    { maxOutputTokens: 30 },
+  ).catch(() => null);
+
+  if (j?.narrow) {
+    const base = { user_id: userId, rule_text: p.proposed_rule.slice(0, 200), source: 'learned', status: 'active' };
+    const ins = await adminClient.from('behavior_rules').insert({ ...base, auto_activated: true, pattern_key: p.pattern_key });
+    if (ins.error && /column .* does not exist/i.test(ins.error.message ?? '')) {
+      await adminClient.from('behavior_rules').insert(base); // pre-0031
+    }
+    await adminClient.from('correction_candidates').update({ status: 'promoted' }).eq('id', match.id);
     await enqueueNotification(userId, {
       kind: 'behavior',
-      title: 'A pattern I noticed',
+      title: 'Adjusting how I work',
       body:
-        `You've corrected me a few times about ${p.pattern_description}. ` +
-        `Make it a standing rule? Reply "yes, make it a rule" or "no". ` +
-        `Proposed: "${p.proposed_rule}"`,
-      dedupeKey: `behavior:${match.id}`,
+        `You've corrected me a couple of times about ${p.pattern_description}, so I've started following: ` +
+        `"${p.proposed_rule}". Say "stop doing that" if it's wrong.`,
+      dedupeKey: `behavior:auto:${match.id}`,
     });
-    return 'proposed';
+    return 'auto';
   }
-  return 'tracking';
+
+  await adminClient.from('correction_candidates').update({ status: 'proposed' }).eq('id', match.id);
+  await enqueueNotification(userId, {
+    kind: 'behavior',
+    title: 'A pattern I noticed',
+    body:
+      `You've corrected me a few times about ${p.pattern_description}. ` +
+      `Make it a standing rule? Reply "yes, make it a rule" or "no". ` +
+      `Proposed: "${p.proposed_rule}"`,
+    dedupeKey: `behavior:${match.id}`,
+  });
+  return 'proposed';
 }
 
 async function runReflectionForUser(userId: string): Promise<number> {
@@ -226,7 +316,8 @@ async function runReflectionForUser(userId: string): Promise<number> {
 
   let proposed = 0;
   for (const p of out.behavioral ?? []) {
-    if ((await trackCorrectionCandidate(userId, p).catch(() => null)) === 'proposed') proposed++;
+    const s = await trackCorrectionCandidate(userId, p).catch(() => null);
+    if (s === 'proposed' || s === 'auto') proposed++;
   }
 
   // factual corrections → correction notes (deduped against recent ones)
