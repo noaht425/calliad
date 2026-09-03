@@ -15,6 +15,7 @@ export interface EventDraft {
   end_at?: string | null;
   all_day?: boolean;
   location?: string | null;
+  city?: string | null; // the city the location is in, if a known venue/address makes it obvious
 }
 
 export function isCalendarWrite(text: string): boolean {
@@ -34,13 +35,13 @@ export async function extractEvent(text: string, now = new Date()): Promise<Even
 Request: "${text}"
 
 Return JSON only:
-{"ok": true|false, "title": "short", "start_at": "UTC ISO 8601", "end_at": "UTC ISO 8601 or null", "all_day": false, "location": "or null"}
+{"ok": true|false, "title": "short", "start_at": "UTC ISO 8601", "end_at": "UTC ISO 8601 or null", "all_day": false, "location": "or null", "city": "or null"}
 
-ok=false if there's no determinable date/time. If a time is given but no duration, set end_at null (the writer defaults to 1h). all_day=true only when no clock time is implied.`,
-    { maxOutputTokens: 200 },
+ok=false if there's no determinable date/time. If a time is given but no duration, set end_at null (the writer defaults to 1h). all_day=true only when no clock time is implied. city = the city the location is in ONLY if a well-known venue or a full address makes it unambiguous (e.g. "Climate Pledge Arena" → "Seattle"); otherwise null.`,
+    { maxOutputTokens: 220 },
   );
   if (!out?.ok || !out.start_at || Number.isNaN(Date.parse(out.start_at))) return null;
-  return { title: out.title || 'Untitled', start_at: out.start_at, end_at: out.end_at ?? null, all_day: !!out.all_day, location: out.location ?? null };
+  return { title: out.title || 'Untitled', start_at: out.start_at, end_at: out.end_at ?? null, all_day: !!out.all_day, location: out.location ?? null, city: out.city ?? null };
 }
 
 export function whenLabel(iso: string, allDay = false): string {

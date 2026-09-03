@@ -39,7 +39,10 @@ export async function isAutoAllowed(kind: AutoKind): Promise<boolean> {
 /** Create a calendar event with no confirm gate; record it for undo. */
 export async function runAutoCreateEvent(
   userId: string,
-  ev: { title: string; start_at: string; end_at?: string | null; all_day?: boolean; location?: string | null },
+  ev: {
+    title: string; start_at: string; end_at?: string | null; all_day?: boolean; location?: string | null;
+    city?: string | null; region?: string | null; country?: string | null; lat?: number | null; lon?: number | null;
+  },
   conversationId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const r = await createCalendarEvent(userId, {
@@ -48,6 +51,11 @@ export async function runAutoCreateEvent(
     end_at: ev.end_at ?? null,
     all_day: !!ev.all_day,
     location: ev.location ?? null,
+    city: ev.city ?? null,
+    region: ev.region ?? null,
+    country: ev.country ?? null,
+    lat: ev.lat ?? null,
+    lon: ev.lon ?? null,
   });
   await adminClient.from('actions').insert({
     kind: 'create_event',

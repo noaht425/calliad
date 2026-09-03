@@ -5,6 +5,8 @@ import { supabase } from '@/lib/supabase';
 import { adminClient } from '@/lib/supabase.server';
 import { route, type Mode } from '@/lib/router/route';
 import { classifyIntent, type Intent, type IntentGuess } from '@/lib/router/intent';
+import { geocodePlace } from '@/lib/geo/place';
+import { sameDayConflict } from '@/lib/actions/geo-conflict';
 import { call } from '@/lib/brain/call';
 import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
@@ -715,11 +717,27 @@ export async function POST(req: NextRequest) {
     const ev = await extractEvent(text).catch(() => null);
     if (!ev) return say(`I can put that on your calendar — when, exactly?`, 'calendar-write-underspecified');
     const when = whenLabel(ev.start_at, ev.all_day);
+
+    // Resolve the venue → a city + coords (for storage and the same-day
+    // location check). Best effort: no location, or an unrecognisable one, just
+    // means no geo and no conflict warning.
+    const place = ev.location ? await geocodePlace(ev.location).catch(() => null) : null;
+    const evGeo = {
+      ...ev,
+      city: place?.city ?? ev.city ?? null,
+      region: place?.region ?? null,
+      country: place?.country ?? null,
+      lat: place?.lat ?? null,
+      lon: place?.lon ?? null,
+    };
+    const clash = await sameDayConflict(user.id, evGeo).catch(() => null);
+    const clashNote = clash ? ` Heads up — ${clash}.` : '';
+
     if (await isAutoAllowed('create_event').catch(() => false)) {
-      const r = await runAutoCreateEvent(user.id, ev, conversationId).catch(() => ({ ok: false }));
+      const r = await runAutoCreateEvent(user.id, evGeo, conversationId).catch(() => ({ ok: false }));
       if (r.ok) {
         return say(
-          `Added **${ev.title}** — **${when}**${ev.location ? ` (${ev.location})` : ''}. Say "undo" if that's wrong.`,
+          `Added **${ev.title}** — **${when}**${ev.location ? ` (${ev.location})` : ''}. Say "undo" if that's wrong.${clashNote}`,
           'calendar-auto',
         );
       }
@@ -728,9 +746,9 @@ export async function POST(req: NextRequest) {
     await proposeAction({
       userId: user.id, kind: 'create_event', riskTier: 'confirm',
       summary: `${ev.title} — ${when}`,
-      payload: { ...ev }, createdBy: conversationId,
+      payload: { ...evGeo }, createdBy: conversationId,
     });
-    return say(`Put **${ev.title}** on your calendar for **${when}**${ev.location ? ` (${ev.location})` : ''}? Say yes and I'll add it.`, 'action-proposed');
+    return say(`Put **${ev.title}** on your calendar for **${when}**${ev.location ? ` (${ev.location})` : ''}? Say yes and I'll add it.${clashNote}`, 'action-proposed');
   }
 
   // ── confirm tier: draft an email → compose, show it, wait for yes ───────

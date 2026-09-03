@@ -85,6 +85,11 @@ export async function decideAction(
         end_at: (payload.end_at as string | null) ?? null,
         all_day: Boolean(payload.all_day),
         location: (payload.location as string | null) ?? null,
+        city: (payload.city as string | null) ?? null,
+        region: (payload.region as string | null) ?? null,
+        country: (payload.country as string | null) ?? null,
+        lat: (payload.lat as number | null) ?? null,
+        lon: (payload.lon as number | null) ?? null,
       });
       result = r.ok
         ? { ok: true, message: `Done — it's on your calendar.` }

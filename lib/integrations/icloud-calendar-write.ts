@@ -11,6 +11,12 @@ export interface CalendarEventInput {
   location?: string | null;
   description?: string | null;
   confirmation_number?: string | null;
+  // resolved from `location` (venue → city); stored, not written to iCal
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  lat?: number | null;
+  lon?: number | null;
 }
 
 export interface CalendarWriteResult {
@@ -228,7 +234,7 @@ export async function createCalendarEvent(
       d.setUTCHours(d.getUTCHours() + 1);
       effectiveEndAt = d.toISOString();
     }
-    await adminClient.from('calendar_events').upsert({
+    const baseRow = {
       user_id: userId,
       uid,
       calendar_url: targetUrl,
@@ -242,7 +248,22 @@ export async function createCalendarEvent(
       raw_ical: ical,
       source: 'icloud',
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,uid', ignoreDuplicates: false });
+    };
+    const geoRow = {
+      city: event.city ?? null,
+      region: event.region ?? null,
+      country: event.country ?? null,
+      lat: event.lat ?? null,
+      lon: event.lon ?? null,
+      geo_resolved_at: event.lat != null || event.city != null ? new Date().toISOString() : null,
+    };
+    const opts = { onConflict: 'user_id,uid', ignoreDuplicates: false } as const;
+    const wrote = await adminClient.from('calendar_events').upsert({ ...baseRow, ...geoRow }, opts);
+    // 0029 adds the geo columns; if it hasn't been applied yet, fall back so a
+    // calendar add still works.
+    if (wrote.error && /column .* does not exist/i.test(wrote.error.message ?? '')) {
+      await adminClient.from('calendar_events').upsert(baseRow, opts);
+    }
 
     syncCalendarEvents(userId).catch(() => {});
 
