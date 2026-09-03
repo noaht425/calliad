@@ -46,7 +46,7 @@ import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
 import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
 import { isRecipeShare, extractShareUrl, shareRecipeToAbentfork } from '@/lib/tools/abentfork';
 import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock, isRestaurantTasteQuery, restaurantTasteBlock } from '@/lib/tools/beli';
-import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine, detectContactLog, logContact, occasionsContextLine } from '@/lib/integrations/icloud-contacts';
+import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine, detectContactLog, logContact, occasionsContextLine, resolveAttendees } from '@/lib/integrations/icloud-contacts';
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
 import { isTidyRequest, scanForTidy, applyTidyItems, type TidyItem } from '@/lib/memory/tidy';
 import {
@@ -733,22 +733,37 @@ export async function POST(req: NextRequest) {
     const clash = await sameDayConflict(user.id, evGeo).catch(() => null);
     const clashNote = clash ? ` Heads up — ${clash}.` : '';
 
+    // Guests named in the message ("with David") who are contacts with an email.
+    // We put them on the event; iCloud may not actually mail them, so we also
+    // hand Noah a one-tap mailto to send the invite himself.
+    const attendees = await resolveAttendees(user.id, text).catch(() => [] as { name: string; email: string }[]);
+    const evFull = { ...evGeo, attendees };
+    const inviteNote =
+      attendees.length && !ev.all_day
+        ? ` To invite ${attendees.map((a) => a.name.split(' ')[0]).join(' & ')}: ${attendees
+            .map((a) => `[email ${a.name.split(' ')[0]}](${inviteMailto(a.email, ev.title, when, ev.location)})`)
+            .join(' · ')}`
+        : attendees.length
+          ? ` (${attendees.map((a) => a.name.split(' ')[0]).join(' & ')} ${attendees.length > 1 ? 'are' : 'is'} on the invite.)`
+          : '';
+
     if (await isAutoAllowed('create_event').catch(() => false)) {
-      const r = await runAutoCreateEvent(user.id, evGeo, conversationId).catch(() => ({ ok: false }));
+      const r = await runAutoCreateEvent(user.id, evFull, conversationId).catch(() => ({ ok: false }));
       if (r.ok) {
         return say(
-          `Added **${ev.title}** — **${when}**${ev.location ? ` (${ev.location})` : ''}. Say "undo" if that's wrong.${clashNote}`,
+          `Added **${ev.title}** — **${when}**${ev.location ? ` (${ev.location})` : ''}. Say "undo" if that's wrong.${clashNote}${inviteNote}`,
           'calendar-auto',
         );
       }
       // couldn't write → fall through to the confirm path
     }
+    const guestLine = attendees.length ? `, with ${attendees.map((a) => a.name).join(', ')}` : '';
     await proposeAction({
       userId: user.id, kind: 'create_event', riskTier: 'confirm',
-      summary: `${ev.title} — ${when}`,
-      payload: { ...evGeo }, createdBy: conversationId,
+      summary: `${ev.title} — ${when}${guestLine}`,
+      payload: { ...evFull }, createdBy: conversationId,
     });
-    return say(`Put **${ev.title}** on your calendar for **${when}**${ev.location ? ` (${ev.location})` : ''}? Say yes and I'll add it.${clashNote}`, 'action-proposed');
+    return say(`Put **${ev.title}** on your calendar for **${when}**${ev.location ? ` (${ev.location})` : ''}${guestLine}? Say yes and I'll add it.${clashNote}`, 'action-proposed');
   }
 
   // ── confirm tier: draft an email → compose, show it, wait for yes ───────
@@ -1016,6 +1031,13 @@ export async function POST(req: NextRequest) {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────
+/** A pre-filled invitation email Noah can send with one tap. */
+function inviteMailto(email: string, title: string, when: string, location?: string | null): string {
+  const subject = `Invitation: ${title}`;
+  const body = `Hi,\n\nPutting this on the calendar: ${title}\nWhen: ${when}${location ? `\nWhere: ${location}` : ''}\n\nHope you can make it.`;
+  return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 async function recentTurns(conversationId: string, currentText: string) {
   // Last ~24 messages, chronological. (Must be newest-first + limit, then reverse —
   // ascending+limit would return the OLDEST 21 and lose the recent thread.)

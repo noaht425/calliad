@@ -396,3 +396,31 @@ export async function contactContextLine(userId: string, text: string): Promise<
   if (!hits.length) return '';
   return `## Contacts in this message\n${hits.join('\n')}\nUse the full name / relationship if it helps; don't announce the lookup.`;
 }
+
+/**
+ * People named as going to something ("with David", "invite Ana and Ben") who
+ * are known contacts WITH an email — the candidates to put on a calendar event.
+ * Only pulls names sitting after a guest-ish verb, so a title like "lunch with
+ * the team" or a passing "told Mark" doesn't sweep someone in.
+ */
+export async function resolveAttendees(userId: string, text: string): Promise<{ name: string; email: string }[]> {
+  const cands = new Set<string>();
+  for (const m of text.matchAll(
+    new RegExp(`\\b(?:with|invite|inviting)\\s+(${CC_NAME}(?:${CC_SEP}${CC_NAME})*)`, 'gi'),
+  )) {
+    for (const p of m[1].split(new RegExp(CC_SEP))) if (p.trim()) cands.add(p.trim());
+  }
+  const out: { name: string; email: string }[] = [];
+  const seen = new Set<string>();
+  for (const n of [...cands].slice(0, 6)) {
+    const lc = n.toLowerCase();
+    const c = (await findContacts(userId, n).catch(() => []))[0];
+    if (!c || !c.emails.length) continue;
+    const nameOk = c.name.toLowerCase() === lc || (c.first_name ?? '').toLowerCase() === lc.split(' ')[0];
+    if (!nameOk) continue;
+    if (seen.has(c.emails[0])) continue;
+    seen.add(c.emails[0]);
+    out.push({ name: c.name, email: c.emails[0] });
+  }
+  return out;
+}

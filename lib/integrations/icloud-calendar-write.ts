@@ -17,6 +17,9 @@ export interface CalendarEventInput {
   country?: string | null;
   lat?: number | null;
   lon?: number | null;
+  // guests to put on the event (ATTENDEE lines); iCloud may or may not email
+  // them, so callers also hand Noah a mailto to send himself.
+  attendees?: { name: string; email: string }[];
 }
 
 export interface CalendarWriteResult {
@@ -38,7 +41,7 @@ function escapeICalText(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
 }
 
-function buildVCalendar(uid: string, event: CalendarEventInput): string {
+function buildVCalendar(uid: string, event: CalendarEventInput, organizerEmail?: string): string {
   const allDay = event.all_day ?? false;
   const startFmt = allDay ? 'VALUE=DATE' : 'TZID=UTC';
   const startVal = formatICalDate(event.start_at, allDay);
@@ -78,6 +81,17 @@ function buildVCalendar(uid: string, event: CalendarEventInput): string {
 
   if (event.location) lines.push(`LOCATION:${escapeICalText(event.location)}`);
   if (desc) lines.push(`DESCRIPTION:${escapeICalText(desc)}`);
+
+  const guests = (event.attendees ?? []).filter((a) => a.email);
+  if (guests.length) {
+    if (organizerEmail) lines.push(`ORGANIZER:mailto:${organizerEmail}`);
+    for (const g of guests) {
+      lines.push(
+        `ATTENDEE;CN=${escapeICalText(g.name || g.email)};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${g.email}`,
+      );
+    }
+  }
+
   lines.push('X-CALLIAD-SOURCE:calliad');
   lines.push('END:VEVENT');
   lines.push('END:VCALENDAR');
@@ -209,7 +223,7 @@ export async function createCalendarEvent(
     if (!conn) return { ok: false, error: 'iCloud Calendar not connected' };
 
     const uid = `${randomUUID()}@calliad`;
-    const ical = buildVCalendar(uid, event);
+    const ical = buildVCalendar(uid, event, conn.appleId);
     const targetUrl = calendarUrl ?? conn.calendars[0].url;
 
     await conn.client.createCalendarObject({

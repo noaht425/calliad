@@ -90,9 +90,23 @@ export async function decideAction(
         country: (payload.country as string | null) ?? null,
         lat: (payload.lat as number | null) ?? null,
         lon: (payload.lon as number | null) ?? null,
+        attendees: (payload.attendees as { name: string; email: string }[] | undefined) ?? [],
       });
+      const guests = (payload.attendees as { name: string; email: string }[] | undefined) ?? [];
+      const inviteLine =
+        r.ok && guests.length
+          ? ` To send the invite yourself: ${guests
+              .map((g) => {
+                const subject = encodeURIComponent(`Invitation: ${payload.title ?? 'event'}`);
+                const body = encodeURIComponent(
+                  `Putting this on the calendar: ${payload.title ?? 'event'}${payload.location ? `\nWhere: ${payload.location}` : ''}\n\nHope you can make it.`,
+                );
+                return `[email ${g.name.split(' ')[0]}](mailto:${g.email}?subject=${subject}&body=${body})`;
+              })
+              .join(' · ')}`
+          : '';
       result = r.ok
-        ? { ok: true, message: `Done — it's on your calendar.` }
+        ? { ok: true, message: `Done — it's on your calendar.${inviteLine}` }
         : { ok: false, message: `Couldn't write to your calendar: ${r.error}` };
     } else if (action.kind === 'update_event') {
       const r = await updateCalendarEvent(userId, String(payload.uid), {

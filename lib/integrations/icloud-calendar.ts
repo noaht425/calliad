@@ -19,6 +19,7 @@ export interface SelectedCalendar { url: string; name: string }
 export interface ICloudConnection {
   client: DAVClient;
   calendars: SelectedCalendar[];
+  appleId: string; // the account principal — used as ORGANIZER on events with guests
 }
 
 export async function getICloudConnection(userId: string): Promise<ICloudConnection | null> {
@@ -47,7 +48,7 @@ export async function getICloudConnection(userId: string): Promise<ICloudConnect
     defaultAccountType: 'caldav',
   });
   await client.login();
-  return { client, calendars };
+  return { client, calendars, appleId };
 }
 
 function unfoldiCal(ical: string): string {

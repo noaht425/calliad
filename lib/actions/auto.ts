@@ -42,6 +42,7 @@ export async function runAutoCreateEvent(
   ev: {
     title: string; start_at: string; end_at?: string | null; all_day?: boolean; location?: string | null;
     city?: string | null; region?: string | null; country?: string | null; lat?: number | null; lon?: number | null;
+    attendees?: { name: string; email: string }[];
   },
   conversationId: string,
 ): Promise<{ ok: boolean; error?: string }> {
@@ -56,6 +57,7 @@ export async function runAutoCreateEvent(
     country: ev.country ?? null,
     lat: ev.lat ?? null,
     lon: ev.lon ?? null,
+    attendees: ev.attendees ?? [],
   });
   await adminClient.from('actions').insert({
     kind: 'create_event',
