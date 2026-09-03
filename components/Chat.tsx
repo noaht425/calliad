@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { streamChat } from '@/lib/api';
 import { useVoiceInput } from '@/lib/voice/useVoiceInput';
-import { SentenceSpeaker, primeSpeech } from '@/lib/voice/speak';
+import { makeSpeaker, primeSpeech, type Speaker } from '@/lib/voice/speak';
 import { fileToResizedDataUrl } from '@/lib/image';
 import { useConversationSync } from '@/lib/chat/useConversationSync';
 
@@ -29,8 +29,9 @@ export function Chat() {
   const [ttsOn, setTtsOn] = useState(false);
   const ttsRef = useRef(false);
   ttsRef.current = ttsOn;
-  const speakerRef = useRef<SentenceSpeaker>(null);
-  if (!speakerRef.current) speakerRef.current = new SentenceSpeaker();
+  const speakerRef = useRef<Speaker>(null);
+  if (!speakerRef.current) speakerRef.current = makeSpeaker();
+  useEffect(() => { speakerRef.current?.setAuth(session?.access_token ?? null); }, [session]);
   const convRef = useRef<string | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -53,7 +54,7 @@ export function Chat() {
     setTtsOn((v) => {
       const next = !v;
       try { localStorage.setItem('calliad:tts', next ? '1' : '0'); } catch { /* no storage */ }
-      if (next) primeSpeech();
+      if (next) { primeSpeech(); speakerRef.current?.prime(); }
       return next;
     });
   }, []);
@@ -99,7 +100,7 @@ export function Chat() {
 
   const runTurn = useCallback(async (text: string, images: string[] = []) => {
     if ((!text.trim() && !images.length) || sending || !session) return;
-    if (ttsRef.current) primeSpeech();
+    if (ttsRef.current) { primeSpeech(); speakerRef.current?.prime(); }
     setMessages((m) => [...m, { role: 'user', text, images: images.length ? images : undefined }, { role: 'assistant', text: '' }]);
     setSending(true);
     speakerRef.current!.cancel();
@@ -179,6 +180,7 @@ export function Chat() {
 
   const enterConvo = useCallback(() => {
     primeSpeech();
+    speakerRef.current?.prime();
     setTtsOn(true);
     try { localStorage.setItem('calliad:tts', '1'); } catch { /* no storage */ }
     inConvoRef.current = true;
@@ -230,7 +232,7 @@ export function Chat() {
               {(m.text || (m.role === 'assistant' && sending)) && (
                 <div
                   role={ttsOn && m.role === 'assistant' && m.text ? 'button' : undefined}
-                  onClick={ttsOn && m.role === 'assistant' && m.text ? () => { primeSpeech(); speakerRef.current!.speakNow(m.text); } : undefined}
+                  onClick={ttsOn && m.role === 'assistant' && m.text ? () => { primeSpeech(); speakerRef.current!.prime(); speakerRef.current!.speakNow(m.text); } : undefined}
                   title={ttsOn && m.role === 'assistant' && m.text ? 'Tap to read aloud' : undefined}
                   className="whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed"
                   style={{

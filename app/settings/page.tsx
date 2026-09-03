@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -469,10 +469,15 @@ function BehaviorRules({ token }: { token: string }) {
   );
 }
 
-function VoiceSettings() {
+function VoiceSettings({ token }: { token: string }) {
   const [converse, setConverse] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voiceName, setVoiceName] = useState('');
+  const [engine, setEngine] = useState<'device' | 'gemini'>('device');
+  const [gVoices, setGVoices] = useState<string[]>([]);
+  const [gVoice, setGVoice] = useState('');
+  const [gBusy, setGBusy] = useState(false);
+  const gAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const loadVoices = useCallback(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
@@ -489,7 +494,13 @@ function VoiceSettings() {
     try {
       setConverse(localStorage.getItem('calliad:converse') === '1');
       setVoiceName(localStorage.getItem('calliad_voice_name') ?? '');
+      setEngine(localStorage.getItem('calliad_tts_engine') === 'gemini' ? 'gemini' : 'device');
+      setGVoice(localStorage.getItem('calliad_gemini_voice') ?? '');
     } catch { /* no storage */ }
+    fetch('/api/tts', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j?.available) setGVoices(j.voices ?? []); })
+      .catch(() => {});
     loadVoices();
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     const onFocus = () => loadVoices();
@@ -501,7 +512,36 @@ function VoiceSettings() {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [loadVoices]);
+  }, [loadVoices, token]);
+
+  const setEnginePref = (e: 'device' | 'gemini') => {
+    setEngine(e);
+    try { localStorage.setItem('calliad_tts_engine', e); } catch { /* no storage */ }
+  };
+
+  const previewGemini = async (voice: string) => {
+    setGVoice(voice);
+    try { voice ? localStorage.setItem('calliad_gemini_voice', voice) : localStorage.removeItem('calliad_gemini_voice'); } catch { /* no storage */ }
+    if (gBusy) return;
+    setGBusy(true);
+    try {
+      const r = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ text: 'This is how I sound.', voice: voice || undefined }),
+      });
+      if (r.ok) {
+        const url = URL.createObjectURL(await r.blob());
+        gAudioRef.current?.pause();
+        const a = new Audio(url);
+        gAudioRef.current = a;
+        a.onended = () => URL.revokeObjectURL(url);
+        await a.play().catch(() => {});
+      }
+    } finally {
+      setGBusy(false);
+    }
+  };
 
   const chooseVoice = (name: string) => {
     setVoiceName(name);
@@ -537,8 +577,61 @@ function VoiceSettings() {
         </span>
       </label>
 
-      <div>
-        <p className="text-sm font-medium text-[var(--text-body)] mb-1">Spoken voice</p>
+      {gVoices.length > 0 && (
+        <div>
+          <p className="text-sm font-medium text-[var(--text-body)] mb-1">Voice engine</p>
+          <div className="flex gap-2">
+            {(['device', 'gemini'] as const).map((e) => (
+              <button
+                key={e}
+                onClick={() => setEnginePref(e)}
+                className="rounded border px-3 py-1.5 text-sm"
+                style={{
+                  borderColor: engine === e ? 'var(--accent)' : 'var(--border)',
+                  background: engine === e ? 'var(--accent)' : 'var(--surface)',
+                  color: engine === e ? '#fff' : 'var(--text)',
+                }}
+              >
+                {e === 'device' ? 'Device (free, offline)' : 'Gemini (natural)'}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            Gemini reads each sentence through Google&apos;s TTS — much more natural than the device voices,
+            and it sidesteps iOS not exposing its good voices to web apps. Needs a connection; falls back to
+            the device voice if a sentence fails.
+          </p>
+        </div>
+      )}
+
+      {engine === 'gemini' && gVoices.length > 0 && (
+        <div>
+          <p className="text-sm font-medium text-[var(--text-body)] mb-1">Gemini voice</p>
+          <div className="flex flex-wrap gap-1.5">
+            {gVoices.map((v) => (
+              <button
+                key={v}
+                disabled={gBusy}
+                onClick={() => previewGemini(v)}
+                className="rounded border px-2.5 py-1 text-xs disabled:opacity-50"
+                style={{
+                  borderColor: gVoice === v ? 'var(--accent)' : 'var(--border)',
+                  background: gVoice === v ? 'var(--accent)' : 'var(--surface)',
+                  color: gVoice === v ? '#fff' : 'var(--text)',
+                }}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-[var(--text-muted)] mt-1">Tap one to hear it.</p>
+        </div>
+      )}
+
+      <div className={engine === 'gemini' ? 'opacity-60' : ''}>
+        <p className="text-sm font-medium text-[var(--text-body)] mb-1">
+          Device voice{engine === 'gemini' ? ' (fallback)' : ''}
+        </p>
         <div className="flex items-center gap-2">
           <select
             value={voiceName}
@@ -1211,7 +1304,7 @@ export default function SettingsPage() {
       {/* ── Voice ───────────────────────────────────────────────────── */}
       <section className="mb-8">
         <h2 className={label}>Voice</h2>
-        <VoiceSettings />
+        <VoiceSettings token={session.access_token} />
       </section>
 
       {/* ── Notifications ────────────────────────────────────────────── */}

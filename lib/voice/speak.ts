@@ -133,4 +133,155 @@ export class SentenceSpeaker {
     this.flushed = false;
     this.doneCb = null;
   }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  setAuth(_token: string | null) { /* device engine needs no token */ }
+  prime() { primeSpeech(); }
+}
+
+// ── Gemini TTS engine (opt-in) ─────────────────────────────────────────────
+// Same surface as SentenceSpeaker, but each sentence is synthesised by
+// /api/tts (Gemini natural voice) and played through one reused <audio>.
+// Sentences fetch in parallel as they're queued, so playback stays close behind
+// the stream. Any failure on a sentence is skipped silently.
+
+const SILENT_WAV =
+  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
+interface Chunk { text: string; blob?: Blob; err?: boolean; done?: boolean }
+
+export class GeminiSpeaker {
+  private q: Chunk[] = [];
+  private audio: HTMLAudioElement | null = null;
+  private playing = false;
+  private spokenLen = 0;
+  private flushed = false;
+  private doneCb: (() => void) | null = null;
+  private token: string | null = null;
+  private stopped = false;
+
+  get speaking() { return this.playing; }
+  whenDone(cb: () => void) { this.doneCb = cb; }
+  setAuth(token: string | null) { this.token = token; }
+
+  private el(): HTMLAudioElement {
+    if (!this.audio) {
+      this.audio = new Audio();
+      this.audio.preload = 'auto';
+    }
+    return this.audio;
+  }
+
+  /** From a user gesture — unlock <audio> playback on iOS. */
+  prime() {
+    try {
+      const a = this.el();
+      a.src = SILENT_WAV;
+      a.play().then(() => { a.pause(); a.currentTime = 0; }).catch(() => {});
+    } catch { /* ignore */ }
+  }
+
+  private voice(): string | undefined {
+    try { return localStorage.getItem('calliad_gemini_voice') || undefined; } catch { return undefined; }
+  }
+
+  private async fetchChunk(c: Chunk) {
+    try {
+      const r = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) },
+        body: JSON.stringify({ text: c.text, voice: this.voice() }),
+      });
+      if (!r.ok) { c.err = true; return; }
+      c.blob = await r.blob();
+    } catch {
+      c.err = true;
+    }
+  }
+
+  private enqueue(text: string) {
+    const t = text.trim();
+    if (!t) return;
+    this.stopped = false;
+    const c: Chunk = { text: t };
+    this.q.push(c);
+    void this.fetchChunk(c); // prefetch
+    void this.pump();
+  }
+
+  private async pump() {
+    if (this.playing || this.stopped) return;
+    const c = this.q[0];
+    if (!c) { this.maybeDone(); return; }
+
+    // wait for this chunk's audio (its fetch was kicked off at enqueue time)
+    for (let i = 0; i < 200 && !c.blob && !c.err; i++) await new Promise((r) => setTimeout(r, 50));
+    this.q.shift();
+    if (this.stopped) return;
+    if (c.err || !c.blob) { void this.pump(); return; } // skip a failed sentence
+
+    this.playing = true;
+    const url = URL.createObjectURL(c.blob);
+    const a = this.el();
+    a.src = url;
+    const finish = () => {
+      URL.revokeObjectURL(url);
+      a.onended = a.onerror = null;
+      this.playing = false;
+      void this.pump();
+    };
+    a.onended = finish;
+    a.onerror = finish;
+    try { await a.play(); } catch { finish(); }
+  }
+
+  private maybeDone() {
+    if (this.flushed && !this.playing && this.q.length === 0) {
+      this.flushed = false;
+      const cb = this.doneCb;
+      this.doneCb = null;
+      cb?.();
+    }
+  }
+
+  feed(fullText: string) {
+    const pending = fullText.slice(this.spokenLen);
+    const m = pending.match(/^[\s\S]*[.!?…](?=\s|$)/);
+    if (!m) return;
+    this.enqueue(m[0]);
+    this.spokenLen += m[0].length;
+  }
+
+  flush(fullText: string) {
+    const rest = fullText.slice(this.spokenLen);
+    this.spokenLen = fullText.length;
+    this.flushed = true;
+    if (rest.trim()) this.enqueue(rest);
+    else this.maybeDone();
+  }
+
+  speakNow(text: string) {
+    this.cancel();
+    this.flushed = true;
+    this.enqueue(text);
+  }
+
+  cancel() {
+    this.stopped = true;
+    this.q = [];
+    this.playing = false;
+    this.flushed = false;
+    this.doneCb = null;
+    this.spokenLen = 0;
+    if (this.audio) { try { this.audio.pause(); this.audio.removeAttribute('src'); } catch { /* ignore */ } }
+  }
+}
+
+export type Speaker = SentenceSpeaker | GeminiSpeaker;
+
+/** Pick the TTS engine from the saved preference. Defaults to on-device. */
+export function makeSpeaker(): Speaker {
+  let engine = 'device';
+  try { engine = localStorage.getItem('calliad_tts_engine') || 'device'; } catch { /* no storage */ }
+  return engine === 'gemini' ? new GeminiSpeaker() : new SentenceSpeaker();
 }
