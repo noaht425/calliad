@@ -36,8 +36,11 @@ async function amadeusOffers(p: FlightParams): Promise<Offer[] | null> {
   const iata = /^[A-Z]{3}$/i;
   if (!iata.test(p.origin) || !iata.test(p.destination)) return null; // Amadeus needs IATA
 
+  // AMADEUS_ENV=production once the app is moved to the (free, 2k/mo) production
+  // tier for real fares; the test env returns synthetic inventory.
+  const prod = /^prod/i.test(process.env.AMADEUS_ENV ?? '');
   try {
-    const base = 'https://test.api.amadeus.com';
+    const base = prod ? 'https://api.amadeus.com' : 'https://test.api.amadeus.com';
     const tok = await fetch(`${base}/v1/security/oauth2/token`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -103,7 +106,12 @@ export async function flightSearch(p: FlightParams, prefsLine = ''): Promise<str
   ].filter(Boolean);
 
   if (offers?.length) {
-    lines.push('', 'Indicative fares (Amadeus test data — treat as ballpark, confirm on the airline/Google):');
+    lines.push(
+      '',
+      /^prod/i.test(process.env.AMADEUS_ENV ?? '')
+        ? 'Fares (Amadeus — real, but confirm on the airline before booking):'
+        : 'Indicative fares (Amadeus test data — treat as ballpark, confirm on the airline/Google):',
+    );
     for (const o of offers) {
       lines.push(`- ${o.price} · ${o.carriers.join('/')} · out: ${o.outbound}${o.inbound ? ` · back: ${o.inbound}` : ''}`);
     }

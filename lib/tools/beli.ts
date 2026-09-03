@@ -1,14 +1,12 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
-import { anthropicCostUsd } from '@/lib/router/tiers';
+import { t1Text } from '@/lib/llm/gemini';
 import { getPrefs } from '@/lib/profile/prefs';
 
-// Beli has no API. Noah screenshots his ranked / want-to-try lists; Sonnet
-// vision pulls the restaurants; they land in restaurant_prefs and feed the
+// Beli has no API. Noah screenshots his ranked / want-to-try lists; Gemini Flash
+// vision pulls the restaurants (structured OCR, not judgement — ~1/10th the cost
+// of a Sonnet vision call); they land in restaurant_prefs and feed the
 // restaurant hand-off + profile.
-
-const anthropic = new Anthropic();
 
 export const isBeliShare = (t: string) =>
   /\bbeli\b/i.test(t) ||
@@ -52,43 +50,30 @@ export async function extractBeli(
 ): Promise<{ rows: BeliRow[]; costUsd: number }> {
   const shots = images.slice(0, 8);
   if (!shots.length) return { rows: [], costUsd: 0 };
-  const started = Date.now();
-  const msg = await anthropic.messages.create({
-    model: 'claude-sonnet-5',
-    max_tokens: 2500,
-    system:
-      'These are screenshots from Beli, a place-ranking app. Extract EVERY place visible across ALL the images. ' +
-      'If the same place appears in more than one image, return it once. ' +
-      'For each: name; city or neighbourhood if shown (else null); the numeric score if shown, 0–10 (else null); ' +
-      'category = the CUISINE only (e.g. "Italian", "Thai", "sushi", "pizza") if shown, else null; ' +
-      'place_type = one of "restaurant", "cafe", "bakery", "dessert", "bar", "other" — infer from the Beli tab/section header ' +
-      '(Restaurants / Coffee & Cafés / Bakeries / Dessert / Bars) or obvious cues; use "restaurant" if unsure; ' +
-      'any short note or tag (else null). ' +
-      'status = "ranked" when there is a score (a place Noah has been), "want" when it is on a want-to-try list with no score. ' +
-      'Return ONLY a minified JSON array like [{"name":"","city":null,"score":8.7,"category":null,"place_type":"restaurant","note":null,"status":"ranked"}]. ' +
-      'No prose, no markdown fence. If the images have no place list, return [].',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          ...shots.map((im) => ({
-            type: 'image' as const,
-            source: { type: 'base64' as const, media_type: im.media_type as 'image/jpeg', data: im.data },
-          })),
-          { type: 'text' as const, text: `Extract the places from ${shots.length === 1 ? 'this screenshot' : `these ${shots.length} screenshots`}.` },
-        ],
-      },
-    ],
-  });
-  const costUsd = anthropicCostUsd('claude-sonnet-5', msg.usage);
-  await audit.modelCall({
-    conversation_id: null, purpose: 'beli_extract', tier: 'T2', model: 'claude-sonnet-5',
-    input_tokens: msg.usage.input_tokens, cached_read_tokens: msg.usage.cache_read_input_tokens ?? 0,
-    cache_write_tokens: msg.usage.cache_creation_input_tokens ?? 0, output_tokens: msg.usage.output_tokens,
-    cost_usd: costUsd, latency_ms: Date.now() - started,
-  });
 
-  const raw = msg.content.filter((b) => b.type === 'text').map((b) => (b as Anthropic.TextBlock).text).join('').replace(/```json\n?|\n?```/g, '').trim();
+  const prompt =
+    'These are screenshots from Beli, a place-ranking app. Extract EVERY place visible across ALL the images. ' +
+    'If the same place appears in more than one image, return it once. ' +
+    'For each: name; city or neighbourhood if shown (else null); the numeric score if shown, 0–10 (else null); ' +
+    'category = the CUISINE only (e.g. "Italian", "Thai", "sushi", "pizza") if shown, else null; ' +
+    'place_type = one of "restaurant", "cafe", "bakery", "dessert", "bar", "other" — infer from the Beli tab/section header ' +
+    '(Restaurants / Coffee & Cafés / Bakeries / Dessert / Bars) or obvious cues; use "restaurant" if unsure; ' +
+    'any short note or tag (else null). ' +
+    'status = "ranked" when there is a score (a place Noah has been), "want" when it is on a want-to-try list with no score. ' +
+    'Return ONLY a minified JSON array like [{"name":"","city":null,"score":8.7,"category":null,"place_type":"restaurant","note":null,"status":"ranked"}]. ' +
+    'No prose, no markdown fence. If the images have no place list, return [].';
+
+  const raw = (
+    await t1Text(
+      'beli_extract',
+      prompt,
+      shots.map((im) => ({ inlineData: { mimeType: im.media_type || 'image/jpeg', data: im.data } })),
+      { flash: true, maxOutputTokens: 2500 },
+    )
+  )?.replace(/```json\n?|\n?```/g, '').trim();
+
+  const costUsd = 0; // metered in audit.modelCall by t1Text
+  if (!raw) return { rows: [], costUsd };
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { return { rows: [], costUsd }; }
   if (!Array.isArray(parsed)) return { rows: [], costUsd };

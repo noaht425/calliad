@@ -75,27 +75,34 @@ export async function t1Json<T>(
   }
 }
 
-/** Plain-text T1 call, optionally with inline file parts (e.g. a PDF to read). */
+// Full Flash — a step up from Flash-Lite for OCR-ish vision (screenshot tables)
+// and longer extraction. Still ~1/10th the cost of a Sonnet vision call.
+const FLASH_MODEL = 'gemini-3.5-flash';
+const FLASH_PRICE = { input: 0.3, output: 2.5 };
+
+/** Plain-text T1 call, optionally with inline file parts (e.g. a PDF or images). */
 export async function t1Text(
   purpose: string,
   prompt: string,
   parts: { inlineData: { mimeType: string; data: string } }[] = [],
-  opts: { maxOutputTokens?: number } = {},
+  opts: { maxOutputTokens?: number; flash?: boolean } = {},
 ): Promise<string | null> {
   const g = genai();
   if (!g) return null;
   const started = Date.now();
+  const modelId = opts.flash ? FLASH_MODEL : MODEL;
+  const price = opts.flash ? FLASH_PRICE : PRICE;
   try {
     const model = g.getGenerativeModel({
-      model: MODEL,
+      model: modelId,
       generationConfig: { maxOutputTokens: opts.maxOutputTokens ?? 6000 },
     });
     const res = await model.generateContent([prompt, ...parts]);
     const text = res.response.text().trim();
     const um = res.response.usageMetadata;
-    const cost = ((um?.promptTokenCount ?? 0) * PRICE.input + (um?.candidatesTokenCount ?? 0) * PRICE.output) / 1_000_000;
+    const cost = ((um?.promptTokenCount ?? 0) * price.input + (um?.candidatesTokenCount ?? 0) * price.output) / 1_000_000;
     await audit.modelCall({
-      conversation_id: null, purpose, tier: 'T1', model: MODEL,
+      conversation_id: null, purpose, tier: 'T1', model: modelId,
       input_tokens: um?.promptTokenCount ?? 0, cached_read_tokens: 0, cache_write_tokens: 0,
       output_tokens: um?.candidatesTokenCount ?? 0, cost_usd: cost, latency_ms: Date.now() - started,
     });
