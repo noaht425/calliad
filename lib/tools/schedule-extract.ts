@@ -29,7 +29,7 @@ interface RawBlock {
   location: string | null;
   start_time: string; // "HH:MM" 24h
   end_time: string;
-  days: string[] | null; // ["Mon","Wed"] for a recurring weekly block
+  days: string | null; // meeting days exactly as shown — "TR", "MWF", "Tuesday, Thursday", etc. Decoded in code, not by the model (see parseDayCode).
   date: string | null;   // "YYYY-MM-DD" for a specific one-off entry
 }
 
@@ -55,12 +55,12 @@ function parseArrayLoose(raw: string): Record<string, unknown> | null {
 const SYSTEM = `These screenshots show a class timetable or a work shift schedule. Extract every distinct time block.
 
 Two kinds of block, tell them apart:
-- RECURRING: a weekly class grid ("Mon/Wed/Fri 9:00-9:50", a course timetable). Set "days" to the weekday names it meets, "date" null.
+- RECURRING: a weekly class grid ("Mon/Wed/Fri 9:00-9:50", a course timetable). Set "days" to the meeting days EXACTLY as written in the image, "date" null. Class schedules often show days as letter codes, not full names — copy the code verbatim, do not translate or expand it yourself: "TR" stays "TR", "MWF" stays "MWF", "T" stays "T". Do not guess what a code means — just transcribe it.
 - DATED: a specific day's shift or event with an actual date visible ("Tue Sep 9, 2pm-6pm"). Set "date" to that ISO date, "days" null.
 
 For each block: title (course name/code, or job/employer name for a shift), location if shown (room, or workplace), start_time and end_time in 24-hour "HH:MM". If the image states the term/semester date range (e.g. "Fall 2026" with visible start/end, or a syllabus-style date range), capture it in term_start/term_end (YYYY-MM-DD) — otherwise leave those null.
 
-Return ONLY minified JSON: {"ok":true|false,"blocks":[{"title":"","location":null,"start_time":"09:00","end_time":"09:50","days":["Mon","Wed"],"date":null}],"term_start":null,"term_end":null,"notes":"anything ambiguous or that needs Noah to confirm, else null"}
+Return ONLY minified JSON: {"ok":true|false,"blocks":[{"title":"","location":null,"start_time":"09:00","end_time":"09:50","days":"MWF","date":null}],"term_start":null,"term_end":null,"notes":"anything ambiguous or that needs Noah to confirm, else null"}
 ok=false only if the images have no readable schedule at all.`;
 
 export async function extractSchedule(
@@ -112,10 +112,41 @@ export interface PlannedEvent {
   end_at: string;
 }
 
-const DOW: Record<string, number> = {
-  Sun: 0, Sunday: 0, Mon: 1, Monday: 1, Tue: 2, Tues: 2, Tuesday: 2, Wed: 3, Wednesday: 3,
-  Thu: 4, Thur: 4, Thurs: 4, Thursday: 4, Fri: 5, Friday: 5, Sat: 6, Saturday: 6,
-};
+// Longest token first so a full/abbreviated name is matched before falling
+// back to single letters. Order matters: 'TH' must be checked before bare
+// 'T', and multi-letter names before their abbreviations.
+const DAY_TOKENS_RAW: [string, number][] = [
+  ['SUNDAY', 0], ['MONDAY', 1], ['TUESDAY', 2], ['WEDNESDAY', 3], ['THURSDAY', 4], ['FRIDAY', 5], ['SATURDAY', 6],
+  ['SUN', 0], ['MON', 1], ['TUE', 2], ['TUES', 2], ['WED', 3], ['THU', 4], ['THUR', 4], ['THURS', 4], ['FRI', 5], ['SAT', 6],
+  ['TU', 2], ['TH', 4], ['SU', 0], ['SA', 6],
+  // Bare-letter academic shorthand. The classic ambiguity this exists to
+  // resolve: T = Tuesday, R = Thursday (never "Th") so "TR" reads as
+  // Tuesday+Thursday, not one ambiguous day. S = Saturday, U = Sunday.
+  ['M', 1], ['T', 2], ['W', 3], ['R', 4], ['F', 5], ['S', 6], ['U', 0],
+];
+const DAY_TOKENS: [string, number][] = [...DAY_TOKENS_RAW].sort((a, b) => b[0].length - a[0].length);
+
+/** Decode a day spec exactly as a schedule screenshot might show it — full
+ *  names ("Tuesday, Thursday"), abbreviations ("Tue/Thu"), or academic
+ *  letter-code shorthand ("TR", "MWF", "TTh", "M/W/F") — into weekday
+ *  numbers (0=Sun..6=Sat). Never asks a model to resolve this; it's a fixed,
+ *  testable table so "TR" always means Tue+Thu, not a guess. */
+function parseDayCode(raw: string): number[] {
+  const s = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  const out: number[] = [];
+  let i = 0;
+  outer: while (i < s.length) {
+    for (const [tok, dow] of DAY_TOKENS) {
+      if (s.startsWith(tok, i)) {
+        out.push(dow);
+        i += tok.length;
+        continue outer;
+      }
+    }
+    i += 1; // unrecognized character — skip rather than silently drop the whole block
+  }
+  return out;
+}
 
 /** Local wall-clock (America/New_York) -> UTC ISO, DST-correct. */
 function localToUtcISO(dateStr: string, timeStr: string): string {
@@ -159,7 +190,7 @@ export function expandBlocks(
       continue;
     }
     if (b.days?.length) {
-      const wantDows = new Set(b.days.map((d) => DOW[d]).filter((n) => n !== undefined));
+      const wantDows = new Set(parseDayCode(b.days));
       for (const date of eachDate(termStart, termEnd)) {
         const dow = new Date(date + 'T12:00:00Z').getUTCDay();
         if (!wantDows.has(dow)) continue;
