@@ -17,16 +17,28 @@ const RECURS: Recur[] = ['daily', 'weekdays', 'weekly', 'biweekly', 'monthly'];
  * plus an optional due date. No date → due_at null. Falls back to the raw text
  * as the title when T1 is unavailable.
  */
-export async function extractTask(text: string, now = new Date()): Promise<TaskDraft> {
+export async function extractTask(
+  text: string,
+  now = new Date(),
+  recent: { role: 'user' | 'assistant'; content: string }[] = [],
+): Promise<TaskDraft> {
   const raw = text
     .replace(/^.*?\b(add (a )?(task|reminder|to-?do)( to)?|remind me to|add to (my )?(to-?do|task list)|put on my to-?do)\b[:,]?\s*/i, '')
     .trim();
   if (!t1Available() || !raw) return { title: raw || text.trim(), due_at: null, recur: null };
 
   const localNow = now.toLocaleString('en-US', { timeZone: TZ });
+  const convo = recent
+    .slice(-4)
+    .map((t) => `${t.role === 'user' ? 'Noah' : 'Assistant'}: ${t.content.slice(0, 240)}`)
+    .join('\n');
   const out = await t1Json<{ title: string; due_at: string | null; recur: string | null }>(
     'extract_task',
     `Noah is adding a to-do. "Now" is ${localNow} (${TZ}).
+
+Recent conversation (use ONLY to fill in what "${raw}" doesn't say itself, e.g. a vague "remind me" pointing back at something just discussed; never override what this message itself states):
+${convo || '(none)'}
+
 "${raw}"
 Return JSON: {"title":"the task, imperative, no date/repeat words","due_at":"UTC ISO 8601 at a sensible time (default 9am local) or null","recur":"daily|weekdays|weekly|biweekly|monthly or null"}
 - due_at: null unless a day/deadline is clearly stated ("tomorrow", "Friday", "by the 15th", "next week" → the following Monday). For a repeating task, due_at = the FIRST occurrence.

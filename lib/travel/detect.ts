@@ -16,13 +16,25 @@ export interface FlightParams {
   adults: number;
 }
 
-export async function extractFlight(text: string, now = new Date()): Promise<FlightParams | null> {
+export async function extractFlight(
+  text: string,
+  now = new Date(),
+  recent: { role: 'user' | 'assistant'; content: string }[] = [],
+): Promise<FlightParams | null> {
   if (!t1Available()) return null;
   const localNow = now.toLocaleString('en-US', { timeZone: TZ });
+  const convo = recent
+    .slice(-4)
+    .map((t) => `${t.role === 'user' ? 'Noah' : 'Assistant'}: ${t.content.slice(0, 240)}`)
+    .join('\n');
   const out = await t1Json<FlightParams & { ok: boolean }>(
     'extract_flight',
     `Pull flight-search parameters from Noah's request. "Now" is ${localNow} (${TZ}).
 Noah context: home = Kirkland/Seattle (SEA); girlfriend in NYC (uses JFK/LGA/EWR); school = Hartford. "home" ⇒ SEA. "to Annalee" / "to NYC" ⇒ NYC (leave as "NYC", the search handles it).
+
+Recent conversation (use ONLY to fill in a detail this message doesn't restate, e.g. this message just answers "where/when?"; never override what this message itself states):
+${convo || '(none)'}
+
 Request: "${text}"
 
 Return JSON only:
@@ -48,12 +60,24 @@ export interface RestaurantParams {
   party: number;
 }
 
-export async function extractRestaurant(text: string, now = new Date()): Promise<RestaurantParams | null> {
+export async function extractRestaurant(
+  text: string,
+  now = new Date(),
+  recent: { role: 'user' | 'assistant'; content: string }[] = [],
+): Promise<RestaurantParams | null> {
   if (!t1Available()) return null;
   const localNow = now.toLocaleString('en-US', { timeZone: TZ });
+  const convo = recent
+    .slice(-4)
+    .map((t) => `${t.role === 'user' ? 'Noah' : 'Assistant'}: ${t.content.slice(0, 240)}`)
+    .join('\n');
   const out = await t1Json<RestaurantParams & { ok: boolean }>(
     'extract_restaurant',
     `Pull restaurant-booking details from Noah's request. "Now" is ${localNow} (${TZ}).
+
+Recent conversation (use ONLY to fill in a detail this message doesn't restate; never override what this message itself states):
+${convo || '(none)'}
+
 Request: "${text}"
 Return JSON: {"ok":true|false,"name":"restaurant name or null","city":"city or null","dateTime":"local ISO 8601 or null","party":2}
 ok=false if there's nothing to act on. If Noah gave no party size, default 2.`,

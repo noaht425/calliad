@@ -105,12 +105,24 @@ export interface CalendarChangeDraft {
   new_location: string | null;
 }
 
-export async function extractCalendarChange(text: string, now = new Date()): Promise<CalendarChangeDraft | null> {
+export async function extractCalendarChange(
+  text: string,
+  now = new Date(),
+  recent: { role: 'user' | 'assistant'; content: string }[] = [],
+): Promise<CalendarChangeDraft | null> {
   if (!t1Available()) return null;
   const localNow = now.toLocaleString('en-US', { timeZone: TZ });
+  const convo = recent
+    .slice(-4)
+    .map((t) => `${t.role === 'user' ? 'Noah' : 'Assistant'}: ${t.content.slice(0, 240)}`)
+    .join('\n');
   const out = await t1Json<CalendarChangeDraft & { ok: boolean }>(
     'extract_calendar_change',
     `Noah wants to change or cancel a calendar event. "Now" is ${localNow} (${TZ}).
+
+Recent conversation (use ONLY to recover which event or what change this message doesn't restate, e.g. this message answers Calliad's own "which one?" or "what's the change?"; never let it override anything this message itself states):
+${convo || '(none)'}
+
 Request: "${text}"
 Return JSON: {"ok":true|false,"op":"update"|"delete","match":"how Noah refers to the event — title words plus any day/time he mentions to identify it, e.g. 'standup tomorrow' or 'dentist Friday 2pm'","new_title":null,"new_start":"UTC ISO 8601 or null","new_end":"UTC ISO 8601 or null","new_location":null}
 - match is what identifies the EXISTING event, never the new time.

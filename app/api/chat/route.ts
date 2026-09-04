@@ -162,6 +162,13 @@ export async function POST(req: NextRequest) {
     return say(`I don't actually keep the photo after it comes in, only that a screenshot was sent, not the image itself. Mind resending it? I'll apply what you just told me on top of it.`, 'reuse-attachment-refused');
   }
 
+  // Fetched once, up front, and threaded into every extractor below that can
+  // be answered with a bare follow-up ("next Friday at 1pm", "the 3pm one").
+  // Previously each handler either had no memory of prior turns at all, or
+  // (task-edit, calendar-write) fetched its own redundant copy — this is the
+  // single shared source now.
+  const recent = await recentTurns(conversationId, text).catch(() => []);
+
   const medLine = await medContextLine(user.id).catch(() => '');
 
   // ── pending action awaiting yes/no ──────────────────────────────────────
@@ -260,7 +267,7 @@ export async function POST(req: NextRequest) {
   const inferredGuess = async (): Promise<IntentGuess | null> => {
     if (modeState.practiceLang) return null;
     if (_intentGuess === undefined) {
-      _intentGuess = await classifyIntent(text, await recentTurns(conversationId, text), conversationId).catch(() => null);
+      _intentGuess = await classifyIntent(text, recent, conversationId).catch(() => null);
     }
     return _intentGuess ?? null;
   };
@@ -565,7 +572,7 @@ export async function POST(req: NextRequest) {
 
   // ── silent tier: add a task → open loop (tagged 'task'), no gate ────────
   if ((isTaskAdd(text) || await inferred('task.add')) && !isSubscriptionAdd(text)) {
-    const { title, due_at, recur } = await extractTask(text).catch(() => ({ title: text.trim(), due_at: null, recur: null }));
+    const { title, due_at, recur } = await extractTask(text, new Date(), recent).catch(() => ({ title: text.trim(), due_at: null, recur: null }));
     if (title) {
       // "remind me to watch <show>" with no time attached is really a watch-list add
       const wm = !due_at && !recur ? /^\s*watch(?:ing)?\s+(.+)$/i.exec(title) : null;
@@ -597,7 +604,7 @@ export async function POST(req: NextRequest) {
 
   // ── silent tier: "I'm going to <place> <dates>" → trip record for prep nudges ──
   if (isTripPlan(text) && !isTaskAdd(text)) {
-    const t = await extractTrip(text).catch(() => null);
+    const t = await extractTrip(text, new Date(), recent).catch(() => null);
     if (t) {
       const trip = await createTrip(user.id, t);
       const range = t.end_date ? `${fmtDay(t.start_date)}–${fmtDay(t.end_date)}` : fmtDay(t.start_date);
@@ -749,8 +756,7 @@ export async function POST(req: NextRequest) {
   // the Tasks list, not an event, and the calendar-edit path's "which event?"
   // question doesn't fit a task that has no day/time of its own.
   if (isTaskEdit(text) || await inferred('task.edit')) {
-    const recentForTask = await recentTurns(conversationId, text).catch(() => []);
-    const draft = await extractTaskChange(text, recentForTask).catch(() => null);
+    const draft = await extractTaskChange(text, recent).catch(() => null);
     if (!draft) return say(`Which task do you mean?`, 'task-edit-underspecified');
     const found = await findLoopByHint(user.id, draft.match).catch(() => ({ none: true as const }));
     if ('none' in found) return say(`I don't see a task matching "${draft.match}"; what's it titled on your list?`, 'task-edit-nomatch');
@@ -767,7 +773,7 @@ export async function POST(req: NextRequest) {
     // always returned right after the rename.
     if (isCalendarWrite(text) || await inferred('calendar.create')) {
       const ev =
-        (await extractEvent(text, new Date(), recentForTask).catch(() => null)) ??
+        (await extractEvent(text, new Date(), recent).catch(() => null)) ??
         (found.hit.due_at
           ? { title: draft.new_title, start_at: found.hit.due_at, end_at: null, all_day: false, location: null, city: null }
           : null);
@@ -780,7 +786,7 @@ export async function POST(req: NextRequest) {
 
   // ── confirm / named-consequence: change or cancel a calendar event ──────
   if ((isCalendarChange(text) || await inferred('calendar.change')) && !isCalendarWrite(text) && !isTaskEdit(text)) {
-    const ch = await extractCalendarChange(text).catch(() => null);
+    const ch = await extractCalendarChange(text, new Date(), recent).catch(() => null);
     if (!ch) return say(`Which event do you mean? Name it and the day.`, 'cal-change-underspecified');
     const found = await findEventByHint(user.id, ch.match).catch(() => ({ none: true as const }));
     if ('none' in found) return say(`I don't see "${ch.match}" on your synced calendar. Try naming it the way it reads there.`, 'cal-change-nomatch');
@@ -813,12 +819,7 @@ export async function POST(req: NextRequest) {
 
   // ── calendar write → auto-add if trusted, else propose and wait for yes ──
   if (isCalendarWrite(text) || await inferred('calendar.create')) {
-    // Recent turns matter here: if this message is just "next Friday at 1pm"
-    // answering Calliad's own "when, exactly?", the subject lives in the
-    // prior turn, not this one, and without it the extractor has to invent
-    // a title rather than recover the real one.
-    const recentForEvent = await recentTurns(conversationId, text).catch(() => []);
-    const ev = await extractEvent(text, new Date(), recentForEvent).catch(() => null);
+    const ev = await extractEvent(text, new Date(), recent).catch(() => null);
     if (!ev) return say(`I can put that on your calendar: when, exactly?`, 'calendar-write-underspecified');
     const r = await createOrProposeEvent(ev, text, user.id, conversationId);
     return say(r.message, r.reason);
@@ -898,8 +899,7 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [recent, integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, behaviorLine, correctionsLine, occasionsLine, rapport, userPreset] = await Promise.all([
-    recentTurns(conversationId, text),
+  const [integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, behaviorLine, correctionsLine, occasionsLine, rapport, userPreset] = await Promise.all([
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
     decision.tools.includes('morphology') ? runMorphology(text).catch(() => undefined) : Promise.resolve(undefined),
@@ -991,12 +991,12 @@ export async function POST(req: NextRequest) {
       (await wouldILike(user.id, text).catch(() => undefined)) ??
       toolResult;
   } else if (isFlightQuery(text)) {
-    const fp = await extractFlight(text).catch(() => null);
+    const fp = await extractFlight(text, new Date(), recent).catch(() => null);
     toolResult = fp
       ? await flightSearch(fp, await prefsLine(user.id).catch(() => '')).catch(() => undefined)
       : `## Flight search\nCouldn't pin down where/when; ask Noah for the destination and rough dates.`;
   } else if (isRestaurantQuery(text)) {
-    const rp = await extractRestaurant(text).catch(() => null);
+    const rp = await extractRestaurant(text, new Date(), recent).catch(() => null);
     const [handoff, prefs] = await Promise.all([
       rp ? restaurantHandoff(rp).catch(() => undefined) : Promise.resolve(undefined),
       restaurantPrefsBlock(user.id).catch(() => ''),

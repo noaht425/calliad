@@ -33,9 +33,14 @@ export function isTripPlan(t: string): boolean {
 export async function extractTrip(
   text: string,
   now = new Date(),
+  recent: { role: 'user' | 'assistant'; content: string }[] = [],
 ): Promise<{ destination: string; start_date: string; end_date: string | null; has_pet: boolean } | null> {
   if (!t1Available()) return null;
   const localNow = now.toLocaleString('en-US', { timeZone: TZ });
+  const convo = recent
+    .slice(-4)
+    .map((t) => `${t.role === 'user' ? 'Noah' : 'Assistant'}: ${t.content.slice(0, 240)}`)
+    .join('\n');
   const out = await t1Json<{
     ok: boolean;
     destination: string | null;
@@ -45,6 +50,10 @@ export async function extractTrip(
   }>(
     'extract_trip',
     `Pull trip details from Noah's message. "Now" is ${localNow} (${TZ}).
+
+Recent conversation (use ONLY to fill in a detail this message doesn't restate; never override what this message itself states):
+${convo || '(none)'}
+
 Message: "${text}"
 Return JSON: {"ok":true|false,"destination":"City, Country or City, ST or null","start_date":"YYYY-MM-DD or null","end_date":"YYYY-MM-DD or null","has_pet":false}
 ok=false unless there's a real destination AND at least a start date. Resolve relative dates ("next friday", "the 12th", "March 3-10"). If only one date is given, end_date=null. Only set has_pet=true if the message explicitly mentions a pet/dog/cat.`,
