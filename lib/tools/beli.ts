@@ -66,31 +66,25 @@ function parseArrayLoose(raw: string): Record<string, unknown>[] {
   return out;
 }
 
-/** One or more screenshots → the places in them (deduped across shots). */
-export async function extractBeli(
-  images: { media_type: string; data: string }[],
-): Promise<{ rows: BeliRow[]; costUsd: number }> {
-  const shots = images.slice(0, 8);
-  if (!shots.length) return { rows: [], costUsd: 0 };
+const BELI_SYSTEM =
+  'These are screenshots from Beli, a place-ranking app. Extract EVERY place visible across ALL the images — ' +
+  'do NOT summarise, sample, or stop early; if there are 40 places, return 40 objects. ' +
+  'If the same place appears in more than one image, return it once. ' +
+  'For each: name; city or neighbourhood if shown (else null); the numeric score if shown, 0–10 (else null); ' +
+  'category = the CUISINE only (e.g. "Italian", "Thai", "sushi", "pizza") if shown, else null; ' +
+  'place_type = one of "restaurant", "cafe", "bakery", "dessert", "bar", "other" — infer from the Beli tab/section header ' +
+  '(Restaurants / Coffee & Cafés / Bakeries / Dessert / Bars) or obvious cues; use "restaurant" if unsure; ' +
+  'any short note or tag (else null). ' +
+  'status = "ranked" when there is a score (a place Noah has been), "want" when it is on a want-to-try list with no score. ' +
+  'Return ONLY a minified JSON array like [{"name":"","city":null,"score":8.7,"category":null,"place_type":"restaurant","note":null,"status":"ranked"}]. ' +
+  'No prose, no markdown fence. If the images have no place list, return [].';
 
-  const system =
-    'These are screenshots from Beli, a place-ranking app. Extract EVERY place visible across ALL the images — ' +
-    'do NOT summarise, sample, or stop early; if there are 50 places, return 50 objects. ' +
-    'If the same place appears in more than one image, return it once. ' +
-    'For each: name; city or neighbourhood if shown (else null); the numeric score if shown, 0–10 (else null); ' +
-    'category = the CUISINE only (e.g. "Italian", "Thai", "sushi", "pizza") if shown, else null; ' +
-    'place_type = one of "restaurant", "cafe", "bakery", "dessert", "bar", "other" — infer from the Beli tab/section header ' +
-    '(Restaurants / Coffee & Cafés / Bakeries / Dessert / Bars) or obvious cues; use "restaurant" if unsure; ' +
-    'any short note or tag (else null). ' +
-    'status = "ranked" when there is a score (a place Noah has been), "want" when it is on a want-to-try list with no score. ' +
-    'Return ONLY a minified JSON array like [{"name":"","city":null,"score":8.7,"category":null,"place_type":"restaurant","note":null,"status":"ranked"}]. ' +
-    'No prose, no markdown fence. If the images have no place list, return [].';
-
+async function extractChunk(shots: { media_type: string; data: string }[]): Promise<Record<string, unknown>[]> {
   const started = Date.now();
   const msg = await anthropic.messages.create({
     model: 'claude-sonnet-5',
     max_tokens: 8000,
-    system,
+    system: BELI_SYSTEM,
     messages: [
       {
         role: 'user',
@@ -104,20 +98,31 @@ export async function extractBeli(
       },
     ],
   });
-  const costUsd = anthropicCostUsd('claude-sonnet-5', msg.usage);
   await audit.modelCall({
     conversation_id: null, purpose: 'beli_extract', tier: 'T2', model: 'claude-sonnet-5',
     input_tokens: msg.usage.input_tokens, cached_read_tokens: msg.usage.cache_read_input_tokens ?? 0,
     cache_write_tokens: msg.usage.cache_creation_input_tokens ?? 0, output_tokens: msg.usage.output_tokens,
-    cost_usd: costUsd, latency_ms: Date.now() - started,
+    cost_usd: anthropicCostUsd('claude-sonnet-5', msg.usage), latency_ms: Date.now() - started,
   });
-
   const raw = msg.content.filter((b) => b.type === 'text').map((b) => (b as Anthropic.TextBlock).text).join('');
-  const parsed = parseArrayLoose(raw);
-  if (!parsed.length) return { rows: [], costUsd };
+  return parseArrayLoose(raw);
+}
+
+/** One or more screenshots → the places in them. Runs in chunks of ≤4 images so
+ *  a big batch can't blow the function's time budget or the model's output cap. */
+export async function extractBeli(
+  images: { media_type: string; data: string }[],
+): Promise<{ rows: BeliRow[]; costUsd: number }> {
+  const shots = images.slice(0, 8);
+  if (!shots.length) return { rows: [], costUsd: 0 };
+
+  const chunks: { media_type: string; data: string }[][] = [];
+  for (let i = 0; i < shots.length; i += 4) chunks.push(shots.slice(i, i + 4));
+  const parsed = (await Promise.all(chunks.map((c) => extractChunk(c).catch(() => [])))).flat();
+  if (!parsed.length) return { rows: [], costUsd: 0 };
 
   const rows: BeliRow[] = [];
-  for (const p of parsed as Record<string, unknown>[]) {
+  for (const p of parsed) {
     const name = typeof p.name === 'string' ? p.name.trim() : '';
     if (!name) continue;
     const score = typeof p.score === 'number' && p.score >= 0 && p.score <= 10 ? Math.round(p.score * 10) / 10 : null;
@@ -131,7 +136,7 @@ export async function extractBeli(
       status: p.status === 'want' || score === null ? 'want' : 'ranked',
     });
   }
-  return { rows, costUsd };
+  return { rows, costUsd: 0 }; // per-chunk cost already recorded in audit.modelCall
 }
 
 export async function saveBeliRows(
