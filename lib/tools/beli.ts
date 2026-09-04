@@ -2,6 +2,7 @@ import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { t1Text } from '@/lib/llm/gemini';
 import { getPrefs } from '@/lib/profile/prefs';
+import { nearbySpotsBlock } from '@/lib/tools/foursquare';
 
 // Beli has no API. Noah screenshots his ranked / want-to-try lists; Gemini Flash
 // vision pulls the restaurants (structured OCR, not judgement — ~1/10th the cost
@@ -289,11 +290,18 @@ export async function restaurantTasteBlock(userId: string, text: string): Promis
   if (prefs) L.push('', prefs);
   const diet = (await getPrefs(userId).catch(() => ({ dietary_restrictions: [] as string[] }))).dietary_restrictions;
   if (diet.length) L.push('', `Dietary: ${diet.join(', ')} — factor this into any recommendation.`);
+
+  // structured nearby data for a recommendation ask (dark without FOURSQUARE_API_KEY)
+  if (rec) {
+    const nearby = await nearbySpotsBlock(text).catch(() => '');
+    if (nearby) L.push('', nearby);
+  }
+
   L.push(
     '',
     '### Instructions',
     'Whether he\'d like a specific place: if it\'s on file, lead with his own score and where it sits among his other ratings; if not, estimate from his cuisine averages and highest-rated places (same cuisine / neighbourhood / vibe) and flag it as an estimate. ' +
-      'For a recommendation or nearby options: start from his want-to-try list and top-rated places; if you have web search this turn, look up well-reviewed spots in the area and cross-check them against his cuisine preferences before naming any. ' +
+      'For a recommendation or nearby options: start from his want-to-try list and top-rated places, then use the Foursquare list above (or web search if present) — cross-check every candidate against his cuisine preferences and ratings before naming it. ' +
       'Match the place type to the ask (dessert → dessert list, coffee → cafés). A few sentences, his voice, no menu spoilers.',
   );
   return L.join('\n');
