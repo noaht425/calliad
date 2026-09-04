@@ -159,7 +159,7 @@ export async function POST(req: NextRequest) {
   // and definitely not the general chat model, gets a chance to improvise a
   // "done!" reply about data it was never actually given this turn.
   if (!images.length && isReuseAttachmentRequest(text)) {
-    return say(`I don't actually keep the photo after it comes in — only that a screenshot was sent, not the image itself. Mind resending it? I'll apply what you just told me on top of it.`, 'reuse-attachment-refused');
+    return say(`I don't actually keep the photo after it comes in, only that a screenshot was sent, not the image itself. Mind resending it? I'll apply what you just told me on top of it.`, 'reuse-attachment-refused');
   }
 
   const medLine = await medContextLine(user.id).catch(() => '');
@@ -209,7 +209,7 @@ export async function POST(req: NextRequest) {
   }
   if (medReply === 'not-yet') {
     await recordMed(user.id, false, 'not yet');
-    return say('Okay — I’ll check once more later, then leave it.', 'med-reply');
+    return say('Okay, I’ll check once more later, then leave it.', 'med-reply');
   }
 
   // ── language practice: "reply to me in French" / "back to English" ────
@@ -222,8 +222,8 @@ export async function POST(req: NextRequest) {
     if (rs && g) {
       const solved = checkRiddle(rs.id, g);
       modeState.riddle = { ...rs, revealed: solved };
-      if (solved) { await recordScore(user.id, 'riddle', 1, { id: rs.id }); riddleTail = ` And yes — the riddle was **${RIDDLES[rs.id].a}**.`; }
-      else riddleTail = ` Not the riddle answer, though — say "answer" to give up.`;
+      if (solved) { await recordScore(user.id, 'riddle', 1, { id: rs.id }); riddleTail = ` And yes, the riddle was **${RIDDLES[rs.id].a}**.`; }
+      else riddleTail = ` Not the riddle answer, though; say "answer" to give up.`;
     }
     await adminClient.from('conversations')
       .update({ mode_state: { ...modeState, practiceLang: undefined } })
@@ -235,7 +235,7 @@ export async function POST(req: NextRequest) {
     if (pl && (!curPractice || curPractice.name !== pl.name || curPractice.level !== pl.level)) {
       await adminClient.from('conversations').update({ mode_state: { ...modeState, practiceLang: pl } }).eq('id', conversationId);
       return say(
-        `${pl.name} it is (${pl.level}). I'll reply in ${pl.name} from here — say "back to English" to stop.`,
+        `${pl.name} it is (${pl.level}). I'll reply in ${pl.name} from here; say "back to English" to stop.`,
         'practice-enter',
       );
     }
@@ -246,7 +246,7 @@ export async function POST(req: NextRequest) {
   if (presetSwitch && text.trim().split(/\s+/).length <= 9) {
     const next = presetSwitch === 'default' ? undefined : presetSwitch;
     await adminClient.from('conversations').update({ mode_state: { ...modeState, preset: next } }).eq('id', conversationId);
-    return say(next ? `Switched — ${PRESETS[next]?.label ?? next}.` : 'Back to normal.', 'preset-switch');
+    return say(next ? `Switched: ${PRESETS[next]?.label ?? next}.` : 'Back to normal.', 'preset-switch');
   }
 
   // ── inference net ─────────────────────────────────────────────────────
@@ -285,7 +285,7 @@ export async function POST(req: NextRequest) {
       await patchMode({});
       const r = sprintResult(sprint);
       await recordScore(user.id, 'math_sprint', r.score, { ms: r.ms, of: sprint.problems.length });
-      return say(`Stopped — ${r.line}.`, 'sprint-stop');
+      return say(`Stopped: ${r.line}.`, 'sprint-stop');
     }
     const num = text.trim().match(/-?\d+(?:\.\d+)?/);
     if (!num) return say(`Just the number, or "stop". ${sprint.problems[sprint.idx].q} = ?`, 'sprint-reprompt');
@@ -298,7 +298,7 @@ export async function POST(req: NextRequest) {
       await recordScore(user.id, 'math_sprint', r.score, { ms: r.ms, of: next.problems.length });
       const pb = await bestScore(user.id, 'math_sprint').catch(() => null);
       const pbLine = pb ? ` Best: ${pb.score}/${next.problems.length}${pb.detail.ms ? ` in ${Math.round(Number(pb.detail.ms) / 1000)}s` : ''}.` : '';
-      return say(`${right ? '✓' : `✗ (${cur.a})`} — that's the set. **${r.line}.**${pbLine}`, 'sprint-done');
+      return say(`${right ? '✓' : `✗ (${cur.a})`}, that's the set. **${r.line}.**${pbLine}`, 'sprint-done');
     }
     await adminClient.from('conversations').update({ mode_state: { ...modeState, sprint: next } }).eq('id', conversationId);
     return say(`${right ? '✓' : `✗ (${cur.a})`}  ·  ${next.idx + 1}/${next.problems.length}:  ${next.problems[next.idx].q} = ?`, 'sprint-next');
@@ -309,7 +309,7 @@ export async function POST(req: NextRequest) {
   if (rq?.order?.length) {
     if (/^\s*(stop|done|quit|end|exit)\b/i.test(text)) {
       await adminClient.from('conversations').update({ mode_state: { ...modeState, roots: undefined } }).eq('id', conversationId);
-      return say(`Stopped — ${rq.correct}/${rq.i} so far.`, 'roots-stop');
+      return say(`Stopped: ${rq.correct}/${rq.i} so far.`, 'roots-stop');
     }
     const { ok, want } = checkRoots(rq, text);
     await recordRootResult(user.id, ROOTS[rq.order[rq.i]].root, ok).catch(() => {});
@@ -319,7 +319,7 @@ export async function POST(req: NextRequest) {
       await adminClient.from('conversations').update({ mode_state: { ...modeState, roots: undefined } }).eq('id', conversationId);
       await recordScore(user.id, 'roots_quiz', advanced.correct, { of: advanced.i });
       const pb = await bestScore(user.id, 'roots_quiz').catch(() => null);
-      return say(`${mark} — done. **${advanced.correct}/${advanced.i}.**${pb ? ` Best: ${pb.score}/${pb.detail.of ?? 8}.` : ''}`, 'roots-done');
+      return say(`${mark}, done. **${advanced.correct}/${advanced.i}.**${pb ? ` Best: ${pb.score}/${pb.detail.of ?? 8}.` : ''}`, 'roots-done');
     }
     await adminClient.from('conversations').update({ mode_state: { ...modeState, roots: advanced } }).eq('id', conversationId);
     const p = rootsPrompt(advanced);
@@ -340,7 +340,7 @@ export async function POST(req: NextRequest) {
       if (checkRiddle(riddleSt.id, guess)) {
         await adminClient.from('conversations').update({ mode_state: { ...modeState, riddle: { ...riddleSt, revealed: true } } }).eq('id', conversationId);
         await recordScore(user.id, 'riddle', 1, { id: riddleSt.id });
-        return say(`Got it — ${RIDDLES[riddleSt.id].a}`, 'riddle-solved');
+        return say(`Got it: ${RIDDLES[riddleSt.id].a}`, 'riddle-solved');
       }
       const hint = RIDDLES[riddleSt.id].hint;
       return say(`Not it.${hint ? ` Hint: ${hint}` : ''} Say "answer" to give up.`, 'riddle-wrong');
@@ -389,7 +389,7 @@ export async function POST(req: NextRequest) {
   // ── "tidy up / any duplicates" → scan + propose ──────────────────────
   if (isTidyRequest(text)) {
     const items = await scanForTidy(user.id).catch(() => []);
-    if (!items.length) return say(`Your lists look clean — nothing to tidy.`, 'tidy-empty');
+    if (!items.length) return say(`Your lists look clean, nothing to tidy.`, 'tidy-empty');
     await adminClient.from('conversations').update({ mode_state: { ...modeState, tidy: items } }).eq('id', conversationId);
     const list = items.map((it, i) => `${i + 1}. ${it.summary}`).join('\n');
     return say(`Here's what I'd tidy:\n${list}\n\nReply with the numbers to apply (e.g. "1 3"), "all", or "none".`, 'tidy-proposed');
@@ -399,12 +399,12 @@ export async function POST(req: NextRequest) {
   if (isMathSprintStart(text)) {
     const s = newSprint();
     await adminClient.from('conversations').update({ mode_state: { ...modeState, sprint: s } }).eq('id', conversationId);
-    return say(`Math sprint — ${s.problems.length} problems, just the number, "stop" to bail.\n\n1/${s.problems.length}:  ${s.problems[0].q} = ?`, 'sprint-start');
+    return say(`Math sprint: ${s.problems.length} problems, just the number, "stop" to bail.\n\n1/${s.problems.length}:  ${s.problems[0].q} = ?`, 'sprint-start');
   }
   if (isRootsQuizStart(text)) {
     const s = await newRootsQuiz(user.id);
     await adminClient.from('conversations').update({ mode_state: { ...modeState, roots: s } }).eq('id', conversationId);
-    return say(`Roots quiz — 8 questions, "stop" to bail.\n\n1. ${rootsPrompt(s).text}`, 'roots-start');
+    return say(`Roots quiz: 8 questions, "stop" to bail.\n\n1. ${rootsPrompt(s).text}`, 'roots-start');
   }
   if (isRiddleRequest(text)) {
     const r = riddleOfTheDay();
@@ -412,7 +412,7 @@ export async function POST(req: NextRequest) {
     // keep today's if already going and unsolved; otherwise (re)seed
     const st: RiddleState = existing && existing.id === r.id ? existing : { id: r.id, revealed: false, at: Date.now() };
     await adminClient.from('conversations').update({ mode_state: { ...modeState, riddle: st } }).eq('id', conversationId);
-    return say(st.revealed ? `${r.q}\n\n(You already had this one — ${r.a})` : r.q, 'riddle');
+    return say(st.revealed ? `${r.q}\n\n(You already had this one: ${r.a})` : r.q, 'riddle');
   }
 
   // ── "save anything from this chat" → sweep + propose ──────────────────
@@ -457,7 +457,7 @@ export async function POST(req: NextRequest) {
       const c = (await findContacts(user.id, who).catch(() => []))[0];
       if (c && (c.name.toLowerCase() === who.toLowerCase() || (c.first_name ?? '').toLowerCase() === who.toLowerCase().split(' ')[0])) {
         await logContact(user.id, c.id).catch(() => {});
-        return say(`Noted — last caught up with ${c.name.split(' ')[0]} today.`, 'contact-logged');
+        return say(`Noted, last caught up with ${c.name.split(' ')[0]} today.`, 'contact-logged');
       }
       // no known contact by that name → fall through to the brain
     }
@@ -480,17 +480,17 @@ export async function POST(req: NextRequest) {
   if (scheduleShare) {
     const extracted = await extractSchedule(images, text).catch(() => null);
     if (!extracted || !extracted.ok || !extracted.blocks.length) {
-      return say(`I couldn't read a schedule off ${images.length > 1 ? 'those' : 'that'} — try a clearer screenshot.`, 'schedule-empty');
+      return say(`I couldn't read a schedule off ${images.length > 1 ? 'those' : 'that'}, try a clearer screenshot.`, 'schedule-empty');
     }
     const usedDefaultTerm = !extracted.term_start || !extracted.term_end;
     const termStart = extracted.term_start ?? scheduleDefaultTerm.start;
     const termEnd = extracted.term_end ?? scheduleDefaultTerm.end;
     const planned = expandBlocks(extracted.blocks, termStart, termEnd);
     if (!planned.length) {
-      return say(`I read the schedule but couldn't pin down real dates or times from it — try a clearer screenshot, or tell me the date range it covers.`, 'schedule-empty');
+      return say(`I read the schedule but couldn't pin down real dates or times from it; try a clearer screenshot, or tell me the date range it covers.`, 'schedule-empty');
     }
     const hasRecurring = extracted.blocks.some((b) => b.days?.length);
-    const termNote = hasRecurring && usedDefaultTerm ? ` (assumed the current term, ${termStart} to ${termEnd} — say so if that's wrong)` : '';
+    const termNote = hasRecurring && usedDefaultTerm ? ` (assumed the current term, ${termStart} to ${termEnd}; say so if that's wrong)` : '';
     const flagNote = extracted.notes ? ` Note: ${extracted.notes}` : '';
     const label = `schedule import ${new Date().toISOString().slice(0, 10)}`;
 
@@ -520,14 +520,14 @@ export async function POST(req: NextRequest) {
     const { rows } = await extractBeli(images).catch(() => ({ rows: [], costUsd: 0 }));
     if (rows.length) {
       const { added, updated, failed } = await saveBeliRows(user.id, rows);
-      if (failed) return say(`I read ${rows.length} place${rows.length > 1 ? 's' : ''} but couldn't save them — something's off on my end. Try again in a minute.`, 'beli-save-failed');
+      if (failed) return say(`I read ${rows.length} place${rows.length > 1 ? 's' : ''} but couldn't save them; something's off on my end. Try again in a minute.`, 'beli-save-failed');
       const top = rows.filter((r) => r.score != null).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 4).map((r) => `${r.name} (${r.score})`);
       return say(
-        `Got ${added + updated} — ${added} new, ${updated} updated.${top.length ? ` Top of this batch: ${top.join(', ')}.` : ''} ${images.length >= 8 ? 'That was the 8-screenshot max per message — send the rest in another message.' : 'Send more screenshots to fill it out.'}`,
+        `Got ${added + updated}: ${added} new, ${updated} updated.${top.length ? ` Top of this batch: ${top.join(', ')}.` : ''} ${images.length >= 8 ? 'That was the 8-screenshot max per message, send the rest in another message.' : 'Send more screenshots to fill it out.'}`,
         'beli-extract',
       );
     }
-    if (beliExplicit) return say(`I couldn't read a place list off ${images.length > 1 ? 'those' : 'that'} — try a clearer screenshot of the ranked or want-to-try view.`, 'beli-empty');
+    if (beliExplicit) return say(`I couldn't read a place list off ${images.length > 1 ? 'those' : 'that'}, try a clearer screenshot of the ranked or want-to-try view.`, 'beli-empty');
     // bare screenshot(s), not a restaurant list → let the vision path handle it
   }
   // a pending email draft + anything that isn't yes/no → treat it as a revision
@@ -535,15 +535,15 @@ export async function POST(req: NextRequest) {
     await decideAction(user.id, pending.id, 'rejected', conversationId);
     const prior = String((pending.payload as Record<string, unknown>).request ?? '');
     const d = await composeEmail(user.id, `${prior}\n\nNoah's revision: ${text}`).catch(() => null);
-    if (!d) return say(`Couldn't revise that one — say it again with a bit more detail.`, 'email-draft-failed');
+    if (!d) return say(`Couldn't revise that one; say it again with a bit more detail.`, 'email-draft-failed');
     await proposeAction({
       userId: user.id, kind: 'draft_email', riskTier: 'confirm',
-      summary: `Draft email to ${d.to_email ?? d.to_name ?? '(unspecified)'} — "${d.subject}"`,
+      summary: `Draft email to ${d.to_email ?? d.to_name ?? '(unspecified)'}: "${d.subject}"`,
       payload: { to_name: d.to_name, to_email: d.to_email, subject: d.subject, body: d.body, request: `${prior}\n\nNoah's revision: ${text}` },
       createdBy: conversationId,
     });
     return say(
-      `Revised — still nothing sent.\n\n**To:** ${d.to_email ?? d.to_name ?? "(you'll need to add this)"}\n**Subject:** ${d.subject}\n\n${d.body}\n\nSay yes for the link, or keep tweaking.`,
+      `Revised, still nothing sent.\n\n**To:** ${d.to_email ?? d.to_name ?? "(you'll need to add this)"}\n**Subject:** ${d.subject}\n\n${d.body}\n\nSay yes for the link, or keep tweaking.`,
       'email-draft-revised',
     );
   }
@@ -577,10 +577,10 @@ export async function POST(req: NextRequest) {
           const tail = r.row.tmdb_id
             ? ''
             : upgrading
-              ? " I'll pin down the exact title in a moment — check /watch."
-              : " (couldn't find it on TMDB — added by name)";
+              ? " I'll pin down the exact title in a moment, check /watch."
+              : " (couldn't find it on TMDB, added by name)";
           return say(
-            `Put **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''} on your watch list — want to watch${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${tail}`,
+            `Put **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''} on your watch list, want to watch${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${tail}`,
             'watch-add',
           );
         }
@@ -588,7 +588,7 @@ export async function POST(req: NextRequest) {
       }
       await upsertLoop(user.id, { title, due_at, recur, source: 'manual', tags: ['task'] });
       const whenNote = due_at
-        ? ` — ${recur ? 'first due ' : 'due '}${new Date(due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ })}`
+        ? `, ${recur ? 'first due ' : 'due '}${new Date(due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ })}`
         : '';
       const recurNote = recur ? ` (${RECUR_LABEL[recur]})` : '';
       return say(`Added: ${title}${whenNote}${recurNote}.`, 'task-add');
@@ -638,13 +638,13 @@ export async function POST(req: NextRequest) {
     if (p) {
       let host = p.url;
       try { host = new URL(p.url).hostname.replace(/^www\./, ''); } catch { /* keep raw */ }
-      const label = p.forWhat ? `${host} — ${p.forWhat}` : `${host} (any change)`;
+      const label = p.forWhat ? `${host}: ${p.forWhat}` : `${host} (any change)`;
       const w = await createWatcher(user.id, {
         kind: 'page', label, spec: { url: p.url, ...(p.forWhat ? { for: p.forWhat } : {}) }, intervalMin: 60,
       }).catch(() => null);
       return say(
         w
-          ? `Watching **${host}**${p.forWhat ? ` for ${p.forWhat}` : ' for changes'} — I'll ping you here when it moves. (checks hourly)`
+          ? `Watching **${host}**${p.forWhat ? ` for ${p.forWhat}` : ' for changes'}; I'll ping you here when it moves. (checks hourly)`
           : `Already watching that page.`,
         'watcher-page-add',
       );
@@ -657,7 +657,7 @@ export async function POST(req: NextRequest) {
     }).catch(() => null);
     return say(
       w
-        ? `Done — I'll watch the forecast against your calendar for the next ${days === 1 ? 'day' : `${days} days`} and warn you if rain or snow lands on a timed event.`
+        ? `Done, I'll watch the forecast against your calendar for the next ${days === 1 ? 'day' : `${days} days`} and warn you if rain or snow lands on a timed event.`
         : `Already watching the weather over your plans.`,
       'watcher-weather-add',
     );
@@ -665,7 +665,7 @@ export async function POST(req: NextRequest) {
   if (isFlightWatch(text)) {
     if (!flightStatusAvailable()) {
       return say(
-        `I can track flights once a flight-status key is set (RAPIDAPI_KEY — AeroDataBox on RapidAPI, free tier). Add that and ask again.`,
+        `I can track flights once a flight-status key is set (RAPIDAPI_KEY, AeroDataBox on RapidAPI, free tier). Add that and ask again.`,
         'watcher-flight-nokey',
       );
     }
@@ -677,7 +677,7 @@ export async function POST(req: NextRequest) {
       }).catch(() => null);
       return say(
         w
-          ? `Tracking **${f.flightNo}** on ${nice} — I'll ping you on a delay, gate change, or cancellation, and drop it once it lands.`
+          ? `Tracking **${f.flightNo}** on ${nice}; I'll ping you on a delay, gate change, or cancellation, and drop it once it lands.`
           : `Already tracking ${f.flightNo} that day.`,
         'watcher-flight-add',
       );
@@ -695,14 +695,14 @@ export async function POST(req: NextRequest) {
         const tail = r.row.tmdb_id
           ? ''
           : upgrading
-            ? " I'll pin down the exact title in a moment — check /watch."
-            : " (couldn't find it on TMDB — added by name)";
+            ? " I'll pin down the exact title in a moment, check /watch."
+            : " (couldn't find it on TMDB, added by name)";
         return say(
-          `${r.added ? 'Added' : 'Updated'} **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''} — ${r.row.status === 'watching' ? 'watching' : 'want to watch'}${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${tail}`,
+          `${r.added ? 'Added' : 'Updated'} **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''}, ${r.row.status === 'watching' ? 'watching' : 'want to watch'}${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${tail}`,
           'watch-add',
         );
       }
-      return say(`Couldn't add "${w.title}" — try the /watch screen.`, 'watch-add-failed');
+      return say(`Couldn't add "${w.title}"; try the /watch screen.`, 'watch-add-failed');
     }
   }
   if (isWatchUpdate(text) || await inferred('watchlist.update')) {
@@ -733,14 +733,14 @@ export async function POST(req: NextRequest) {
   // ── silent tier: "from now on, always ask before…" → a standing behavior rule ──
   if (isBehaviorRuleStatement(text) && !isCalendarWrite(text) && !isCalendarChange(text)) {
     const rule = await saveExplicitRule(user.id, text).catch(() => null);
-    if (rule) return say(`Noted — standing rule: "${rule}"`, 'behavior-rule-add');
+    if (rule) return say(`Noted, standing rule: "${rule}"`, 'behavior-rule-add');
     // LLM says it's not a real preference → fall through
   }
 
   // ── silent tier: "remember that I…" → confirmed profile_fact, no gate ────
   if (isExplicitRemember(text) && !isCalendarWrite(text)) {
     const saved = await saveFactFromText(user.id, text).catch(() => null);
-    if (saved) return say(`Got it — I'll remember that: ${saved}`, 'fact-saved');
+    if (saved) return say(`Got it, I'll remember that: ${saved}`, 'fact-saved');
     // nothing concrete to store → fall through to the brain
   }
 
@@ -753,24 +753,39 @@ export async function POST(req: NextRequest) {
     const draft = await extractTaskChange(text, recentForTask).catch(() => null);
     if (!draft) return say(`Which task do you mean?`, 'task-edit-underspecified');
     const found = await findLoopByHint(user.id, draft.match).catch(() => ({ none: true as const }));
-    if ('none' in found) return say(`I don't see a task matching "${draft.match}" — what's it titled on your list?`, 'task-edit-nomatch');
+    if ('none' in found) return say(`I don't see a task matching "${draft.match}"; what's it titled on your list?`, 'task-edit-nomatch');
     if ('ambiguous' in found) {
       const opts = found.ambiguous.map((l) => l.title).join('; ');
       return say(`A few could match: ${opts}. Which one?`, 'task-edit-ambiguous');
     }
     if (!draft.new_title) return say(`What should "${found.hit.title}" say instead?`, 'task-edit-underspecified');
     await setLoopTitle(user.id, found.hit.id, draft.new_title);
-    return say(`Fixed — "${found.hit.title}" now reads "${draft.new_title}".`, 'task-edit-done');
+    const fixedNote = `Fixed: "${found.hit.title}" now reads "${draft.new_title}".`;
+
+    // The same message can also ask to put the (newly-titled) task on the
+    // calendar — this used to get silently dropped since the block above
+    // always returned right after the rename.
+    if (isCalendarWrite(text) || await inferred('calendar.create')) {
+      const ev =
+        (await extractEvent(text).catch(() => null)) ??
+        (found.hit.due_at
+          ? { title: draft.new_title, start_at: found.hit.due_at, end_at: null, all_day: false, location: null, city: null }
+          : null);
+      if (!ev) return say(`${fixedNote} What time's it at, so I can add it to your calendar?`, 'task-edit-then-calendar-underspecified');
+      const r = await createOrProposeEvent(ev, text, user.id, conversationId);
+      return say(`${fixedNote} ${r.message}`, r.reason);
+    }
+    return say(fixedNote, 'task-edit-done');
   }
 
   // ── confirm / named-consequence: change or cancel a calendar event ──────
   if ((isCalendarChange(text) || await inferred('calendar.change')) && !isCalendarWrite(text) && !isTaskEdit(text)) {
     const ch = await extractCalendarChange(text).catch(() => null);
-    if (!ch) return say(`Which event do you mean — name it and the day?`, 'cal-change-underspecified');
+    if (!ch) return say(`Which event do you mean? Name it and the day.`, 'cal-change-underspecified');
     const found = await findEventByHint(user.id, ch.match).catch(() => ({ none: true as const }));
     if ('none' in found) return say(`I don't see "${ch.match}" on your synced calendar. Try naming it the way it reads there.`, 'cal-change-nomatch');
     if ('ambiguous' in found) {
-      const opts = found.ambiguous.map((e) => `${e.title} — ${whenLabel(e.start_at)}`).join('; ');
+      const opts = found.ambiguous.map((e) => `${e.title}, ${whenLabel(e.start_at)}`).join('; ');
       return say(`A few could match: ${opts}. Which one?`, 'cal-change-ambiguous');
     }
     const e = found.hit;
@@ -780,7 +795,7 @@ export async function POST(req: NextRequest) {
         summary: `Delete "${e.title}" (${whenLabel(e.start_at)}) from your calendar`,
         payload: { uid: e.uid, title: e.title, start_at: e.start_at }, createdBy: conversationId,
       });
-      return say(`Remove **${e.title}** (${whenLabel(e.start_at)}) from your calendar? If it has other guests this cancels for them too — reply **yes, delete it** to confirm.`, 'action-proposed');
+      return say(`Remove **${e.title}** (${whenLabel(e.start_at)}) from your calendar? If it has other guests this cancels for them too; reply **yes, delete it** to confirm.`, 'action-proposed');
     }
     const bits: string[] = [];
     if (ch.new_start) bits.push(`→ ${whenLabel(ch.new_start)}`);
@@ -793,75 +808,29 @@ export async function POST(req: NextRequest) {
       payload: { uid: e.uid, new_title: ch.new_title, new_start: ch.new_start, new_end: ch.new_end, new_location: ch.new_location },
       createdBy: conversationId,
     });
-    return say(`Update **${e.title}** (${whenLabel(e.start_at)}) — ${bits.join(', ')}? Say yes and I'll change it.`, 'action-proposed');
+    return say(`Update **${e.title}** (${whenLabel(e.start_at)}): ${bits.join(', ')}? Say yes and I'll change it.`, 'action-proposed');
   }
 
   // ── calendar write → auto-add if trusted, else propose and wait for yes ──
   if (isCalendarWrite(text) || await inferred('calendar.create')) {
     const ev = await extractEvent(text).catch(() => null);
-    if (!ev) return say(`I can put that on your calendar — when, exactly?`, 'calendar-write-underspecified');
-    const when = whenLabel(ev.start_at, ev.all_day);
-
-    // Resolve the venue → a city + coords (for storage and the same-day
-    // location check). Best effort: no location, or an unrecognisable one, just
-    // means no geo and no conflict warning.
-    const place = ev.location ? await geocodePlace(ev.location).catch(() => null) : null;
-    const evGeo = {
-      ...ev,
-      city: place?.city ?? ev.city ?? null,
-      region: place?.region ?? null,
-      country: place?.country ?? null,
-      lat: place?.lat ?? null,
-      lon: place?.lon ?? null,
-    };
-    const clash = await sameDayConflict(user.id, evGeo).catch(() => null);
-    const clashNote = clash ? ` Heads up — ${clash}.` : '';
-
-    // Guests named in the message ("with David") who are contacts with an email.
-    // We put them on the event; iCloud may not actually mail them, so we also
-    // hand Noah a one-tap mailto to send the invite himself.
-    const attendees = await resolveAttendees(user.id, text).catch(() => [] as { name: string; email: string }[]);
-    const evFull = { ...evGeo, attendees };
-    const inviteNote =
-      attendees.length && !ev.all_day
-        ? ` To invite ${attendees.map((a) => a.name.split(' ')[0]).join(' & ')}: ${attendees
-            .map((a) => `[email ${a.name.split(' ')[0]}](${inviteMailto(a.email, ev.title, when, ev.location)})`)
-            .join(' · ')}`
-        : attendees.length
-          ? ` (${attendees.map((a) => a.name.split(' ')[0]).join(' & ')} ${attendees.length > 1 ? 'are' : 'is'} on the invite.)`
-          : '';
-
-    if (await isAutoAllowed('create_event').catch(() => false)) {
-      const r = await runAutoCreateEvent(user.id, evFull, conversationId).catch(() => ({ ok: false }));
-      if (r.ok) {
-        return say(
-          `Added **${ev.title}** — **${when}**${ev.location ? ` (${ev.location})` : ''}. Say "undo" if that's wrong.${clashNote}${inviteNote}`,
-          'calendar-auto',
-        );
-      }
-      // couldn't write → fall through to the confirm path
-    }
-    const guestLine = attendees.length ? `, with ${attendees.map((a) => a.name).join(', ')}` : '';
-    await proposeAction({
-      userId: user.id, kind: 'create_event', riskTier: 'confirm',
-      summary: `${ev.title} — ${when}${guestLine}`,
-      payload: { ...evFull }, createdBy: conversationId,
-    });
-    return say(`Put **${ev.title}** on your calendar for **${when}**${ev.location ? ` (${ev.location})` : ''}${guestLine}? Say yes and I'll add it.${clashNote}`, 'action-proposed');
+    if (!ev) return say(`I can put that on your calendar: when, exactly?`, 'calendar-write-underspecified');
+    const r = await createOrProposeEvent(ev, text, user.id, conversationId);
+    return say(r.message, r.reason);
   }
 
   // ── confirm tier: draft an email → compose, show it, wait for yes ───────
   if (isEmailDraft(text)) {
     const d = await composeEmail(user.id, text).catch(() => null);
-    if (!d) return say(`I couldn't put that draft together — try again, or give me a bit more to go on.`, 'email-draft-failed');
+    if (!d) return say(`I couldn't put that draft together; try again, or give me a bit more to go on.`, 'email-draft-failed');
     await proposeAction({
       userId: user.id, kind: 'draft_email', riskTier: 'confirm',
-      summary: `Draft email to ${d.to_email ?? d.to_name ?? '(unspecified)'} — "${d.subject}"`,
+      summary: `Draft email to ${d.to_email ?? d.to_name ?? '(unspecified)'}: "${d.subject}"`,
       payload: { to_name: d.to_name, to_email: d.to_email, subject: d.subject, body: d.body, request: text },
       createdBy: conversationId,
     });
     return say(
-      `Here's a draft — nothing's sent yet.\n\n**To:** ${d.to_email ?? d.to_name ?? "(you'll need to add this)"}\n**Subject:** ${d.subject}\n\n${d.body}\n\nSay yes and I'll hand you a link that opens it in your mail app, or tell me what to change.`,
+      `Here's a draft, nothing's sent yet.\n\n**To:** ${d.to_email ?? d.to_name ?? "(you'll need to add this)"}\n**Subject:** ${d.subject}\n\n${d.body}\n\nSay yes and I'll hand you a link that opens it in your mail app, or tell me what to change.`,
       'email-draft-proposed',
     );
   }
@@ -891,7 +860,7 @@ export async function POST(req: NextRequest) {
       ? r.deduped
         ? `Already on your ${r.item.kind} list: ${r.item.title ?? r.item.url}.`
         : `Filed under ${r.item.kind}: ${r.item.title ?? r.item.url}.${r.item.descriptor ? ` ${r.item.descriptor}` : ''}`
-      : `Couldn't grab that link — ${r.error}.`;
+      : `Couldn't grab that link: ${r.error}.`;
     await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply });
     await audit.log('outbound_message', 'calliad', conversationId, { text: reply, surface, reason: 'capture' });
     return streamResponse(conversationId, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
@@ -967,7 +936,7 @@ export async function POST(req: NextRequest) {
       toolResult = block;
     } else {
       toolResult = moxUrl
-        ? `## Deck analysis\nCouldn't pull that Moxfield deck — it's almost certainly private or unlisted (public decks import fine). Ask Noah to make it public, or paste the list (Moxfield: "..." menu → Export → copy).`
+        ? `## Deck analysis\nCouldn't pull that Moxfield deck; it's almost certainly private or unlisted (public decks import fine). Ask Noah to make it public, or paste the list (Moxfield: "..." menu → Export → copy).`
         : `## Deck analysis\nCouldn't read a decklist from that${deckUrl ? ' link' : ''}. Ask Noah to paste the list or an Archidekt / Moxfield URL.`;
     }
   } else if (isEdhrecQuery(text)) {
@@ -975,7 +944,7 @@ export async function POST(req: NextRequest) {
     const recs = name ? await getCommanderRecs(name).catch(() => null) : null;
     toolResult = recs
       ? recBlock(recs)
-      : `## EDHREC\nCouldn't tell which commander Noah means${name ? ` ("${name}" — not found on EDHREC)` : ''}. Ask him to name it.`;
+      : `## EDHREC\nCouldn't tell which commander Noah means${name ? ` ("${name}", not found on EDHREC)` : ''}. Ask him to name it.`;
   } else if (isCardQuestion(text) || await inferred('card.question')) {
     const names = extractCardNames(text);
     const { found } = names.length ? await getCards(names) : { found: [] };
@@ -1020,7 +989,7 @@ export async function POST(req: NextRequest) {
     const fp = await extractFlight(text).catch(() => null);
     toolResult = fp
       ? await flightSearch(fp, await prefsLine(user.id).catch(() => '')).catch(() => undefined)
-      : `## Flight search\nCouldn't pin down where/when — ask Noah for the destination and rough dates.`;
+      : `## Flight search\nCouldn't pin down where/when; ask Noah for the destination and rough dates.`;
   } else if (isRestaurantQuery(text)) {
     const rp = await extractRestaurant(text).catch(() => null);
     const [handoff, prefs] = await Promise.all([
@@ -1035,7 +1004,7 @@ export async function POST(req: NextRequest) {
   } else if (isLyricQuery(text)) {
     toolResult = await findByLyrics(text).catch(() => undefined);
   } else if (/\b(name that song|what song is (this|that|playing)|shazam|identif(y|ies) (this|the) song|what'?s (this|that) song)\b/i.test(text)) {
-    toolResult = `## Song ID\nNoah wants to identify a song that's playing but sent no audio. Tell him to hold the ♪ button in the composer while it plays — a few seconds is enough.`;
+    toolResult = `## Song ID\nNoah wants to identify a song that's playing but sent no audio. Tell him to hold the ♪ button in the composer while it plays; a few seconds is enough.`;
   }
 
   // Fallback: an unanswered factual lookup ("what's the storage code") — check
@@ -1103,7 +1072,7 @@ export async function POST(req: NextRequest) {
       yield sse({ error: String(err) });
     }
     // stream is fully drained here → meta.text / meta.costUsd populated
-    const finalText = meta.text || 'Something broke on my end — try that again in a minute.';
+    const finalText = meta.text || 'Something broke on my end; try that again in a minute.';
     await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: finalText });
     await audit.log('outbound_message', 'calliad', conversationId, {
       text: finalText, surface, tier: meta.tier, model: meta.model, cost_usd: meta.costUsd, capped: meta.capped,
@@ -1138,6 +1107,68 @@ function inviteMailto(email: string, title: string, when: string, location?: str
   const subject = `Invitation: ${title}`;
   const body = `Hi,\n\nPutting this on the calendar: ${title}\nWhen: ${when}${location ? `\nWhere: ${location}` : ''}\n\nHope you can make it.`;
   return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+/** Shared by the standalone calendar-create handler and any other flow that
+ *  ends in "…and add it to my calendar" (e.g. a task edit). Auto-adds if the
+ *  trust ladder allows it, else proposes and waits for a yes. */
+async function createOrProposeEvent(
+  ev: { title: string; start_at: string; end_at?: string | null; all_day?: boolean; location?: string | null; city?: string | null },
+  text: string,
+  userId: string,
+  conversationId: string,
+): Promise<{ message: string; reason: string }> {
+  const when = whenLabel(ev.start_at, ev.all_day);
+
+  // Resolve the venue → a city + coords (for storage and the same-day
+  // location check). Best effort: no location, or an unrecognisable one, just
+  // means no geo and no conflict warning.
+  const place = ev.location ? await geocodePlace(ev.location).catch(() => null) : null;
+  const evGeo = {
+    ...ev,
+    city: place?.city ?? ev.city ?? null,
+    region: place?.region ?? null,
+    country: place?.country ?? null,
+    lat: place?.lat ?? null,
+    lon: place?.lon ?? null,
+  };
+  const clash = await sameDayConflict(userId, evGeo).catch(() => null);
+  const clashNote = clash ? ` Heads up, ${clash}.` : '';
+
+  // Guests named in the message ("with David") who are contacts with an email.
+  // We put them on the event; iCloud may not actually mail them, so we also
+  // hand Noah a one-tap mailto to send the invite himself.
+  const attendees = await resolveAttendees(userId, text).catch(() => [] as { name: string; email: string }[]);
+  const evFull = { ...evGeo, attendees };
+  const inviteNote =
+    attendees.length && !ev.all_day
+      ? ` To invite ${attendees.map((a) => a.name.split(' ')[0]).join(' & ')}: ${attendees
+          .map((a) => `[email ${a.name.split(' ')[0]}](${inviteMailto(a.email, ev.title, when, ev.location)})`)
+          .join(' · ')}`
+      : attendees.length
+        ? ` (${attendees.map((a) => a.name.split(' ')[0]).join(' & ')} ${attendees.length > 1 ? 'are' : 'is'} on the invite.)`
+        : '';
+
+  if (await isAutoAllowed('create_event').catch(() => false)) {
+    const r = await runAutoCreateEvent(userId, evFull, conversationId).catch(() => ({ ok: false }));
+    if (r.ok) {
+      return {
+        message: `Added **${ev.title}**, **${when}**${ev.location ? ` (${ev.location})` : ''}. Say "undo" if that's wrong.${clashNote}${inviteNote}`,
+        reason: 'calendar-auto',
+      };
+    }
+    // couldn't write → fall through to the confirm path
+  }
+  const guestLine = attendees.length ? `, with ${attendees.map((a) => a.name).join(', ')}` : '';
+  await proposeAction({
+    userId, kind: 'create_event', riskTier: 'confirm',
+    summary: `${ev.title}, ${when}${guestLine}`,
+    payload: { ...evFull }, createdBy: conversationId,
+  });
+  return {
+    message: `Put **${ev.title}** on your calendar for **${when}**${ev.location ? ` (${ev.location})` : ''}${guestLine}? Say yes and I'll add it.${clashNote}`,
+    reason: 'action-proposed',
+  };
 }
 
 async function recentTurns(conversationId: string, currentText: string) {

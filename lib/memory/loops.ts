@@ -159,7 +159,7 @@ export async function setLoopTitle(userId: string, id: string, title: string): P
     .eq('id', id);
 }
 
-export interface MatchedLoop { id: string; title: string }
+export interface MatchedLoop { id: string; title: string; due_at: string | null }
 
 const LOOP_HINT_STOP = new Set([
   'the', 'a', 'an', 'my', 'our', 'to', 'on', 'at', 'for', 'with', 'me', 'that', 'please', 'one',
@@ -174,7 +174,7 @@ export async function findLoopByHint(
 ): Promise<{ hit: MatchedLoop } | { ambiguous: MatchedLoop[] } | { none: true }> {
   const { data } = await adminClient
     .from('open_loops')
-    .select('id, title')
+    .select('id, title, due_at')
     .eq('user_id', userId)
     .eq('status', 'open')
     .limit(200);

@@ -13,13 +13,13 @@ import { coreProfile, renderSections } from '@/lib/brain/profile';
 // ── Layer 5: mode overlays (short; rendered only when mode != default) ──────
 const MODE_OVERLAY: Partial<Record<Mode, string>> = {
   'italian-tutor':
-    `## Mode: Italian tutor\nConverse with Noah in Italian at roughly B1 / intermediate (his level). Keep replies natural and not too long. Correct his mistakes briefly as you go — a quick "(si dice X, non Y)" — don't lecture. Localise idioms, never transliterate. Only drop into English if he's clearly stuck or asks. Your persona and dry humour still apply, just in Italian.`,
+    `## Mode: Italian tutor\nConverse with Noah in Italian at roughly B1 / intermediate (his level). Keep replies natural and not too long. Correct his mistakes briefly as you go, a quick "(si dice X, non Y)", don't lecture. Localise idioms, never transliterate. Only drop into English if he's clearly stuck or asks. Your persona and dry humour still apply, just in Italian.`,
   'study-coach':
-    `## Mode: Study coach\nPoint Noah at what to prioritise given weight and time left. Do NOT produce the answers, write the work, or summarise the readings' conclusions — orient him, don't substitute for the studying. Use the Live data (exam dates, weights) and open loops.`,
+    `## Mode: Study coach\nPoint Noah at what to prioritise given weight and time left. Do NOT produce the answers, write the work, or summarise the readings' conclusions; orient him, don't substitute for the studying. Use the Live data (exam dates, weights) and open loops.`,
   'quiz':
-    `## Mode: Quiz\nActive-recall quizzing over what Noah is actually studying (Latin / Greek / Italian vocab and forms — see profile). Ask one item at a time, wait for his answer, mark it, give the correct form if he missed it, then the next. Keep it moving. No generic trivia — only material tied to his courses.`,
+    `## Mode: Quiz\nActive-recall quizzing over what Noah is actually studying (Latin / Greek / Italian vocab and forms, see profile). Ask one item at a time, wait for his answer, mark it, give the correct form if he missed it, then the next. Keep it moving. No generic trivia, only material tied to his courses.`,
   morphology:
-    `## Mode: Morphology\nNoah asked for a conjugation, declension, or parse. The morphology tool result (if present) is the source of truth — narrate and format it, don't second-guess it. If no tool result is available, give your best answer but flag that it's unverified.`,
+    `## Mode: Morphology\nNoah asked for a conjugation, declension, or parse. The morphology tool result (if present) is the source of truth: narrate and format it, don't second-guess it. If no tool result is available, give your best answer but flag that it's unverified.`,
 };
 
 const CONTENT_DIR = path.join(process.cwd(), 'content');
@@ -36,24 +36,26 @@ const OPERATING_RULES = `
   save to a list) may proceed.
 - Descriptive, not substitutive. Reading-list blurbs give subject + scope, never findings.
   Study help points at what to focus on; it does not produce the answers.
-- Deterministic tools for facts. Latin/Greek morphology, prices, dates, song IDs, game rules —
+- Deterministic tools for facts. Latin/Greek morphology, prices, dates, song IDs, game rules:
   call the tool, don't freehand. Persona governs tone; tools govern truth.
 - Live web. Some turns you're given a web_search tool. When it's there, use it for anything
-  that turns on current or outside facts — recent releases, prices, news, standings, "latest",
-  "as of now" — and name your source in the reply. Skip it for things you already know or that
+  that turns on current or outside facts (recent releases, prices, news, standings, "latest",
+  "as of now") and name your source in the reply. Skip it for things you already know or that
   live in Noah's own data (calendar, tasks, profile, morphology). If a turn needs it and it
-  isn't there, just say you can't look that up right now — never print a pretend tool call like
+  isn't there, just say you can't look that up right now; never print a pretend tool call like
   "gaming_news(query=…)".
 - Quiet hours. Nothing proactive between 1:00 and 7:00 AM local unless genuinely urgent.
 - Checking loops. Answer "did I / is it" once, plainly. A repeat gets a short confirmation,
   not new caveats.
-- Don't think out loud. Give the clean answer — no "wait, actually…" mid-sentence corrections,
+- Don't think out loud. Give the clean answer, no "wait, actually…" mid-sentence corrections,
   no narrating how you got there. If you're unsure, say so briefly at the end, not in a ramble.
 - No antithesis frames. Never phrase a point as "it's X, not Y", "not X but Y", "less X, more Y",
-  or "closer to X than Y". State the thing directly. (Litotes — "not great", "not ideal" — is
+  or "closer to X than Y". State the thing directly. (Litotes ("not great", "not ideal") is
   fine; the ban is the contrastive balance.) This is the biggest tell that you're a bot.
+- No em dashes, ever. Not in a reply, not in a proposed action summary. Use a period, comma,
+  colon, semicolon, or parentheses instead. This is the second-biggest tell that you're a bot.
 - Calendar vs. profile. The "Live data" block is ground truth for what's scheduled. Profile
-  details like class times are background reference — never present them as confirmed events on
+  details like class times are background reference; never present them as confirmed events on
   specific dates.
 - Medication. Don't rely on the Apple Reminders checkbox (Noah never ticks it). Use an active
   check-in.
@@ -89,10 +91,10 @@ export interface TurnState {
 }
 
 function renderLoops(loops: OpenLoop[], tz: string): string {
-  const lines = ['## Open loops (working state — things in progress or pending a decision)'];
+  const lines = ['## Open loops (working state: things in progress or pending a decision)'];
   for (const l of loops) {
     const due = l.due_at
-      ? ` — due ${new Date(l.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz })}`
+      ? `, due ${new Date(l.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz })}`
       : '';
     lines.push(`- ${l.title}${due}${l.body ? `: ${l.body}` : ''}`);
   }
@@ -112,7 +114,7 @@ function renderIntegrations(ctx: IntegrationContext, tz: string): string {
       lines.push(`- ${e.title} · ${when}${e.location ? ` · ${e.location}` : ''}`);
     }
   } else {
-    lines.push('', 'Calendar checked — nothing scheduled in the next 14 days. If asked about the week, say the calendar is clear in one line. Do NOT invent events, and do NOT list things that are not happening. Class times in the profile are reference only, not confirmed events.');
+    lines.push('', 'Calendar checked: nothing scheduled in the next 14 days. If asked about the week, say the calendar is clear in one line. Do NOT invent events, and do NOT list things that are not happening. Class times in the profile are reference only, not confirmed events.');
   }
 
   if (ctx.emails.length) {
@@ -121,7 +123,7 @@ function renderIntegrations(ctx: IntegrationContext, tz: string): string {
       const when = m.received_at
         ? new Date(m.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: tz })
         : '';
-      lines.push(`- [${when}] ${m.from_addr} — ${m.subject}${m.snippet ? `: ${m.snippet.slice(0, 160)}` : ''}`);
+      lines.push(`- [${when}] ${m.from_addr}: ${m.subject}${m.snippet ? ` (${m.snippet.slice(0, 160)})` : ''}`);
     }
     lines.push('</untrusted>');
   } else {
@@ -154,7 +156,7 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
     // Layer 3 — profile CORE, second cache breakpoint (stable within a session).
     {
       type: 'text',
-      text: `## About Noah (core — always in)\n\n${PROFILE_CORE}`,
+      text: `## About Noah (core, always in)\n\n${PROFILE_CORE}`,
       cache_control: { type: 'ephemeral', ttl: '1h' },
     },
     // Layer 4 — fresh every turn, MUST sit after the last breakpoint.
@@ -162,7 +164,7 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
   ];
 
   const extra = renderSections(state.profileSections ?? []);
-  if (extra) system.push({ type: 'text', text: `## About Noah — relevant to this turn\n\n${extra}` });
+  if (extra) system.push({ type: 'text', text: `## About Noah (relevant to this turn)\n\n${extra}` });
   if (state.learned) system.push({ type: 'text', text: state.learned });
   if (state.medStatus) system.push({ type: 'text', text: state.medStatus });
   if (state.behaviorRules) system.push({ type: 'text', text: state.behaviorRules });
