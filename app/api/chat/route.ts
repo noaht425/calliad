@@ -240,6 +240,26 @@ export async function POST(req: NextRequest) {
     return say(next ? `Switched — ${PRESETS[next]?.label ?? next}.` : 'Back to normal.', 'preset-switch');
   }
 
+  // ── inference net ─────────────────────────────────────────────────────
+  // One cheap T1 pass names the intent behind a message the regex guards would
+  // miss ("I'm going to a concert Friday" → calendar.create). Lazy + memoised:
+  // runs at most once per turn, only when a guard actually consults it. Handlers
+  // still do their own extraction + gating; this only widens what reaches them.
+  // Defined here (before the practice-mode gate) so the tool-result chain can
+  // use it too; inferredGuess() itself no-ops inside a language-practice thread.
+  let _intentGuess: IntentGuess | null | undefined;
+  const inferredGuess = async (): Promise<IntentGuess | null> => {
+    if (modeState.practiceLang) return null;
+    if (_intentGuess === undefined) {
+      _intentGuess = await classifyIntent(text, await recentTurns(conversationId, text), conversationId).catch(() => null);
+    }
+    return _intentGuess ?? null;
+  };
+  const inferred = async (want: Intent): Promise<boolean> => {
+    const g = await inferredGuess();
+    return g?.intent === want && (g.confidence ?? 0) >= 0.7;
+  };
+
   // A language-practice thread is a conversation. The English-command intent
   // handlers below (calendar, tasks, watch list, taste, games, capture…) misfire
   // on foreign text and on the user explaining in English what they want to say,
@@ -357,22 +377,6 @@ export async function POST(req: NextRequest) {
     return say(recap, 'tidy-apply');
   }
 
-  // ── inference net ─────────────────────────────────────────────────────
-  // One cheap T1 pass names the action behind a message the regex guards below
-  // would miss ("I'm going to a concert Friday" → calendar.create). Lazy +
-  // memoised: it runs at most once, and only when a guard actually consults it
-  // — never when an earlier handler already returned or its own regex matched.
-  // Handlers still do their own extraction + the trust-ladder gate; this only
-  // widens what reaches them.
-  let _intentGuess: IntentGuess | null | undefined;
-  const inferred = async (want: Intent): Promise<boolean> => {
-    if (modeState.practiceLang) return false; // language practice — never route commands out of it
-    if (_intentGuess === undefined) {
-      _intentGuess = await classifyIntent(text, await recentTurns(conversationId, text), conversationId).catch(() => null);
-    }
-    return _intentGuess?.intent === want && (_intentGuess?.confidence ?? 0) >= 0.7;
-  };
-
   // ── "tidy up / any duplicates" → scan + propose ──────────────────────
   if (isTidyRequest(text)) {
     const items = await scanForTidy(user.id).catch(() => []);
@@ -438,7 +442,8 @@ export async function POST(req: NextRequest) {
 
   // ── silent tier: "talked to Mom today" / "had lunch with Dave" → log contact ──
   {
-    const who = detectContactLog(text);
+    const g = await inferredGuess();
+    const who = detectContactLog(text) ?? (g?.intent === 'contact.log' && (g.confidence ?? 0) >= 0.7 ? g.person ?? null : null);
     if (who) {
       const c = (await findContacts(user.id, who).catch(() => []))[0];
       if (c && (c.name.toLowerCase() === who.toLowerCase() || (c.first_name ?? '').toLowerCase() === who.toLowerCase().split(' ')[0])) {
@@ -654,7 +659,7 @@ export async function POST(req: NextRequest) {
       return say(`Couldn't add "${w.title}" — try the /watch screen.`, 'watch-add-failed');
     }
   }
-  if (isWatchUpdate(text)) {
+  if (isWatchUpdate(text) || await inferred('watchlist.update')) {
     const msg = await applyWatchUpdate(user.id, text).catch(() => null);
     if (msg) return say(msg, 'watch-update');
     // no match on the list → fall through (maybe it's a taste reaction)
@@ -663,7 +668,7 @@ export async function POST(req: NextRequest) {
   // ── silent tier: a reaction to a book/show/film/game → taste_log ────────
   // Runs before the profile-fact path so "remember I loved X" lands in the
   // taste log (verdict + why), not as a loose profile fact.
-  if (isTasteReaction(text)) {
+  if (isTasteReaction(text) || await inferred('taste.reaction')) {
     const logged = await saveTasteFromText(user.id, text).catch(() => null);
     if (logged) return say(logged, 'taste-logged');
     // not actually a media reaction → fall through
@@ -906,7 +911,7 @@ export async function POST(req: NextRequest) {
     toolResult = recs
       ? recBlock(recs)
       : `## EDHREC\nCouldn't tell which commander Noah means${name ? ` ("${name}" — not found on EDHREC)` : ''}. Ask him to name it.`;
-  } else if (isCardQuestion(text)) {
+  } else if (isCardQuestion(text) || await inferred('card.question')) {
     const names = extractCardNames(text);
     const { found } = names.length ? await getCards(names) : { found: [] };
     // only pin a tool result if Scryfall actually returned a card — otherwise
@@ -916,7 +921,7 @@ export async function POST(req: NextRequest) {
   } else if (isTranscriptRequest(text)) {
     const { decks } = parseSimRequest(text);
     toolResult = await runTranscript(decks).catch(() => undefined);
-  } else if (isSimRequest(text)) {
+  } else if (isSimRequest(text) || await inferred('sim.request')) {
     const { decks, games } = parseSimRequest(text);
     toolResult = await runSimulation(decks, games).catch(() => undefined);
   } else if (wantsWebFetch) {
@@ -925,19 +930,19 @@ export async function POST(req: NextRequest) {
     toolResult = target
       ? await runWebFetch(target, text).catch(() => undefined)
       : `## Web fetch\nNoah asked about a saved link but his reading list is empty.`;
-  } else if (isRecallQuestion(text)) {
+  } else if (isRecallQuestion(text) || await inferred('recall.question')) {
     const hits = await searchNotes(user.id, text).catch(() => []);
     toolResult = notesRecallBlock(hits);
-  } else if (isSubscriptionQuery(text)) {
+  } else if (isSubscriptionQuery(text) || await inferred('subscription.query')) {
     toolResult = await subscriptionsSummary(user.id).catch(() => undefined);
-  } else if (isWatchQuery(text)) {
+  } else if (isWatchQuery(text) || await inferred('watchlist.query')) {
     if (/\b(airing|dropping|coming out|new (episode|season)) (soon|this week|next)|what'?s (airing|new|dropping)/i.test(text)) {
       const soon = await watchContextLine(user.id).catch(() => [] as string[]);
       toolResult = soon.length ? `## Airing soon\n${soon.map((s) => `- ${s}`).join('\n')}` : `## Airing soon\nNothing in your watch list has an episode in the next ~10 days.`;
     } else {
       toolResult = watchListBlock(await listWatch(user.id).catch(() => []));
     }
-  } else if (isRestaurantTasteQuery(text)) {
+  } else if (isRestaurantTasteQuery(text) || await inferred('restaurant.reco')) {
     toolResult = await restaurantTasteBlock(user.id, text).catch(() => undefined);
   } else if (/\b(would i (like|enjoy|hate|bounce off)|should i (watch|read|play|start|bother with|eat at|go to)|do you think i'?d (like|enjoy)|worth (watching|reading|playing|a visit|going to)|think i'?d (like|enjoy)|what did i (rate|think of|give)|have i (been (to|there)|tried|eaten at)|my (score|rating) (for|of|on))\b/i.test(text)) {
     // restaurant first (covers "would I like <place>" / "what did I rate <place>"),
@@ -958,7 +963,7 @@ export async function POST(req: NextRequest) {
       restaurantPrefsBlock(user.id).catch(() => ''),
     ]);
     toolResult = [handoff, prefs].filter(Boolean).join('\n\n') || undefined;
-  } else if (isWeatherQuery(text)) {
+  } else if (isWeatherQuery(text) || await inferred('weather.query')) {
     toolResult = await runForecast(text).catch(() => undefined);
   } else if (isRecipeQuery(text)) {
     toolResult = await runRecipe(text).catch(() => undefined);
