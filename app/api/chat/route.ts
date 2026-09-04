@@ -24,7 +24,7 @@ import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isNoteCapture, extractNote, saveNote, isRecallQuestion, isLookupQuestion, searchNotes, notesRecallBlock, maybeIndexTurn } from '@/lib/memory/notes';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
-import { isAutoAllowed, runAutoCreateEvent, isUndo, undoLastAuto } from '@/lib/actions/auto';
+import { isAutoAllowed, runAutoCreateEvent, isUndo, undoLastAuto, recordScheduleImport } from '@/lib/actions/auto';
 import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo, isCalendarChange, extractCalendarChange, findEventByHint } from '@/lib/actions/detect';
 import { extractTask } from '@/lib/actions/task';
 import { classifyMedReply, recordMed, medContextLine } from '@/lib/health/meds';
@@ -47,6 +47,7 @@ import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
 import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
 import { isRecipeShare, extractShareUrl, shareRecipeToAbentfork } from '@/lib/tools/abentfork';
 import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock, isRestaurantTasteQuery, restaurantTasteBlock } from '@/lib/tools/beli';
+import { isScheduleShare, extractSchedule, expandBlocks, materializeEvents, scheduleDefaultTerm } from '@/lib/tools/schedule-extract';
 import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine, detectContactLog, logContact, occasionsContextLine, resolveAttendees } from '@/lib/integrations/icloud-contacts';
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
 import { isTidyRequest, scanForTidy, applyTidyItems, type TidyItem } from '@/lib/memory/tidy';
@@ -464,6 +465,42 @@ export async function POST(req: NextRequest) {
       );
       return say(r.message, r.ok ? 'abentfork-share' : 'abentfork-share-failed');
     }
+  }
+
+  // ── a class/work schedule screenshot → real recurring or dated events ───
+  const scheduleShare = images.length > 0 && (isScheduleShare(text) || await inferred('schedule.share'));
+  if (scheduleShare) {
+    const extracted = await extractSchedule(images, text).catch(() => null);
+    if (!extracted || !extracted.ok || !extracted.blocks.length) {
+      return say(`I couldn't read a schedule off ${images.length > 1 ? 'those' : 'that'} — try a clearer screenshot.`, 'schedule-empty');
+    }
+    const usedDefaultTerm = !extracted.term_start || !extracted.term_end;
+    const termStart = extracted.term_start ?? scheduleDefaultTerm.start;
+    const termEnd = extracted.term_end ?? scheduleDefaultTerm.end;
+    const planned = expandBlocks(extracted.blocks, termStart, termEnd);
+    if (!planned.length) {
+      return say(`I read the schedule but couldn't pin down real dates or times from it — try a clearer screenshot, or tell me the date range it covers.`, 'schedule-empty');
+    }
+    const hasRecurring = extracted.blocks.some((b) => b.days?.length);
+    const termNote = hasRecurring && usedDefaultTerm ? ` (assumed the current term, ${termStart} to ${termEnd} — say so if that's wrong)` : '';
+    const flagNote = extracted.notes ? ` Note: ${extracted.notes}` : '';
+    const label = `schedule import ${new Date().toISOString().slice(0, 10)}`;
+
+    if (await isAutoAllowed('create_event').catch(() => false)) {
+      const r = await materializeEvents(user.id, planned, label);
+      await recordScheduleImport({ label, uids: r.uids, created: r.created, skipped: r.skipped }, conversationId).catch(() => {});
+      return say(
+        `Added ${r.created} event${r.created === 1 ? '' : 's'} from that${r.skipped ? ` (${r.skipped} were already on your calendar)` : ''}${termNote}.${flagNote} Say "undo" if that's wrong.`,
+        'schedule-auto',
+      );
+    }
+    await proposeAction({
+      userId: user.id, kind: 'create_schedule', riskTier: 'confirm',
+      summary: `${planned.length} events from a schedule screenshot${termNote}`,
+      payload: { events: planned, label },
+      createdBy: conversationId,
+    });
+    return say(`Found ${planned.length} events in that${termNote}.${flagNote} Add them all to your calendar? Say yes and I'll add them.`, 'action-proposed');
   }
 
   // ── a Beli screenshot → extract restaurants into restaurant_prefs ───────

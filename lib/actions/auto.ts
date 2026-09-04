@@ -74,6 +74,26 @@ export async function runAutoCreateEvent(
   return r.ok ? { ok: true } : { ok: false, error: r.error };
 }
 
+/** Record a schedule import (many events at once) for undo — the events
+ *  themselves are already created by the time this is called. */
+export async function recordScheduleImport(
+  info: { label: string; uids: string[]; created: number; skipped: number },
+  conversationId: string,
+): Promise<void> {
+  await adminClient.from('actions').insert({
+    kind: 'create_schedule',
+    summary: `${info.label} — ${info.created} event${info.created === 1 ? '' : 's'} added${info.skipped ? `, ${info.skipped} already there` : ''}`,
+    risk_tier: 'silent',
+    status: 'done',
+    payload: { uids: info.uids, label: info.label, auto: true },
+    created_by: conversationId,
+    decided_at: new Date().toISOString(),
+    executed_at: new Date().toISOString(),
+    result: 'auto',
+  });
+  await audit.log('action_executed', 'calliad', conversationId, { kind: 'create_schedule', auto: true, created: info.created });
+}
+
 const UNDO_WINDOW_MS = 30 * 60_000;
 
 export function isUndo(t: string): boolean {
@@ -102,6 +122,16 @@ export async function undoLastAuto(userId: string, conversationId: string): Prom
     await adminClient.from('actions').update({ status: 'undone' }).eq('id', row.id);
     await audit.log('action_executed', 'noah', conversationId, { kind: 'undo', of: row.id });
     return `Undone — took "${String(p.title ?? 'that event')}" back off your calendar.`;
+  }
+  if (row.kind === 'create_schedule' && Array.isArray(p.uids)) {
+    let removed = 0;
+    for (const uid of p.uids as string[]) {
+      const r = await deleteCalendarEvent(userId, uid).catch(() => ({ ok: false }));
+      if (r.ok) removed++;
+    }
+    await adminClient.from('actions').update({ status: 'undone' }).eq('id', row.id);
+    await audit.log('action_executed', 'noah', conversationId, { kind: 'undo', of: row.id, removed });
+    return `Undone — removed ${removed} event${removed === 1 ? '' : 's'} from "${String(p.label ?? 'that import')}".`;
   }
   return null;
 }
