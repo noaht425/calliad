@@ -283,14 +283,18 @@ export async function upcomingOccasions(userId: string, withinDays = 14): Promis
   return out.sort((a, b) => a.daysUntil - b.daysUntil);
 }
 
-export async function occasionsContextLine(userId: string): Promise<string> {
-  const occ = await upcomingOccasions(userId, 14);
+export async function occasionsContextLine(userId: string, withinDays = 14): Promise<string> {
+  const occ = await upcomingOccasions(userId, withinDays);
   if (!occ.length) return '';
   const lines = occ.map((o) => {
     const when = o.daysUntil === 0 ? 'today' : o.daysUntil === 1 ? 'tomorrow' : `in ${o.daysUntil} days`;
     return `- ${o.name}'s ${o.kind} — ${o.date} (${when})`;
   });
-  return `## Upcoming — people\n${lines.join('\n')}\nMention these if relevant; don't force it.`;
+  return (
+    `## Upcoming — people (computed from today's date, correct)\n${lines.join('\n')}\n` +
+    `Mention these if relevant; don't force it. This is the ONLY source for "is a birthday coming up" — ` +
+    `never estimate or infer a date from background profile notes, and if nothing is listed here, none is coming up soon.`
+  );
 }
 
 const CADENCE_DAYS: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30, quarterly: 91, yearly: 365 };

@@ -6,11 +6,12 @@ import { getIntegrationContext } from '@/lib/integrations/context';
 import { getBriefExtras } from '@/lib/brief/extras';
 import { relevantLoops } from '@/lib/memory/loops';
 import { profileSections, learnedFacts } from '@/lib/brain/profile';
+import { occasionsContextLine } from '@/lib/integrations/icloud-contacts';
 import type { TurnState } from '@/lib/brain/prompt';
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 
-const COMMON = `Follow the "Morning brief" example in the persona: a short greeting, today's schedule from the Live data block, anything due soon, a birthday if one falls within about three weeks, and anything from the recent conversation or watched mail that needs a decision. Then a one-line weather note for today, and 2–3 news headlines from the last day — just the gist, no editorializing, skip any that are trivial. If there's a genuinely notable gaming headline (a real release, a big announcement — not a review or a listicle), add one line for it; otherwise skip gaming entirely. One message; keep it tight. If the day is quiet, say so in one plain line — don't pad it, and don't list things that aren't on the calendar. Only mention events that are actually in the Live data. Match the greeting to the current time of day; don't comment on what time it is.`;
+const COMMON = `Follow the "Morning brief" example in the persona: a short greeting, today's schedule from the Live data block, anything due soon, a birthday/anniversary ONLY if the "Upcoming — people" block lists one (use its date and day-count as given — never estimate one from background profile notes, and say nothing if that block is absent or empty), and anything from the recent conversation or watched mail that needs a decision. Then a one-line weather note for today, and 2–3 news headlines from the last day — just the gist, no editorializing, skip any that are trivial. If there's a genuinely notable gaming headline (a real release, a big announcement — not a review or a listicle), add one line for it; otherwise skip gaming entirely. One message; keep it tight. If the day is quiet, say so in one plain line — don't pad it, and don't list things that aren't on the calendar. Only mention events that are actually in the Live data. Match the greeting to the current time of day; don't comment on what time it is.`;
 
 function extrasBlock(w: Awaited<ReturnType<typeof getBriefExtras>>): string {
   const lines: string[] = ['## Weather + news (for the brief)'];
@@ -55,7 +56,7 @@ export async function composeBrief(
   const now = new Date();
 
   const dayAgo = new Date(now.getTime() - 36 * 3600 * 1000).toISOString();
-  const [integrations, recentUser, extras, loops] = await Promise.all([
+  const [integrations, recentUser, extras, loops, occasions] = await Promise.all([
     getIntegrationContext(userId, { daysAhead: 8, emailLimit: 10 }).catch(() => undefined),
     // Only what NOAH said recently — never feed the brief its own past output back
     // in (that echoes hallucinations forward). This is "things he mentioned",
@@ -69,6 +70,10 @@ export async function composeBrief(
       .limit(8),
     getBriefExtras().catch(() => ({ weather: null, headlines: [] as string[], gaming: [] as string[] })),
     relevantLoops(userId, { dueWithinDays: 14 }).catch(() => []),
+    // "about three weeks" per COMMON below — computed here, not left for the
+    // model to eyeball from a static profile note (that's how a Nov 15 birthday
+    // turned into "the 15th, about a week and a half away" from today's date).
+    occasionsContextLine(userId, 21).catch(() => ''),
   ]);
 
   const notes = (recentUser.data ?? [])
@@ -87,6 +92,7 @@ export async function composeBrief(
     now, tz: TZ, recent, integrations, loops,
     profileSections: profileSections('schedule deadlines assignments birthday work timesheet study', 'brief'),
     learned: (await learnedFacts(userId).catch(() => '')) || undefined,
+    occasions: occasions || undefined,
   };
 
   const conversationId = randomUUID();
