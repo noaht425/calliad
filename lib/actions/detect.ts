@@ -37,19 +37,37 @@ export function isTaskAdd(text: string): boolean {
   return TASK_ADD.test(text) && !CAL_WRITE.test(text);
 }
 
-/** Extract a calendar event from free text via T1. Returns null if underspecified. */
-export async function extractEvent(text: string, now = new Date()): Promise<EventDraft | null> {
+/**
+ * Extract a calendar event from free text via T1. Returns null if underspecified.
+ * `recent` matters when this message is a bare follow-up to Calliad's own
+ * "when, exactly?" — "next Friday at 1pm" alone has no subject, so without
+ * the prior turn the model has to invent a title rather than recover the
+ * one Noah already gave (e.g. "the meeting with Katie").
+ */
+export async function extractEvent(
+  text: string,
+  now = new Date(),
+  recent: { role: 'user' | 'assistant'; content: string }[] = [],
+): Promise<EventDraft | null> {
   if (!t1Available()) return null;
   const localNow = now.toLocaleString('en-US', { timeZone: TZ });
+  const convo = recent
+    .slice(-4)
+    .map((t) => `${t.role === 'user' ? 'Noah' : 'Assistant'}: ${t.content.slice(0, 240)}`)
+    .join('\n');
   const out = await t1Json<EventDraft & { ok: boolean }>(
     'extract_event',
     `Pull a single calendar event from this request. "Now" is ${localNow} (${TZ}). Resolve relative dates/times against that.
+
+Recent conversation (use ONLY to recover a subject/title this message doesn't restate, e.g. this message is just a time answering "when, exactly?"; never let it override anything this message itself states):
+${convo || '(none)'}
+
 Request: "${text}"
 
 Return JSON only:
 {"ok": true|false, "title": "short", "start_at": "UTC ISO 8601", "end_at": "UTC ISO 8601 or null", "all_day": false, "location": "or null", "city": "or null"}
 
-ok=false if there's no determinable date/time. If a time is given but no duration, set end_at null (the writer defaults to 1h). all_day=true only when no clock time is implied. city = the city the location is in ONLY if a well-known venue or a full address makes it unambiguous (e.g. "Climate Pledge Arena" → "Seattle"); otherwise null.`,
+ok=false if there's no determinable date/time. If a time is given but no duration, set end_at null (the writer defaults to 1h). all_day=true only when no clock time is implied. city = the city the location is in ONLY if a well-known venue or a full address makes it unambiguous (e.g. "Climate Pledge Arena" → "Seattle"); otherwise null. Never invent a generic title like "Meeting" or a title made out of the date/time itself, if the subject genuinely isn't stated anywhere (including recent conversation), leave title empty so the caller can ask.`,
     { maxOutputTokens: 220 },
   );
   if (!out?.ok || !out.start_at || Number.isNaN(Date.parse(out.start_at))) return null;

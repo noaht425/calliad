@@ -767,7 +767,7 @@ export async function POST(req: NextRequest) {
     // always returned right after the rename.
     if (isCalendarWrite(text) || await inferred('calendar.create')) {
       const ev =
-        (await extractEvent(text).catch(() => null)) ??
+        (await extractEvent(text, new Date(), recentForTask).catch(() => null)) ??
         (found.hit.due_at
           ? { title: draft.new_title, start_at: found.hit.due_at, end_at: null, all_day: false, location: null, city: null }
           : null);
@@ -813,7 +813,12 @@ export async function POST(req: NextRequest) {
 
   // ── calendar write → auto-add if trusted, else propose and wait for yes ──
   if (isCalendarWrite(text) || await inferred('calendar.create')) {
-    const ev = await extractEvent(text).catch(() => null);
+    // Recent turns matter here: if this message is just "next Friday at 1pm"
+    // answering Calliad's own "when, exactly?", the subject lives in the
+    // prior turn, not this one, and without it the extractor has to invent
+    // a title rather than recover the real one.
+    const recentForEvent = await recentTurns(conversationId, text).catch(() => []);
+    const ev = await extractEvent(text, new Date(), recentForEvent).catch(() => null);
     if (!ev) return say(`I can put that on your calendar: when, exactly?`, 'calendar-write-underspecified');
     const r = await createOrProposeEvent(ev, text, user.id, conversationId);
     return say(r.message, r.reason);
