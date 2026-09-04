@@ -19,14 +19,14 @@ import { runMorphology } from '@/lib/tools/morphology';
 import { profileSections, learnedFacts } from '@/lib/brain/profile';
 import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
-import { upsertLoop, RECUR_LABEL } from '@/lib/memory/loops';
+import { upsertLoop, RECUR_LABEL, findLoopByHint, setLoopTitle } from '@/lib/memory/loops';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isNoteCapture, extractNote, saveNote, isRecallQuestion, isLookupQuestion, searchNotes, notesRecallBlock, maybeIndexTurn } from '@/lib/memory/notes';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isAutoAllowed, runAutoCreateEvent, isUndo, undoLastAuto, recordScheduleImport } from '@/lib/actions/auto';
-import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo, isCalendarChange, extractCalendarChange, findEventByHint } from '@/lib/actions/detect';
-import { extractTask } from '@/lib/actions/task';
+import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo, isCalendarChange, extractCalendarChange, findEventByHint, isReuseAttachmentRequest } from '@/lib/actions/detect';
+import { extractTask, isTaskEdit, extractTaskChange } from '@/lib/actions/task';
 import { classifyMedReply, recordMed, medContextLine } from '@/lib/health/meds';
 import { isEmailDraft, composeEmail } from '@/lib/actions/email';
 import { wouldILike } from '@/lib/taste/judge';
@@ -153,6 +153,14 @@ export async function POST(req: NextRequest) {
     await audit.log('outbound_message', 'calliad', conversationId!, { text: reply, surface, reason });
     return streamResponse(conversationId!, (async function* () { yield sse({ delta: reply }); yield sse({ done: true }); })());
   };
+
+  // ── can't actually reuse a prior screenshot — the bytes are never kept ──
+  // Must be checked before anything else: no image-dependent handler below,
+  // and definitely not the general chat model, gets a chance to improvise a
+  // "done!" reply about data it was never actually given this turn.
+  if (!images.length && isReuseAttachmentRequest(text)) {
+    return say(`I don't actually keep the photo after it comes in — only that a screenshot was sent, not the image itself. Mind resending it? I'll apply what you just told me on top of it.`, 'reuse-attachment-refused');
+  }
 
   const medLine = await medContextLine(user.id).catch(() => '');
 
@@ -736,8 +744,27 @@ export async function POST(req: NextRequest) {
     // nothing concrete to store → fall through to the brain
   }
 
+  // ── silent tier: fix an existing task/to-do's title ──────────────────────
+  // Checked before calendar.change: "the note in Tasks still says X" points at
+  // the Tasks list, not an event, and the calendar-edit path's "which event?"
+  // question doesn't fit a task that has no day/time of its own.
+  if (isTaskEdit(text) || await inferred('task.edit')) {
+    const recentForTask = await recentTurns(conversationId, text).catch(() => []);
+    const draft = await extractTaskChange(text, recentForTask).catch(() => null);
+    if (!draft) return say(`Which task do you mean?`, 'task-edit-underspecified');
+    const found = await findLoopByHint(user.id, draft.match).catch(() => ({ none: true as const }));
+    if ('none' in found) return say(`I don't see a task matching "${draft.match}" — what's it titled on your list?`, 'task-edit-nomatch');
+    if ('ambiguous' in found) {
+      const opts = found.ambiguous.map((l) => l.title).join('; ');
+      return say(`A few could match: ${opts}. Which one?`, 'task-edit-ambiguous');
+    }
+    if (!draft.new_title) return say(`What should "${found.hit.title}" say instead?`, 'task-edit-underspecified');
+    await setLoopTitle(user.id, found.hit.id, draft.new_title);
+    return say(`Fixed — "${found.hit.title}" now reads "${draft.new_title}".`, 'task-edit-done');
+  }
+
   // ── confirm / named-consequence: change or cancel a calendar event ──────
-  if ((isCalendarChange(text) || await inferred('calendar.change')) && !isCalendarWrite(text)) {
+  if ((isCalendarChange(text) || await inferred('calendar.change')) && !isCalendarWrite(text) && !isTaskEdit(text)) {
     const ch = await extractCalendarChange(text).catch(() => null);
     if (!ch) return say(`Which event do you mean — name it and the day?`, 'cal-change-underspecified');
     const found = await findEventByHint(user.id, ch.match).catch(() => ({ none: true as const }));

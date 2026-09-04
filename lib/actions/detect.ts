@@ -21,6 +21,18 @@ export interface EventDraft {
 export function isCalendarWrite(text: string): boolean {
   return CAL_WRITE.test(text);
 }
+
+// "just use the screenshot from before" — nothing keeps the actual image
+// bytes past the request that carried them (only a "📷 (N photos)" placeholder
+// is logged to `messages`), so this can never actually be fulfilled. Caught
+// deterministically and refused honestly, before it can reach the general
+// chat model and get a plausible-sounding but fabricated "done" reply.
+const REUSE_ATTACHMENT =
+  /\b(use|resend|reuse|go(?:\s+ahead)?\s+with)\b.{0,30}\b(same|that|the|last|previous|earlier)\b.{0,25}\b(screenshot|photo|picture|pic|image)s?\b|\b(screenshot|photo|picture|pic|image)s?\b.{0,20}\bfrom (before|earlier|last time)\b/i;
+
+export function isReuseAttachmentRequest(text: string): boolean {
+  return REUSE_ATTACHMENT.test(text);
+}
 export function isTaskAdd(text: string): boolean {
   return TASK_ADD.test(text) && !CAL_WRITE.test(text);
 }

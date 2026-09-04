@@ -38,3 +38,54 @@ Return JSON: {"title":"the task, imperative, no date/repeat words","due_at":"UTC
   const recur = RECURS.includes(out?.recur as Recur) ? (out!.recur as Recur) : null;
   return { title: title.slice(0, 200), due_at, recur };
 }
+
+// ── task edit ────────────────────────────────────────────────────────────
+// A reference to Noah's Tasks list ("task", "to-do", "reminder", the page
+// name "Tasks") plus an edit-ish verb. Deliberately separate from calendar
+// change detection — "the note in Tasks still says X" is not an event, and
+// routing it through the calendar-edit path produces a "which event?"
+// question that doesn't fit a task.
+const TASKISH = /\b(tasks?|to-?dos?|reminders?)\b/i;
+const EDITISH = /\b(edit|rename|fix(?:ed)?|correct(?:ed)?|update[ds]?|change[ds]?|still says?|should say)\b/i;
+
+export function isTaskEdit(text: string): boolean {
+  return TASKISH.test(text) && EDITISH.test(text);
+}
+
+export interface TaskChangeDraft {
+  match: string;
+  new_title: string | null;
+}
+
+/**
+ * Pull which task Noah means and what it should now say. Recent turns matter
+ * here — "the note in Tasks still says X" often refers back to a correction
+ * ("Kathy" → "Katie") stated earlier in the conversation rather than in this
+ * message itself.
+ */
+export async function extractTaskChange(
+  text: string,
+  recent: { role: 'user' | 'assistant'; content: string }[] = [],
+): Promise<TaskChangeDraft | null> {
+  if (!t1Available()) return null;
+  const convo = recent
+    .slice(-6)
+    .map((t) => `${t.role === 'user' ? 'Noah' : 'Assistant'}: ${t.content.slice(0, 240)}`)
+    .join('\n');
+  const out = await t1Json<{ ok: boolean; match: string; new_title: string | null }>(
+    'extract_task_change',
+    `Noah wants to fix the title of an existing task/to-do on his list. Use the recent conversation to figure out the corrected text if he doesn't spell it out in this message.
+
+Recent conversation:
+${convo || '(none)'}
+
+Latest message: "${text}"
+
+Return JSON: {"ok":true|false,"match":"the words that identify the EXISTING task title, e.g. 'meeting with kathy'","new_title":"the corrected full task title, or null if genuinely unclear"}
+- If a correction (e.g. a name fixed from X to Y) was already stated earlier in the conversation, apply it here to produce new_title.
+- ok=false only if you can't tell which task he means at all.`,
+    { maxOutputTokens: 160 },
+  );
+  if (!out?.ok || !out.match) return null;
+  return { match: out.match.trim(), new_title: out.new_title?.trim() || null };
+}

@@ -52,28 +52,32 @@ function parseArrayLoose(raw: string): Record<string, unknown> | null {
   }
 }
 
-const SYSTEM = `These screenshots show a class timetable or a work shift schedule. Extract every distinct time block.
+const SYSTEM = (localNow: string) => `These screenshots show a class timetable or a work shift schedule. Extract every distinct time block.
+
+Today's real date is ${localNow} (${TZ}) — treat this as ground truth, not a guess.
 
 Two kinds of block, tell them apart:
 - RECURRING: a weekly class grid ("Mon/Wed/Fri 9:00-9:50", a course timetable). Set "days" to the meeting days EXACTLY as written in the image, "date" null. Class schedules often show days as letter codes, not full names — copy the code verbatim, do not translate or expand it yourself: "TR" stays "TR", "MWF" stays "MWF", "T" stays "T". Do not guess what a code means — just transcribe it.
-- DATED: a specific day's shift or event with an actual date visible ("Tue Sep 9, 2pm-6pm"). Set "date" to that ISO date, "days" null.
+- DATED: a specific day's shift or event with an actual date visible ("Tue Sep 9, 2pm-6pm"). Set "date" to that ISO date, "days" null. If the image shows a month/day but NO YEAR (common on a weekly work-shift grid), do not guess a year from general knowledge — derive it from today's real date above: use the current year, unless that month/day has already passed relative to today, in which case use next year instead. Never default to a past year.
 
 For each block: title (course name/code, or job/employer name for a shift), location if shown (room, or workplace), start_time and end_time in 24-hour "HH:MM". If the image states the term/semester date range (e.g. "Fall 2026" with visible start/end, or a syllabus-style date range), capture it in term_start/term_end (YYYY-MM-DD) — otherwise leave those null.
 
-Return ONLY minified JSON: {"ok":true|false,"blocks":[{"title":"","location":null,"start_time":"09:00","end_time":"09:50","days":"MWF","date":null}],"term_start":null,"term_end":null,"notes":"anything ambiguous or that needs Noah to confirm, else null"}
+Return ONLY minified JSON: {"ok":true|false,"blocks":[{"title":"","location":null,"start_time":"09:00","end_time":"09:50","days":"MWF","date":null}],"term_start":null,"term_end":null,"notes":"anything ambiguous or that needs Noah to confirm — including if you had to infer a missing year, else null"}
 ok=false only if the images have no readable schedule at all.`;
 
 export async function extractSchedule(
   images: { media_type: string; data: string }[],
   text: string,
+  now = new Date(),
 ): Promise<ExtractResult | null> {
   const shots = images.slice(0, 8);
   if (!shots.length) return null;
   const started = Date.now();
+  const localNow = now.toLocaleString('en-US', { timeZone: TZ, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const msg = await anthropic.messages.create({
     model: 'claude-sonnet-5',
     max_tokens: 4000,
-    system: SYSTEM,
+    system: SYSTEM(localNow),
     messages: [
       {
         role: 'user',

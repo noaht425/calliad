@@ -14,6 +14,7 @@ export type Intent =
   | 'calendar.create'   // schedule an event, OR state a future plan that has a time
   | 'calendar.change'   // move / rename / cancel an event that already exists
   | 'task.add'          // a to-do or reminder (no clock time of its own)
+  | 'task.edit'         // fix/rename an existing task or to-do ("the note in Tasks still says X")
   | 'watchlist.add'     // wants to watch a show / film
   | 'watchlist.update'  // "on season 3 of X", "rate X 4 stars", "finished X"
   | 'note.remember'     // asking to remember a fact or note something down
@@ -33,7 +34,7 @@ export type Intent =
   | 'none';
 
 const ACTION_INTENTS: Intent[] = [
-  'calendar.create', 'calendar.change', 'task.add', 'watchlist.add', 'watchlist.update',
+  'calendar.create', 'calendar.change', 'task.add', 'task.edit', 'watchlist.add', 'watchlist.update',
   'note.remember', 'contact.log', 'taste.reaction', 'beli.share', 'schedule.share', 'recipe.share',
   'card.question', 'sim.request', 'watchlist.query', 'restaurant.reco', 'weather.query',
   'subscription.query', 'recall.question',
@@ -54,6 +55,7 @@ ACTIONS:
 - calendar.create — wants an event on the calendar. INCLUDES bare statements of a future plan carrying a date/time: "concert at the Garden on the 18th", "dinner with Ana Thursday 7".
 - calendar.change — move, rename, reschedule, or cancel an event that already exists.
 - task.add — a to-do / reminder with no clock time ("remind me to email the landlord", "add milk to the list").
+- task.edit — fix/rename something already on the Tasks list ("the note in Tasks still says X", "that reminder should say Y now"). NOT a calendar event.
 - watchlist.add — wants to watch a show/film ("add Lanterns to my list", "I should watch that new Dune").
 - watchlist.update — progress or a rating on something already on the list ("I'm on season 3 of X", "rate Severance 5 stars", "finished The Bear").
 - note.remember — store a fact / jot something down ("remember the storage code is 4417", "note the car's due for service").

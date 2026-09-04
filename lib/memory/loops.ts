@@ -151,6 +151,53 @@ export async function setLoopDue(userId: string, id: string, due_at: string | nu
     .eq('id', id);
 }
 
+export async function setLoopTitle(userId: string, id: string, title: string): Promise<void> {
+  await adminClient
+    .from('open_loops')
+    .update({ title, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('id', id);
+}
+
+export interface MatchedLoop { id: string; title: string }
+
+const LOOP_HINT_STOP = new Set([
+  'the', 'a', 'an', 'my', 'our', 'to', 'on', 'at', 'for', 'with', 'me', 'that', 'please', 'one',
+  'note', 'notes', 'task', 'tasks', 'list', 'still', 'says', 'say', 'said', 'edit', 'fix', 'change',
+  'update', 'correct', 'rename', 'should',
+]);
+
+/** Resolve a fuzzy reference ("meeting with kathy") to an open task/to-do. */
+export async function findLoopByHint(
+  userId: string,
+  hint: string,
+): Promise<{ hit: MatchedLoop } | { ambiguous: MatchedLoop[] } | { none: true }> {
+  const { data } = await adminClient
+    .from('open_loops')
+    .select('id, title')
+    .eq('user_id', userId)
+    .eq('status', 'open')
+    .limit(200);
+  const rows = (data ?? []) as MatchedLoop[];
+  if (!rows.length) return { none: true };
+
+  const tokens = hint.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !LOOP_HINT_STOP.has(w));
+  if (!tokens.length) return { none: true };
+
+  const scored = rows
+    .map((r) => {
+      const t = r.title.toLowerCase();
+      const s = tokens.reduce((acc, w) => acc + (t.includes(w) ? 2 : 0), 0);
+      return { r, s };
+    })
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s);
+
+  if (!scored.length) return { none: true };
+  if (scored.length === 1 || scored[0].s - scored[1].s >= 2) return { hit: scored[0].r };
+  return { ambiguous: scored.slice(0, 3).map((x) => x.r) };
+}
+
 const isExam = (l: OpenLoop) =>
   l.tags.some((t) => /exam|midterm|final|test|quiz/i.test(t)) || /exam|midterm|final\b|test\b/i.test(l.title);
 
