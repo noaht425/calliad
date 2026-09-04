@@ -407,7 +407,7 @@ function Subscriptions({ token }: { token: string }) {
 }
 
 function BehaviorRules({ token }: { token: string }) {
-  const [rules, setRules] = useState<{ id: string; rule_text: string; source: string; status: string }[]>([]);
+  const [rules, setRules] = useState<{ id: string; rule_text: string; source: string; status: string; weight?: number }[]>([]);
   const [draft, setDraft] = useState('');
   const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   const load = useCallback(async () => {
@@ -422,7 +422,8 @@ function BehaviorRules({ token }: { token: string }) {
     setDraft(''); load();
   };
   const toggle = async (id: string, status: string) => {
-    await fetch('/api/behavior-rules', { method: 'PATCH', headers: h, body: JSON.stringify({ id, status: status === 'active' ? 'paused' : 'active' }) });
+    const next = status === 'active' ? 'paused' : 'active'; // dormant/paused → active
+    await fetch('/api/behavior-rules', { method: 'PATCH', headers: h, body: JSON.stringify({ id, status: next }) });
     load();
   };
   const del = async (id: string) => {
@@ -440,10 +441,12 @@ function BehaviorRules({ token }: { token: string }) {
         <ul className="space-y-1.5">
           {rules.map((r) => (
             <li key={r.id} className="flex items-start gap-2 text-sm">
-              <span className="flex-1" style={{ color: r.status === 'paused' ? 'var(--text-muted)' : 'var(--text-body)' }}>
+              <span className="flex-1" style={{ color: r.status !== 'active' ? 'var(--text-muted)' : 'var(--text-body)' }}>
                 {r.rule_text}
                 <span className="text-[10px] ml-1.5 text-[var(--text-quiet)]">
-                  {r.source === 'learned' ? 'learned' : ''}{r.status === 'paused' ? ' · paused' : ''}
+                  {r.source === 'learned' ? 'learned' : ''}
+                  {typeof r.weight === 'number' ? ` · confidence ${r.weight}/5` : ''}
+                  {r.status === 'paused' ? ' · paused' : r.status === 'dormant' ? ' · parked (kept getting it wrong)' : ''}
                 </span>
               </span>
               <button className="text-xs underline text-[var(--text-muted)]" onClick={() => toggle(r.id, r.status)}>

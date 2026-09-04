@@ -22,6 +22,7 @@ const SEED: Record<string, string> = {
   auto_actions: '{}',
   // Learned behavior rules: when reflection / the rule compiler last ran.
   behavior_reflection_at: '',
+  behavior_lifecycle_at: '',
   behavior_compiler_at: '',
   // Knowledge base: one-time backfill of old chat history into notes.
   notes_backfill_cursor: '',

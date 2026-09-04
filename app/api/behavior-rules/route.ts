@@ -17,8 +17,11 @@ export async function GET(req: NextRequest) {
   const user = await requireUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const sel = (cols: string) =>
-    adminClient.from('behavior_rules').select(cols).eq('user_id', user.id).in('status', ['active', 'paused']).order('created_at');
-  let res = await sel('id, rule_text, source, status, created_at, auto_activated');
+    adminClient.from('behavior_rules').select(cols).eq('user_id', user.id).in('status', ['active', 'paused', 'dormant']).order('created_at');
+  let res = await sel('id, rule_text, source, status, created_at, auto_activated, weight');
+  if (res.error && /column .* does not exist/i.test(res.error.message ?? '')) {
+    res = await sel('id, rule_text, source, status, created_at, auto_activated');
+  }
   if (res.error && /column .* does not exist/i.test(res.error.message ?? '')) {
     res = await sel('id, rule_text, source, status, created_at');
   }
@@ -45,8 +48,8 @@ export async function PATCH(req: NextRequest) {
   const user = await requireUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const b = (await req.json().catch(() => ({}))) as { id?: string; status?: string };
-  if (!b.id || !['active', 'paused'].includes(b.status ?? '')) {
-    return NextResponse.json({ error: 'id and status (active|paused) required' }, { status: 400 });
+  if (!b.id || !['active', 'paused', 'dormant'].includes(b.status ?? '')) {
+    return NextResponse.json({ error: 'id and status (active|paused|dormant) required' }, { status: 400 });
   }
   await adminClient
     .from('behavior_rules')

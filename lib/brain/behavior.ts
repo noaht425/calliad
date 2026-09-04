@@ -21,17 +21,25 @@ export interface BehaviorRule {
   created_at: string;
   auto_activated?: boolean;
   pattern_key?: string | null;
+  weight?: number;
+  reinforced_at?: string | null;
+  last_conflict_at?: string | null;
 }
 
 export async function activeRules(userId: string): Promise<BehaviorRule[]> {
   const sel = (cols: string) =>
     adminClient.from('behavior_rules').select(cols).eq('user_id', userId).eq('status', 'active').order('created_at');
-  let res = await sel('id, rule_text, source, status, created_at, auto_activated, pattern_key');
-  // 0031 adds auto_activated/pattern_key; fall back if it isn't applied yet
+  let res = await sel('id, rule_text, source, status, created_at, auto_activated, pattern_key, weight, reinforced_at, last_conflict_at');
+  // migrations 0031/0032 add these columns; fall back if not applied yet
+  if (res.error && /column .* does not exist/i.test(res.error.message ?? '')) {
+    res = await sel('id, rule_text, source, status, created_at, auto_activated, pattern_key');
+  }
   if (res.error && /column .* does not exist/i.test(res.error.message ?? '')) {
     res = await sel('id, rule_text, source, status, created_at');
   }
-  return (res.data ?? []) as unknown as BehaviorRule[];
+  const rows = (res.data ?? []) as unknown as BehaviorRule[];
+  // strongest first, then oldest — so the prompt leads with the most-reinforced
+  return rows.sort((a, b) => (b.weight ?? 3) - (a.weight ?? 3) || a.created_at.localeCompare(b.created_at));
 }
 
 /** The prompt block. Empty string when there are no active rules. */
@@ -60,6 +68,34 @@ export function isBehaviorRuleStatement(t: string): boolean {
   return RULE_IMPER.test(s) && aboutCalliad.test(s);
 }
 
+/** Insert a rule, degrading gracefully if 0031/0032 columns aren't applied. */
+async function insertBehaviorRule(row: Record<string, unknown>): Promise<void> {
+  const ins = await adminClient.from('behavior_rules').insert(row);
+  if (ins.error && /column .* does not exist/i.test(ins.error.message ?? '')) {
+    const base = { user_id: row.user_id, rule_text: row.rule_text, source: row.source, status: row.status };
+    await adminClient.from('behavior_rules').insert(base);
+  }
+}
+
+/** Bring a dormant / dismissed rule whose text matches back to active. Returns
+ *  true if one was reactivated. */
+async function reactivateRule(userId: string, ruleText: string): Promise<boolean> {
+  const { data } = await adminClient
+    .from('behavior_rules')
+    .select('id, weight')
+    .eq('user_id', userId)
+    .in('status', ['dormant', 'dismissed'])
+    .ilike('rule_text', ruleText.slice(0, 60) + '%')
+    .limit(1)
+    .maybeSingle();
+  if (!data) return false;
+  await adminClient
+    .from('behavior_rules')
+    .update({ status: 'active', weight: Math.min(5, ((data.weight as number) ?? 2) + 1), updated_at: new Date().toISOString() })
+    .eq('id', data.id);
+  return true;
+}
+
 /** Save an explicit rule. Returns the stored text, or null if the LLM decides
  *  it isn't really a standing preference (caller then falls through). */
 export async function saveExplicitRule(userId: string, text: string): Promise<string | null> {
@@ -82,8 +118,9 @@ export async function saveExplicitRule(userId: string, text: string): Promise<st
     .eq('status', 'active')
     .ilike('rule_text', rule);
   if (dup?.length) return rule;
+  if (await reactivateRule(userId, rule)) return rule;
 
-  await adminClient.from('behavior_rules').insert({ user_id: userId, rule_text: rule, source: 'explicit', status: 'active' });
+  await insertBehaviorRule({ user_id: userId, rule_text: rule, source: 'explicit', status: 'active', weight: 4 });
   await audit.log('tool_call', 'calliad', null, { tool: 'behavior_rule_add', source: 'explicit', rule });
   return rule;
 }
@@ -107,8 +144,8 @@ export async function resolveRulePrompt(userId: string, accept: boolean): Promis
   const p = await pendingRulePrompt(userId);
   if (!p) return null;
   if (accept) {
-    await adminClient.from('behavior_rules').insert({
-      user_id: userId, rule_text: p.proposed_rule, source: 'learned', status: 'active',
+    await insertBehaviorRule({
+      user_id: userId, rule_text: p.proposed_rule, source: 'learned', status: 'active', weight: 3,
     });
     await adminClient.from('correction_candidates').update({ status: 'promoted' }).eq('id', p.id);
     await audit.log('tool_call', 'calliad', null, { tool: 'behavior_rule_add', source: 'learned', rule: p.proposed_rule });
@@ -161,6 +198,40 @@ export async function vetoRule(userId: string, text: string): Promise<string | n
   }
   await audit.log('tool_call', 'calliad', null, { tool: 'behavior_rule_veto', rule: target.rule_text });
   return `Dropped that rule — "${target.rule_text}". I won't follow it any more.`;
+}
+
+const REVIVE =
+  /\b(bring back (that|the) rule|reinstate (that|the) rule|un[- ]?park (that|the) rule|restore (that|the) rule|(re[- ]?)?activate (that|the) rule|(i )?(still )?want that rule( back)?|put that rule back)\b/i;
+export function isRuleRevive(t: string): boolean {
+  return REVIVE.test(t.trim());
+}
+
+/** "bring back that rule" → un-park a dormant rule (newest, or T1-matched). */
+export async function reviveRule(userId: string, text: string): Promise<string | null> {
+  const { data: dormant } = await adminClient
+    .from('behavior_rules')
+    .select('id, rule_text, weight, updated_at')
+    .eq('user_id', userId)
+    .eq('status', 'dormant')
+    .order('updated_at', { ascending: false });
+  if (!dormant?.length) return null;
+
+  let target = dormant[0];
+  if (dormant.length > 1) {
+    const pick = await t1Json<{ id: string | null }>(
+      'behavior_rule_revive',
+      `Parked rules:\n${dormant.map((r) => `[${r.id}] ${r.rule_text}`).join('\n')}\n\nUser said: "${text}"\n` +
+        `Which to bring back? Reply JSON: {"id":"<id, or the most recently parked if unclear>"}`,
+      { maxOutputTokens: 40 },
+    ).catch(() => null);
+    target = (pick?.id && dormant.find((r) => r.id === pick.id)) || dormant[0];
+  }
+  await adminClient
+    .from('behavior_rules')
+    .update({ status: 'active', weight: Math.max(3, (target.weight as number) ?? 2), reinforced_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('id', target.id);
+  await audit.log('tool_call', 'calliad', null, { tool: 'behavior_rule_revive', rule: target.rule_text });
+  return `Back on — "${target.rule_text}".`;
 }
 
 // ── reflection ──────────────────────────────────────────────────────────
@@ -226,6 +297,11 @@ export async function trackCorrectionCandidate(
     await adminClient.from('correction_candidates').update({ status: 'promoted' }).eq('id', match.id);
     return 'auto';
   }
+  // the pattern recurred after the rule was parked → bring it back
+  if (await reactivateRule(userId, p.proposed_rule)) {
+    await adminClient.from('correction_candidates').update({ status: 'promoted' }).eq('id', match.id);
+    return 'auto';
+  }
 
   // narrow + low-risk → activate now and tell him; broad → ask first
   const j = await t1Json<{ narrow: boolean }>(
@@ -239,11 +315,10 @@ export async function trackCorrectionCandidate(
   ).catch(() => null);
 
   if (j?.narrow) {
-    const base = { user_id: userId, rule_text: p.proposed_rule.slice(0, 200), source: 'learned', status: 'active' };
-    const ins = await adminClient.from('behavior_rules').insert({ ...base, auto_activated: true, pattern_key: p.pattern_key });
-    if (ins.error && /column .* does not exist/i.test(ins.error.message ?? '')) {
-      await adminClient.from('behavior_rules').insert(base); // pre-0031
-    }
+    await insertBehaviorRule({
+      user_id: userId, rule_text: p.proposed_rule.slice(0, 200), source: 'learned', status: 'active',
+      auto_activated: true, pattern_key: p.pattern_key, weight: 3,
+    });
     await adminClient.from('correction_candidates').update({ status: 'promoted' }).eq('id', match.id);
     await enqueueNotification(userId, {
       kind: 'behavior',
@@ -269,12 +344,12 @@ export async function trackCorrectionCandidate(
   return 'proposed';
 }
 
-async function runReflectionForUser(userId: string): Promise<number> {
-  const cutoff = new Date(Date.now() - 3 * 86_400_000).toISOString();
+/** Recent assistant→user exchange pairs across active conversations. */
+async function recentPairs(days = 3): Promise<{ assistant: string; user: string }[]> {
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
   const { data: convs } = await adminClient.from('conversations').select('id').gte('last_at', cutoff);
   const ids = (convs ?? []).map((c) => c.id as string);
-  if (!ids.length) return 0;
-
+  if (!ids.length) return [];
   const { data: msgs } = await adminClient
     .from('messages')
     .select('role, content')
@@ -282,7 +357,6 @@ async function runReflectionForUser(userId: string): Promise<number> {
     .gte('created_at', cutoff)
     .order('created_at')
     .limit(160);
-
   const m = msgs ?? [];
   const pairs: { assistant: string; user: string }[] = [];
   for (let i = 0; i < m.length - 1; i++) {
@@ -290,6 +364,11 @@ async function runReflectionForUser(userId: string): Promise<number> {
       pairs.push({ assistant: String(m[i].content).slice(0, 400), user: String(m[i + 1].content).slice(0, 250) });
     }
   }
+  return pairs;
+}
+
+async function runReflectionForUser(userId: string): Promise<number> {
+  const pairs = await recentPairs(3);
   if (!pairs.length) return 0;
 
   const out = await t1Json<{ behavioral: Pattern[]; factual: { note: string; topic: string }[] }>(
@@ -342,7 +421,72 @@ async function runReflectionForUser(userId: string): Promise<number> {
   return proposed;
 }
 
-// ── compiler (dedupe / merge) ───────────────────────────────────────────
+// ── rule lifecycle: reinforce / demote / park ──────────────────────────
+async function runRuleLifecycle(userId: string): Promise<number> {
+  const rules = await activeRules(userId);
+  if (!rules.length) return 0;
+  const pairs = await recentPairs(4);
+  if (!pairs.length) return 0;
+
+  const verdict = await t1Json<{ reinforced: string[]; conflicted: string[] }>(
+    'behavior_rule_lifecycle',
+    `Calliad's active standing rules:\n` +
+      rules.map((x) => `[${x.id}] ${x.rule_text}`).join('\n') +
+      `\n\nRecent Calliad→user exchanges:\n` +
+      pairs.slice(0, 25).map((p, i) => `${i + 1}. Calliad: ${p.assistant}\n   User: ${p.user}`).join('\n') +
+      `\n\nFor each rule, did the exchanges show it:\n` +
+      `- RESPECTED — Calliad clearly followed it and the user did not push back → reinforced\n` +
+      `- BROKEN — Calliad went against it and the user had to re-correct the SAME thing → conflicted\n` +
+      `- neither / not relevant → omit it\n` +
+      `Reply JSON: {"reinforced":["<id>"],"conflicted":["<id>"]}. Be strict; empty arrays if unsure.`,
+    { maxOutputTokens: 300 },
+  ).catch(() => null);
+  if (!verdict) return 0;
+
+  const byId = new Map(rules.map((r) => [r.id, r]));
+  let changes = 0;
+  const nowIso = new Date().toISOString();
+
+  for (const id of verdict.reinforced ?? []) {
+    const rule = byId.get(id);
+    if (!rule) continue;
+    await adminClient
+      .from('behavior_rules')
+      .update({ weight: Math.min(5, (rule.weight ?? 3) + 1), reinforced_at: nowIso, updated_at: nowIso })
+      .eq('id', id)
+      .eq('user_id', userId);
+    changes++;
+  }
+
+  for (const id of verdict.conflicted ?? []) {
+    const rule = byId.get(id);
+    if (!rule || (verdict.reinforced ?? []).includes(id)) continue;
+    const w = (rule.weight ?? 3) - 1;
+    if (w <= 1) {
+      await adminClient
+        .from('behavior_rules')
+        .update({ weight: 1, status: 'dormant', last_conflict_at: nowIso, updated_at: nowIso })
+        .eq('id', id)
+        .eq('user_id', userId);
+      await enqueueNotification(userId, {
+        kind: 'behavior',
+        title: 'Parking a rule',
+        body: `I keep getting "${rule.rule_text}" wrong even with the rule in place, so I've parked it. Say "bring back that rule" if you still want it.`,
+        dedupeKey: `behavior:dormant:${id}`,
+      });
+    } else {
+      await adminClient
+        .from('behavior_rules')
+        .update({ weight: w, last_conflict_at: nowIso, updated_at: nowIso })
+        .eq('id', id)
+        .eq('user_id', userId);
+    }
+    changes++;
+  }
+  return changes;
+}
+
+// ── compiler (dedupe / merge / decay) ──────────────────────────────────
 async function runCompilerForUser(userId: string): Promise<number> {
   const rules = await activeRules(userId);
   if (rules.length < 3) return 0;
@@ -375,12 +519,27 @@ async function runCompilerForUser(userId: string): Promise<number> {
     await adminClient.from('behavior_rules').update({ status: 'dismissed' }).eq('id', id).eq('user_id', userId);
     changes++;
   }
+
+  // decay: a weak, old rule the sweep hasn't reinforced lately → park it
+  const stale = new Date(Date.now() - 21 * 86_400_000).toISOString();
+  const { data: weak } = await adminClient
+    .from('behavior_rules')
+    .select('id, weight, reinforced_at, created_at')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .lte('weight', 2)
+    .lt('created_at', stale);
+  for (const w of weak ?? []) {
+    if ((w.reinforced_at as string | null) && (w.reinforced_at as string) > stale) continue;
+    await adminClient.from('behavior_rules').update({ status: 'dormant', updated_at: new Date().toISOString() }).eq('id', w.id);
+    changes++;
+  }
   return changes;
 }
 
-/** Self-gating: reflection ~daily, compiler ~weekly. Called from the tick worker. */
-export async function runBehaviorMaintenance(): Promise<{ reflection?: number; compiler?: number }> {
-  const out: { reflection?: number; compiler?: number } = {};
+/** Self-gating: reflection ~daily, lifecycle ~2.5d, compiler ~weekly. Tick worker. */
+export async function runBehaviorMaintenance(): Promise<{ reflection?: number; lifecycle?: number; compiler?: number }> {
+  const out: { reflection?: number; lifecycle?: number; compiler?: number } = {};
   const now = Date.now();
 
   const reflAt = await config.get('behavior_reflection_at').catch(() => '');
@@ -389,6 +548,14 @@ export async function runBehaviorMaintenance(): Promise<{ reflection?: number; c
     for (const uid of await ownerUserIds()) n += await runReflectionForUser(uid).catch(() => 0);
     await config.set('behavior_reflection_at', new Date().toISOString());
     out.reflection = n;
+  }
+
+  const lifeAt = await config.get('behavior_lifecycle_at').catch(() => '');
+  if (!lifeAt || now - Date.parse(lifeAt) > 2.5 * 86_400_000) {
+    let n = 0;
+    for (const uid of await ownerUserIds()) n += await runRuleLifecycle(uid).catch(() => 0);
+    await config.set('behavior_lifecycle_at', new Date().toISOString());
+    out.lifecycle = n;
   }
 
   const compAt = await config.get('behavior_compiler_at').catch(() => '');

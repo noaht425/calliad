@@ -63,7 +63,7 @@ import { isTripPlan, extractTrip, createTrip, tripsContextLine } from '@/lib/tra
 import { locationContextLine } from '@/lib/location/rules';
 import {
   behaviorContextLine, isBehaviorRuleStatement, saveExplicitRule,
-  pendingRulePrompt, resolveRulePrompt, isRuleVeto, vetoRule,
+  pendingRulePrompt, resolveRulePrompt, isRuleVeto, vetoRule, isRuleRevive, reviveRule,
 } from '@/lib/brain/behavior';
 import { isUnsubscribeMention, noteUnsubscribeFromChat } from '@/lib/mail/unsubscribes';
 import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSubscription, subscriptionsSummary } from '@/lib/money/subscriptions';
@@ -174,6 +174,12 @@ export async function POST(req: NextRequest) {
     const msg = await vetoRule(user.id, text).catch(() => null);
     if (msg) return say(msg, 'behavior-rule-veto');
     // no rule matched → fall through to the brain
+  }
+
+  // ── "bring back that rule" → un-park a dormant rule ──────────────────
+  if (!pending && isRuleRevive(text)) {
+    const msg = await reviveRule(user.id, text).catch(() => null);
+    if (msg) return say(msg, 'behavior-rule-revive');
   }
 
   // ── yes/no on a proposed learned behavior rule ───────────────────────
