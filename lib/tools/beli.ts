@@ -1,18 +1,24 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
-import { t1Text } from '@/lib/llm/gemini';
+import { anthropicCostUsd } from '@/lib/router/tiers';
 import { getPrefs } from '@/lib/profile/prefs';
 import { nearbySpotsBlock } from '@/lib/tools/places';
 
-// Beli has no API. Noah screenshots his ranked / want-to-try lists; Gemini Flash
-// vision pulls the restaurants (structured OCR, not judgement — ~1/10th the cost
-// of a Sonnet vision call); they land in restaurant_prefs and feed the
+// Beli has no API. Noah screenshots his ranked / want-to-try lists; Sonnet
+// vision pulls the places (a long list must come back COMPLETE, so completeness
+// wins over the cheaper model here); they land in restaurant_prefs and feed the
 // restaurant hand-off + profile.
 
+const anthropic = new Anthropic();
+
+const PLACE_KIND = '(restaurant|resto|place|spot|bakery|bakeries|dessert|caf[eé]|coffee|bar|eatery|food)';
 export const isBeliShare = (t: string) =>
   /\bbeli\b/i.test(t) ||
-  /\b(my|these are (my)?) (restaurant|resto) (rank|list|score|pref)/i.test(t) ||
-  /\b(here('?s| are)|adding) .{0,25}(restaurant|place)s? (i('?ve| have)? )?(been|rank|rated|want)/i.test(t);
+  new RegExp(`\\b(my|these are (my)?|more (of my)?) ${PLACE_KIND}s? (rank|list|score|pref|rating|log)`, 'i').test(t) ||
+  new RegExp(`\\b(here('?s| are|s)|adding|add these|got more|some more|the rest of my)\\b.{0,30}${PLACE_KIND}s?\\b`, 'i').test(t) ||
+  new RegExp(`\\b${PLACE_KIND}s? (i('?ve| have)? )?(been to|rank|rated|want to try|been)\\b`, 'i').test(t) ||
+  /\b(rest of|more of) (my|the) (list|rankings?)\b/i.test(t);
 
 export type PlaceType = 'restaurant' | 'cafe' | 'bakery' | 'dessert' | 'bar' | 'other';
 const PLACE_TYPES: PlaceType[] = ['restaurant', 'cafe', 'bakery', 'dessert', 'bar', 'other'];
@@ -45,6 +51,21 @@ interface BeliRow {
 const dedupeKey = (name: string, city: string | null) =>
   `${name.toLowerCase().trim()}|${(city ?? '').toLowerCase().trim()}`;
 
+/** Salvage a JSON array even if the model's output got truncated mid-object —
+ *  a long Beli list must not be silently dropped on one bad closing brace. */
+function parseArrayLoose(raw: string): Record<string, unknown>[] {
+  const s = raw.replace(/```json\n?|\n?```/g, '').trim();
+  try {
+    const j = JSON.parse(s);
+    if (Array.isArray(j)) return j as Record<string, unknown>[];
+  } catch { /* fall through to salvage */ }
+  const out: Record<string, unknown>[] = [];
+  for (const m of s.matchAll(/\{[^{}]*\}/g)) {
+    try { out.push(JSON.parse(m[0])); } catch { /* skip a mangled object */ }
+  }
+  return out;
+}
+
 /** One or more screenshots → the places in them (deduped across shots). */
 export async function extractBeli(
   images: { media_type: string; data: string }[],
@@ -52,8 +73,9 @@ export async function extractBeli(
   const shots = images.slice(0, 8);
   if (!shots.length) return { rows: [], costUsd: 0 };
 
-  const prompt =
-    'These are screenshots from Beli, a place-ranking app. Extract EVERY place visible across ALL the images. ' +
+  const system =
+    'These are screenshots from Beli, a place-ranking app. Extract EVERY place visible across ALL the images — ' +
+    'do NOT summarise, sample, or stop early; if there are 50 places, return 50 objects. ' +
     'If the same place appears in more than one image, return it once. ' +
     'For each: name; city or neighbourhood if shown (else null); the numeric score if shown, 0–10 (else null); ' +
     'category = the CUISINE only (e.g. "Italian", "Thai", "sushi", "pizza") if shown, else null; ' +
@@ -64,20 +86,35 @@ export async function extractBeli(
     'Return ONLY a minified JSON array like [{"name":"","city":null,"score":8.7,"category":null,"place_type":"restaurant","note":null,"status":"ranked"}]. ' +
     'No prose, no markdown fence. If the images have no place list, return [].';
 
-  const raw = (
-    await t1Text(
-      'beli_extract',
-      prompt,
-      shots.map((im) => ({ inlineData: { mimeType: im.media_type || 'image/jpeg', data: im.data } })),
-      { flash: true, maxOutputTokens: 2500 },
-    )
-  )?.replace(/```json\n?|\n?```/g, '').trim();
+  const started = Date.now();
+  const msg = await anthropic.messages.create({
+    model: 'claude-sonnet-5',
+    max_tokens: 8000,
+    system,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          ...shots.map((im) => ({
+            type: 'image' as const,
+            source: { type: 'base64' as const, media_type: im.media_type as 'image/jpeg', data: im.data },
+          })),
+          { type: 'text' as const, text: `Extract every place from ${shots.length === 1 ? 'this screenshot' : `these ${shots.length} screenshots`}.` },
+        ],
+      },
+    ],
+  });
+  const costUsd = anthropicCostUsd('claude-sonnet-5', msg.usage);
+  await audit.modelCall({
+    conversation_id: null, purpose: 'beli_extract', tier: 'T2', model: 'claude-sonnet-5',
+    input_tokens: msg.usage.input_tokens, cached_read_tokens: msg.usage.cache_read_input_tokens ?? 0,
+    cache_write_tokens: msg.usage.cache_creation_input_tokens ?? 0, output_tokens: msg.usage.output_tokens,
+    cost_usd: costUsd, latency_ms: Date.now() - started,
+  });
 
-  const costUsd = 0; // metered in audit.modelCall by t1Text
-  if (!raw) return { rows: [], costUsd };
-  let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return { rows: [], costUsd }; }
-  if (!Array.isArray(parsed)) return { rows: [], costUsd };
+  const raw = msg.content.filter((b) => b.type === 'text').map((b) => (b as Anthropic.TextBlock).text).join('');
+  const parsed = parseArrayLoose(raw);
+  if (!parsed.length) return { rows: [], costUsd };
 
   const rows: BeliRow[] = [];
   for (const p of parsed as Record<string, unknown>[]) {
@@ -97,26 +134,40 @@ export async function extractBeli(
   return { rows, costUsd };
 }
 
-export async function saveBeliRows(userId: string, rows: BeliRow[]): Promise<{ added: number; updated: number }> {
-  if (!rows.length) return { added: 0, updated: 0 };
+export async function saveBeliRows(
+  userId: string,
+  rows: BeliRow[],
+): Promise<{ added: number; updated: number; failed: number }> {
+  if (!rows.length) return { added: 0, updated: 0, failed: 0 };
   const { data: existing } = await adminClient.from('restaurant_prefs').select('dedupe_key').eq('user_id', userId);
   const have = new Set((existing ?? []).map((x) => x.dedupe_key as string));
+
+  // one bulk upsert, de-duped by key within this batch
+  const seen = new Set<string>();
+  const payload: Record<string, unknown>[] = [];
   let added = 0;
   let updated = 0;
   for (const r of rows) {
     const key = dedupeKey(r.name, r.city);
+    if (seen.has(key)) continue;
+    seen.add(key);
     (have.has(key) ? updated++ : added++);
-    await adminClient.from('restaurant_prefs').upsert(
-      {
-        user_id: userId, name: r.name, city: r.city, score: r.score, category: r.category,
-        place_type: r.place_type, note: r.note, status: r.status, source: 'beli',
-        dedupe_key: key, updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id,dedupe_key' },
-    );
+    payload.push({
+      user_id: userId, name: r.name, city: r.city, score: r.score, category: r.category,
+      place_type: r.place_type, note: r.note, status: r.status, source: 'beli',
+      dedupe_key: key, updated_at: new Date().toISOString(),
+    });
+  }
+
+  const { error } = await adminClient
+    .from('restaurant_prefs')
+    .upsert(payload, { onConflict: 'user_id,dedupe_key' });
+  if (error) {
+    await audit.log('error', 'system', null, { where: 'saveBeliRows', message: error.message, rows: payload.length });
+    return { added: 0, updated: 0, failed: payload.length };
   }
   await audit.log('outbound_message', 'calliad', null, { tool: 'beli_save', added, updated });
-  return { added, updated };
+  return { added, updated, failed: 0 };
 }
 
 export async function listPrefs(userId: string) {

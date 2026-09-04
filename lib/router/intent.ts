@@ -19,6 +19,7 @@ export type Intent =
   | 'note.remember'     // asking to remember a fact or note something down
   | 'contact.log'       // mentions having seen / talked to / called someone
   | 'taste.reaction'    // a verdict on a book/show/film/game they finished ("loved X")
+  | 'beli.share'        // sharing screenshots of their Beli place list to be logged
   | 'recipe.share'      // send a recipe to A Bent Fork
   // ── lookups (a handler gathers ground data for the reply) ──
   | 'card.question'     // MTG: "what do we think of X", "how does X work / interact"
@@ -32,7 +33,7 @@ export type Intent =
 
 const ACTION_INTENTS: Intent[] = [
   'calendar.create', 'calendar.change', 'task.add', 'watchlist.add', 'watchlist.update',
-  'note.remember', 'contact.log', 'taste.reaction', 'recipe.share',
+  'note.remember', 'contact.log', 'taste.reaction', 'beli.share', 'recipe.share',
   'card.question', 'sim.request', 'watchlist.query', 'restaurant.reco', 'weather.query',
   'subscription.query', 'recall.question',
 ];
@@ -57,6 +58,7 @@ ACTIONS:
 - note.remember — store a fact / jot something down ("remember the storage code is 4417", "note the car's due for service").
 - contact.log — mentions having just seen / talked to / called / texted someone ("caught up with Dad", "lunch with Priya"). Put the name in "person".
 - taste.reaction — a verdict on a book/show/film/game they consumed ("loved Piranesi", "that movie was mid", "hated the ending").
+- beli.share — sharing screenshots of their restaurant / café / bakery / dessert / bar list (from the Beli app) to be saved ("here's more of my list", "adding these bakeries", "the rest of my rankings", "my dessert spots").
 - recipe.share — wants to send a recipe link to "A Bent Fork".
 
 LOOKUPS (assistant should gather data, not act):

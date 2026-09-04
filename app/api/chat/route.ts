@@ -470,18 +470,19 @@ export async function POST(req: NextRequest) {
   // Explicit ("beli" / "my restaurant rankings") OR a bare screenshot with no
   // caption — in the bare case, a non-restaurant image just falls through to the
   // normal vision answer.
-  const beliExplicit = images.length > 0 && isBeliShare(text);
+  const beliExplicit = images.length > 0 && (isBeliShare(text) || await inferred('beli.share'));
   if (beliExplicit || (images.length > 0 && !text.trim())) {
-    const { rows } = await extractBeli(images).catch(() => ({ rows: [] }));
+    const { rows } = await extractBeli(images).catch(() => ({ rows: [], costUsd: 0 }));
     if (rows.length) {
-      const { added, updated } = await saveBeliRows(user.id, rows);
+      const { added, updated, failed } = await saveBeliRows(user.id, rows);
+      if (failed) return say(`I read ${rows.length} place${rows.length > 1 ? 's' : ''} but couldn't save them — something's off on my end. Try again in a minute.`, 'beli-save-failed');
       const top = rows.filter((r) => r.score != null).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 4).map((r) => `${r.name} (${r.score})`);
       return say(
-        `Got ${added + updated} — ${added} new, ${updated} updated.${top.length ? ` Top of this batch: ${top.join(', ')}.` : ''} Send more screenshots to fill it out.`,
+        `Got ${added + updated} — ${added} new, ${updated} updated.${top.length ? ` Top of this batch: ${top.join(', ')}.` : ''} ${images.length >= 8 ? 'That was the 8-screenshot max per message — send the rest in another message.' : 'Send more screenshots to fill it out.'}`,
         'beli-extract',
       );
     }
-    if (beliExplicit) return say(`I couldn't read a restaurant list off ${images.length > 1 ? 'those' : 'that'} — try a clearer screenshot of the ranked or want-to-try view.`, 'beli-empty');
+    if (beliExplicit) return say(`I couldn't read a place list off ${images.length > 1 ? 'those' : 'that'} — try a clearer screenshot of the ranked or want-to-try view.`, 'beli-empty');
     // bare screenshot(s), not a restaurant list → let the vision path handle it
   }
   // a pending email draft + anything that isn't yes/no → treat it as a revision
