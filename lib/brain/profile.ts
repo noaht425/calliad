@@ -45,6 +45,7 @@ const INTENT: { re: RegExp; sections: (string | undefined)[] }[] = [
   { re: /\b(timesheet|payday|admissions|trinity|\bwork\b|\bshift\b)/i, sections: [find('work')] },
   { re: /\b(italian|latin|greek|translat|conjugat|declin|idiom|vocab|grammar)/i, sections: [find('languages'), find('academics — current')] },
   { re: /\b(would i (like|enjoy)|should i (watch|read|play|start)|recommend|worth (watching|reading|playing)|what should i (watch|read|play)|any (recs|recommendations))/i, sections: [find('interests')] },
+  { re: /\b(music|song|track|album|artist|band|playlist|spotify|listen(ing)?\b|shanty|folk|soundtrack|concert|gig|tour dates?)/i, sections: [find('interests')] },
   { re: /\b(birthday|gift\b|present for|anniversary|meeting with)|\b(call|text|email|messag)\w* (my |him|her|them|mom|dad)/i, sections: [find('people'), find('recurring')] },
   { re: /\b(a ?bent ?fork|\bmtg\b|magic the gathering|\brepo\b|deploy|\bproject)/i, sections: [find('projects')] },
 ];

@@ -217,39 +217,43 @@ as fits the person.*
   character descriptions. Details + the negatives list in `taste-log.md`.
 - Full favorites in `inputs/favorites.md`; playtime in `inputs/game-playtime-2026-08.md`.
 
-### Music (from 5 playlists, 2026-08-29 — `inputs/spotify-playlists-2026-08.md`)
+### Music (full Spotify export, Sept 2025 to Sept 2026; regen with `scripts/spotify-profile.mjs`)
 
-**There's a clear trajectory over the ~586-song main playlist ("Noah"):**
+A year of actual listening: ~9,500 plays over 30s, ~456 hours. Volume roughly tripled across
+the year (about 20 h/month in late 2025, 79 h in June 2026, 68 h in August). Mostly an evening
+and late-night listener; afternoons second.
 
-- **Older core** (adds through ~2023): anthemic, radio-friendly pop-rock / alt-pop / EDM-pop.
-  OneRepublic, Bastille, AJR (heavily), Imagine Dragons, Livingston, ILLENIUM, The Chainsmokers,
-  Avicii, X Ambassadors, Andy Grammer, Alec Benjamin. Big choruses, "keep going" themes.
-- **Recent adds** (2025–2026) shift toward **literary indie-folk and narrative music**:
-  - *Chamber / mythic folk:* The Oh Hellos, The Crane Wives, Yaelokre, Vian Izak, Juniper Vale,
-    The Head and the Heart, Radical Face, Run River North, Gang of Youths ("Achilles Come Down").
-  - *Myth-driven musical theatre* — and these are all **Greek myth**: **EPIC: The Musical**
-    (Odyssey — "God Games," "We'll Be Fine"), **Hadestown** (Orpheus — "Wait for Me," "Chant"),
-    **The Lightning Thief** musical ("Take the Weight"). Plus *The Greatest Showman*, Hazbin Hotel.
-  - *TTRPG / story-song / "bardcore":* Colm R. McGuinness ("Bottom of the Bottle," "Tavern Crawl"
-    — Inspired-by-D&D), Fish in a Birdcage (the "Rule #" series), "Three Kobolds in a Trenchcoat,"
-    Janani K. Jha, PEGGY.
-  - *Current favorite artists* (by frequency in recent adds): **The Astronomers, Alex Warren,
-    ISHAN, John Michael Howell**, plus Vinny Marchi, Aimee Carty, Marino, Raynes.
-  - *Italian-language pop* creeping in (tracks the Italian study): Pinguini Tattici Nucleari,
-    Federico Rossi, Damiano David.
-  - Some nostalgic 2000s rock too: Goo Goo Dolls, MCR, Fall Out Boy, Rolling Stones.
-- **The Arcane soundtrack is the constant** across both eras and every playlist.
+**Top artists by listening time (the year):** AJR (30 h, far ahead), Alex Warren, then a dense
+block of nautical / Celtic folk: Sail North, Nathan Evans, Colm R. McGuinness, Ceol, Home Free,
+Derina Harvey Band. Narrative folk-pop: John Michael Howell, The Oh Hellos, The Astronomers,
+ISHAN, Raynes, Vian Izak, Barns Courtney, Livingston, Rose Betts, Alfie Castley. Pop-punk /
+emo nostalgia is a live thread, not just background: Fall Out Boy, My Chemical Romance, All
+Time Low, Paramore, All-American Rejects. Villain-swagger: bbno$, Maneskin. The Arcane
+soundtrack is still a constant.
 
-**Playlists are built around a concept or mood:**
-- **"Pirates"** (27) — sea shanties + Celtic/Irish folk (Nathan Evans, Colm R. McGuinness, Home Free). Says the kick is fading.
-- **"Theros Aestathis"** (48) — a **D&D character** playlist (name = the Greek-myth *Magic* plane). Fiery, proud, villain-swagger: Barns Courtney, bbno$, Måneskin, The Offspring, "It's Tough to Be a God."
-- **"Just in Case"** (9) — his **stress / calm-down** playlist (ADHD/anxiety). Soft folk-pop: SAINT PHNX "Happy Place," "You Will Be Okay (Stolas' Lullaby)," LAUV, Jonah Kagen, The Oh Hellos.
+**The sea-shanty phase did not fade, it took over.** Almost every recent-heavy artist (>70% of
+their plays in the last quarter) is shanty / Celtic / nautical folk: Nathan Evans, Sail North,
+Colm R. McGuinness, Ceol, Home Free, Derina Harvey Band, The Wellermen, Alan Doyle, Celtic
+Woman, Windrose Crew. Top track of the year is "Leave Her, Johnny" (Sail North, 69 plays).
 
-**Through-line:** the music tracks the same interests as everything else — Greek myth, TTRPG,
-narrative. Light on hip-hop, country, metal, jazz.
+**Saved library (explicit keeps):** heavy on **EPIC: The Musical** (Jorge Rivera-Herrans, six
+saga concept albums saved), plus Hadestown and The Lightning Thief cast recordings, all Greek
+myth. AJR (five albums), The Astronomers (three), Sail North, Alex Warren, Livingston, Nathan
+Evans, John Michael Howell, Vitamin String Quartet, the BG3 soundtrack, a Critical Role EP.
 
-**Caveat:** the middle of the main playlist (~2022–2024 adds) is still unseen; the pending
-Spotify export will complete it.
+**Playlists by concept / mood:**
+- **"Pirates"** — sea shanties + Celtic/Irish folk. Now the dominant mode, not a passing kick.
+- **"Theros Aestathis"** — a **D&D character** playlist (name = the Greek-myth *Magic* plane).
+  Fiery, proud, villain-swagger: Barns Courtney, bbno$, Maneskin, The Offspring.
+- **"Just in Case"** — his **stress / calm-down** playlist (ADHD/anxiety). Soft folk-pop:
+  SAINT PHNX "Happy Place," LAUV, Jonah Kagen, The Oh Hellos.
+
+**Podcasts** (light, deep on a few): The Newest Olympian (18 h, a Percy Jackson reread show),
+Worlds Beyond Number + its Fireside feed (24 h, the D&D actual-play), The Magnus Archives
+(5 h, horror fiction). All narrative / actual-play, matching the fiction taste.
+
+**Through-line:** the music tracks the same interests as everything else, Greek myth, TTRPG,
+narrative, adventure. Light on hip-hop, country, metal, jazz.
 
 ## Working style (how Noah likes to collaborate)
 - When handed a formula / config / SQL / command change, prefers being given the **literal text
