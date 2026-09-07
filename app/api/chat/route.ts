@@ -25,7 +25,8 @@ import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isNoteCapture, extractNote, saveNote, isRecallQuestion, isLookupQuestion, searchNotes, notesRecallBlock, ambientNotesBlock, maybeIndexTurn } from '@/lib/memory/notes';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
-import { isAutoAllowed, runAutoCreateEvent, isUndo, undoLastAuto, recordScheduleImport } from '@/lib/actions/auto';
+import { isAutoAllowed, runAutoCreateEvent, runAutoUpdateEvent, isUndo, undoLastAuto, recordScheduleImport } from '@/lib/actions/auto';
+import type { CalendarChange } from '@/lib/integrations/icloud-calendar-write';
 import { isCalendarWrite, isTaskAdd, extractEvent, whenLabel, isYes, isNo, isCalendarChange, extractCalendarChange, findEventByHint, isReuseAttachmentRequest } from '@/lib/actions/detect';
 import { extractTask, isTaskEdit, extractTaskChange } from '@/lib/actions/task';
 import { classifyMedReply, recordMed, medContextLine } from '@/lib/health/meds';
@@ -809,6 +810,28 @@ export async function POST(req: NextRequest) {
     if (ch.new_title) bits.push(`renamed to "${ch.new_title}"`);
     if (ch.new_location !== null && ch.new_location !== undefined) bits.push(`at ${ch.new_location}`);
     if (!bits.length) return say(`What's the change to **${e.title}** (${whenLabel(e.start_at)})?`, 'cal-change-underspecified');
+
+    // Trusted + unambiguous (one event, a concrete change) → just do it and
+    // offer undo, same as auto-add. Otherwise propose and wait for a yes.
+    if (await isAutoAllowed('update_event').catch(() => false)) {
+      const change: CalendarChange = {
+        title: ch.new_title ?? undefined,
+        start_at: ch.new_start ?? undefined,
+        end_at: ch.new_end !== null && ch.new_end !== undefined ? ch.new_end : undefined,
+        location: ch.new_location !== null && ch.new_location !== undefined ? ch.new_location : undefined,
+      };
+      const { data: cur } = await adminClient
+        .from('calendar_events').select('end_at, location').eq('user_id', user.id).eq('uid', e.uid).maybeSingle();
+      const prev: CalendarChange = {};
+      if (change.title !== undefined) prev.title = e.title;
+      if (change.start_at !== undefined) prev.start_at = e.start_at;
+      if (change.end_at !== undefined) prev.end_at = (cur?.end_at as string | null) ?? null;
+      if (change.location !== undefined) prev.location = (cur?.location as string | null) ?? null;
+      const r = await runAutoUpdateEvent(user.id, e.uid, e.title, change, prev, conversationId).catch(() => ({ ok: false }));
+      if (r.ok) return say(`Done. **${ch.new_title ?? e.title}**: ${bits.join(', ')}. Say "undo" to put it back.`, 'calendar-change-auto');
+      // couldn't write → fall through to the confirm path
+    }
+
     await proposeAction({
       userId: user.id, kind: 'update_event', riskTier: 'confirm',
       summary: `Update "${e.title}": ${bits.join(', ')}`,

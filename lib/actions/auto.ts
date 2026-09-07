@@ -1,10 +1,10 @@
 import { adminClient } from '@/lib/supabase.server';
 import { audit } from '@/lib/hub/audit';
 import { config } from '@/lib/hub/config';
-import { createCalendarEvent, deleteCalendarEvent } from '@/lib/integrations/icloud-calendar-write';
+import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent, type CalendarChange } from '@/lib/integrations/icloud-calendar-write';
 
 // The trust ladder. A `confirm`-tier action whose kind Noah has pre-authorised
-// runs immediately instead of waiting for a "yes" — but only reversible, local
+// runs immediately instead of waiting for a "yes", but only reversible, local
 // ones, and every run is recorded so "undo" can reverse it. Send / buy / delete
 // never appear here.
 
@@ -13,6 +13,11 @@ export const AUTO_KINDS = [
     kind: 'create_event',
     label: 'Add calendar events',
     help: 'When the title and time are clear, put it straight on your calendar instead of asking first. Say "undo" to take it back.',
+  },
+  {
+    kind: 'update_event',
+    label: 'Reschedule and rename events',
+    help: 'When it\'s clear which event and what the change is, make it instead of asking first. Say "undo" to put it back.',
   },
 ] as const;
 export type AutoKind = (typeof AUTO_KINDS)[number]['kind'];
@@ -74,7 +79,33 @@ export async function runAutoCreateEvent(
   return r.ok ? { ok: true } : { ok: false, error: r.error };
 }
 
-/** Record a schedule import (many events at once) for undo — the events
+/** Update a calendar event with no confirm gate; stash the prior values so
+ *  "undo" can put them back. `prev` holds only the fields `change` touches. */
+export async function runAutoUpdateEvent(
+  userId: string,
+  uid: string,
+  title: string,
+  change: CalendarChange,
+  prev: CalendarChange,
+  conversationId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const r = await updateCalendarEvent(userId, uid, change);
+  await adminClient.from('actions').insert({
+    kind: 'update_event',
+    summary: `Update "${title}"`,
+    risk_tier: 'silent',
+    status: r.ok ? 'done' : 'failed',
+    payload: { uid, title, change, prev, auto: true },
+    created_by: conversationId,
+    decided_at: new Date().toISOString(),
+    executed_at: new Date().toISOString(),
+    result: r.ok ? 'auto' : (r.error ?? 'failed'),
+  });
+  await audit.log('action_executed', 'calliad', conversationId, { kind: 'update_event', auto: true, ok: r.ok });
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
+/** Record a schedule import (many events at once) for undo. The events
  *  themselves are already created by the time this is called. */
 export async function recordScheduleImport(
   info: { label: string; uids: string[]; created: number; skipped: number },
@@ -97,7 +128,7 @@ export async function recordScheduleImport(
 const UNDO_WINDOW_MS = 30 * 60_000;
 
 export function isUndo(t: string): boolean {
-  return /^\s*(undo(\s+(that|it|the last( one)?))?|nope,?\s+undo|scratch that|take that back|(never ?mind,?\s+)?(undo|remove|delete)\s+(that|the)\s+(event|calendar)( entry)?)\s*[.!]?\s*$/i.test(t);
+  return /^\s*(undo(\s+(that|it|the last( one)?|that change))?|nope,?\s+undo|scratch that|take that back|revert( that| it)?|(change|put|move) (that|it) back|(never ?mind,?\s+)?(undo|remove|delete)\s+(that|the)\s+(event|calendar)( entry)?)\s*[.!]?\s*$/i.test(t);
 }
 
 /** Reverse the most recent auto-action in this conversation, if it's recent. */
@@ -118,10 +149,17 @@ export async function undoLastAuto(userId: string, conversationId: string): Prom
 
   if (row.kind === 'create_event' && p.uid) {
     const r = await deleteCalendarEvent(userId, String(p.uid));
-    if (!r.ok) return `Tried to undo that, but couldn't remove it — ${r.error}.`;
+    if (!r.ok) return `Tried to undo that, but couldn't remove it: ${r.error}.`;
     await adminClient.from('actions').update({ status: 'undone' }).eq('id', row.id);
     await audit.log('action_executed', 'noah', conversationId, { kind: 'undo', of: row.id });
-    return `Undone — took "${String(p.title ?? 'that event')}" back off your calendar.`;
+    return `Undone, took "${String(p.title ?? 'that event')}" back off your calendar.`;
+  }
+  if (row.kind === 'update_event' && p.uid && p.prev) {
+    const r = await updateCalendarEvent(userId, String(p.uid), p.prev as CalendarChange);
+    if (!r.ok) return `Tried to undo that, but couldn't change it back: ${r.error}.`;
+    await adminClient.from('actions').update({ status: 'undone' }).eq('id', row.id);
+    await audit.log('action_executed', 'noah', conversationId, { kind: 'undo', of: row.id });
+    return `Undone, put "${String(p.title ?? 'that event')}" back the way it was.`;
   }
   if (row.kind === 'create_schedule' && Array.isArray(p.uids)) {
     let removed = 0;
@@ -131,7 +169,7 @@ export async function undoLastAuto(userId: string, conversationId: string): Prom
     }
     await adminClient.from('actions').update({ status: 'undone' }).eq('id', row.id);
     await audit.log('action_executed', 'noah', conversationId, { kind: 'undo', of: row.id, removed });
-    return `Undone — removed ${removed} event${removed === 1 ? '' : 's'} from "${String(p.label ?? 'that import')}".`;
+    return `Undone, removed ${removed} event${removed === 1 ? '' : 's'} from "${String(p.label ?? 'that import')}".`;
   }
   return null;
 }
