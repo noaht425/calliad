@@ -51,7 +51,7 @@ export async function relevantLoops(
     .order('due_at', { ascending: true, nullsFirst: false })
     .limit(50);
 
-  const rows = (data ?? []) as OpenLoop[];
+  const rows = ((data ?? []) as OpenLoop[]).filter((l) => !l.tags.includes('checkin')); // social follow-ups aren't working state
   const tagset = new Set((opts.tags ?? []).map((t) => t.toLowerCase()));
   const picked = rows.filter(
     (l) =>
@@ -219,6 +219,7 @@ export async function loopsDueForNudge(userId: string): Promise<OpenLoop[]> {
     .order('due_at', { ascending: true });
 
   return ((data ?? []) as (OpenLoop & { last_nudged_at: string | null })[]).filter((l) => {
+    if (l.tags.includes('checkin')) return false; // social follow-ups have their own runner
     const hoursOut = (Date.parse(l.due_at!) - now) / 3600_000;
     return hoursOut <= (isExam(l) ? 72 : 48);
   });

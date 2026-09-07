@@ -5,6 +5,7 @@ import { drainNotifications } from '@/lib/hub/notify';
 import { runDueWatchers } from '@/lib/watch/check';
 import { runEventNudges } from '@/lib/nudge/events';
 import { runPeopleNudges } from '@/lib/nudge/people';
+import { runCheckins } from '@/lib/nudge/checkins';
 import { runBehaviorMaintenance } from '@/lib/brain/behavior';
 import { backfillNotes } from '@/lib/memory/notes';
 
@@ -57,6 +58,10 @@ async function handle(req: NextRequest) {
     console.error('[tick] runPeopleNudges', e);
     return { enqueued: 0 };
   });
+  const checkins = await runCheckins().catch((e) => {
+    console.error('[tick] runCheckins', e);
+    return { enqueued: 0 };
+  });
   const behavior = await runBehaviorMaintenance().catch((e) => {
     console.error('[tick] runBehaviorMaintenance', e);
     return {} as { reflection?: number; compiler?: number };
@@ -70,8 +75,8 @@ async function handle(req: NextRequest) {
     return { sent: 0, held: 0, failed: 0 };
   });
 
-  const result = { ok: true, watchers, events, people, behavior, kb, notifications, ms: Date.now() - started };
-  if (watchers.changed || events.enqueued || people.enqueued || behavior.reflection || behavior.compiler || kb.processed || notifications.sent || notifications.failed) {
+  const result = { ok: true, watchers, events, people, checkins, behavior, kb, notifications, ms: Date.now() - started };
+  if (watchers.changed || events.enqueued || people.enqueued || checkins.enqueued || behavior.reflection || behavior.compiler || kb.processed || notifications.sent || notifications.failed) {
     await audit.log('trigger_fired', 'cron', 'tick', result);
   }
   return NextResponse.json(result);
