@@ -72,6 +72,7 @@ export interface TurnState {
   now: Date;
   tz: string;
   recent: { role: 'user' | 'assistant'; content: string }[]; // last ~10–20
+  threadSummary?: string;            // rolling "what this conversation is about" note
   integrations?: IntegrationContext; // upcoming calendar + watched-label mail
   loops?: OpenLoop[];                // relevant open loops (working state)
   mode?: Mode;                       // conversation mode (overlay in layer 5)
@@ -163,6 +164,10 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
     // Layer 4 — fresh every turn, MUST sit after the last breakpoint.
     { type: 'text', text: nowLine },
   ];
+
+  if (state.threadSummary) {
+    system.push({ type: 'text', text: `## This conversation so far\n${state.threadSummary}\n\n(Your own running note. Use it to resolve "it" / "that" / "the other one" and to keep track of what's still open. The messages below are the source of truth if they disagree.)` });
+  }
 
   const extra = renderSections(state.profileSections ?? []);
   if (extra) system.push({ type: 'text', text: `## About Noah (relevant to this turn)\n\n${extra}` });

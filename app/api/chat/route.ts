@@ -17,6 +17,7 @@ import { captureLink, listItems } from '@/lib/capture/link';
 import { runWebFetch } from '@/lib/tools/webfetch';
 import { runMorphology } from '@/lib/tools/morphology';
 import { profileSections, semanticSections, learnedFacts } from '@/lib/brain/profile';
+import { summarizeThread } from '@/lib/brain/thread';
 import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
 import { upsertLoop, RECUR_LABEL, findLoopByHint, setLoopTitle } from '@/lib/memory/loops';
@@ -1028,6 +1029,12 @@ export async function POST(req: NextRequest) {
 
   const state: TurnState = {
     now: new Date(), tz: TZ, recent, integrations, loops,
+    // rolling "what are we doing" note, kept on mode_state; only useful once
+    // there's a thread to summarise, and kept out of language-practice runs.
+    threadSummary:
+      recent.length >= 2 && !modeState.practiceLang
+        ? (modeState.threadSummary as string | undefined)
+        : undefined,
     mode: effectiveMode === 'default' ? undefined : effectiveMode,
     toolResult,
     profileSections: [...new Set([...profileSections(text, effectiveMode), ...semSecs])],
@@ -1109,6 +1116,19 @@ export async function POST(req: NextRequest) {
         conversationId,
       ).catch((e) => console.error('[chat] correction capture', e)),
     );
+    // refresh the rolling "what this conversation is about" note for next turn
+    if (!modeState.practiceLang) {
+      waitUntil(
+        summarizeThread(modeState.threadSummary as string | undefined, text, finalText)
+          .then((s) =>
+            adminClient
+              .from('conversations')
+              .update({ mode_state: { ...modeState, threadSummary: s ?? undefined } })
+              .eq('id', conversationId),
+          )
+          .catch((e) => console.error('[chat] thread summary', e)),
+      );
+    }
   }();
 
   return streamResponse(conversationId, body$);
