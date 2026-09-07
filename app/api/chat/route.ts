@@ -16,12 +16,12 @@ import { detectFromTurn } from '@/lib/memory/detect';
 import { captureLink, listItems } from '@/lib/capture/link';
 import { runWebFetch } from '@/lib/tools/webfetch';
 import { runMorphology } from '@/lib/tools/morphology';
-import { profileSections, learnedFacts } from '@/lib/brain/profile';
+import { profileSections, semanticSections, learnedFacts } from '@/lib/brain/profile';
 import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
 import { upsertLoop, RECUR_LABEL, findLoopByHint, setLoopTitle } from '@/lib/memory/loops';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
-import { isNoteCapture, extractNote, saveNote, isRecallQuestion, isLookupQuestion, searchNotes, notesRecallBlock, maybeIndexTurn } from '@/lib/memory/notes';
+import { isNoteCapture, extractNote, saveNote, isRecallQuestion, isLookupQuestion, searchNotes, notesRecallBlock, ambientNotesBlock, maybeIndexTurn } from '@/lib/memory/notes';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isAutoAllowed, runAutoCreateEvent, isUndo, undoLastAuto, recordScheduleImport } from '@/lib/actions/auto';
@@ -899,7 +899,7 @@ export async function POST(req: NextRequest) {
 
   // ── brain ───────────────────────────────────────────────────────────────
   const effectiveMode: Mode = decision.setMode ?? decision.mode;
-  const [integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, behaviorLine, correctionsLine, occasionsLine, rapport, userPreset] = await Promise.all([
+  const [integrations, loops, morphResult, learned, contactsLine, tripsLine, locationLine, behaviorLine, correctionsLine, occasionsLine, rapport, userPreset, semSecs, ambientNoteHits] = await Promise.all([
     getIntegrationContext(user.id, { daysAhead: 14, emailLimit: 8 }).catch(() => undefined),
     relevantLoops(user.id, { dueWithinDays: 21 }).catch(() => []),
     decision.tools.includes('morphology') ? runMorphology(text).catch(() => undefined) : Promise.resolve(undefined),
@@ -912,6 +912,8 @@ export async function POST(req: NextRequest) {
     occasionsContextLine(user.id).catch(() => ''),
     personaExtra(user.id).catch(() => ''),
     config.get('personality_preset').catch(() => 'default'),
+    semanticSections(text).catch(() => [] as string[]),
+    searchNotes(user.id, text, 4).catch(() => []),
   ]);
   const activePreset = resolvePreset({
     userDefault: userPreset,
@@ -1019,12 +1021,18 @@ export async function POST(req: NextRequest) {
     if (hits.length) toolResult = notesRecallBlock(hits);
   }
 
+  // Regex keyword routing is the baseline; the semantic pass unions in anything
+  // it phrased around. A notes-recall block already IS the notes answer, so
+  // don't also staple the ambient version on.
+  const ambientNotes = /^## Your notes/.test(toolResult ?? '') ? '' : ambientNotesBlock(ambientNoteHits);
+
   const state: TurnState = {
     now: new Date(), tz: TZ, recent, integrations, loops,
     mode: effectiveMode === 'default' ? undefined : effectiveMode,
     toolResult,
-    profileSections: profileSections(text, effectiveMode),
+    profileSections: [...new Set([...profileSections(text, effectiveMode), ...semSecs])],
     learned: learned || undefined,
+    notesAmbient: ambientNotes || undefined,
     medStatus: medLine || undefined,
     contacts: contactsLine || undefined,
     trips: tripsLine || undefined,

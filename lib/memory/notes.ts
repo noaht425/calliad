@@ -82,6 +82,22 @@ export async function searchNotes(userId: string, query: string, limit = 6): Pro
   return (data ?? []).map((r) => ({ ...(r as Omit<NoteHit, 'similarity'>), similarity: 0 }));
 }
 
+/** Every-turn version: a small "this might be relevant" block from Noah's own
+ *  notes, framed as background rather than the answer. Higher bar than a recall
+ *  question (0.62) so it only rides along when it's genuinely close, and capped
+ *  at 3 so it can't crowd the turn. Empty string = nothing to add. */
+export function ambientNotesBlock(rows: NoteHit[]): string {
+  const kept = rows.filter((r) => r.similarity >= 0.62).slice(0, 3);
+  if (!kept.length) return '';
+  const lines = kept.map(
+    (r) => `- [${new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: TZ })}] ${r.content}`,
+  );
+  return (
+    `## From Noah's own notes (might bear on this turn)\n${lines.join('\n')}\n\n` +
+    `Background only. Use it if it fits what he's asking; ignore it if it doesn't. Don't announce that you searched.`
+  );
+}
+
 export function notesRecallBlock(rows: NoteHit[]): string {
   const kept = rows.filter((r) => r.similarity === 0 || r.similarity > 0.55);
   if (!kept.length) {

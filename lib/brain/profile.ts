@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { adminClient } from '@/lib/supabase.server';
+import { embed } from '@/lib/memory/embed';
 import type { Mode } from '@/lib/router/route';
 
 // profile.md split by "## " heading → sliced by intent. The full file went into
@@ -62,6 +63,59 @@ export function profileSections(text: string, mode: Mode): string[] {
   };
   (modeMap[mode] ?? []).forEach((s) => picked.add(s));
   return [...picked];
+}
+
+// ── semantic section match (catches what the regex keyword map misses) ─────
+// The INTENT regexes only fire on phrasings someone predicted. This adds a
+// similarity pass over the same sections so "who did I say handles the Trinity
+// payroll thing" still pulls the work + people sections. Unions with the regex
+// result at the call site — never replaces it, so a regex hit can't regress.
+const NON_CORE = HEADINGS.filter((h) => !CORE.includes(h));
+let sectionVecs: { heading: string; vec: number[] }[] | null = null;
+let sectionVecsPromise: Promise<void> | null = null;
+
+async function ensureSectionVecs(): Promise<void> {
+  if (sectionVecs || sectionVecsPromise) return sectionVecsPromise ?? undefined;
+  sectionVecsPromise = (async () => {
+    const pairs = await Promise.all(
+      NON_CORE.map(async (h) => {
+        const body = (SECTIONS[h] ?? '').slice(0, 600);
+        const vec = await embed(body).catch(() => null);
+        return vec ? { heading: h, vec } : null;
+      }),
+    );
+    sectionVecs = pairs.filter((p): p is { heading: string; vec: number[] } => !!p);
+  })();
+  return sectionVecsPromise;
+}
+
+function cosine(a: number[], b: number[]): number {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na && nb ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+
+/** Up to `max` profile headings whose content is semantically close to the
+ *  message. Empty when embeddings are unavailable or nothing clears the bar. */
+export async function semanticSections(text: string, max = 2, threshold = 0.55): Promise<string[]> {
+  const t = text.trim();
+  if (t.length < 8) return [];
+  await ensureSectionVecs().catch(() => {});
+  if (!sectionVecs?.length) return [];
+  const qv = await embed(t).catch(() => null);
+  if (!qv) return [];
+  return sectionVecs
+    .map((s) => ({ heading: s.heading, score: cosine(qv, s.vec) }))
+    .filter((s) => s.score >= threshold)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, max)
+    .map((s) => s.heading);
 }
 
 export function coreProfile(): string {
