@@ -103,21 +103,35 @@ function renderLoops(loops: OpenLoop[], tz: string): string {
   return lines.join('\n');
 }
 
-function renderIntegrations(ctx: IntegrationContext, tz: string): string {
+function renderIntegrations(ctx: IntegrationContext, tz: string, now: Date): string {
   const lines: string[] = ['## Live data (from Noah\'s connected calendar + mail)'];
+  const localDate = (iso: string | Date) =>
+    new Date(iso).toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+  const todayStr = localDate(now);
+  const fmt = (e: IntegrationContext['events'][number]) => {
+    const d = new Date(e.start_at);
+    const when = e.all_day
+      ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz })
+      : d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz });
+    return `- ${e.title} · ${when}${e.location ? ` · ${e.location}` : ''}`;
+  };
 
-  if (ctx.events.length) {
-    lines.push('', 'Upcoming calendar (next 14 days):');
-    for (const e of ctx.events.slice(0, 25)) {
-      const d = new Date(e.start_at);
-      const when = e.all_day
-        ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz })
-        : d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz });
-      lines.push(`- ${e.title} · ${when}${e.location ? ` · ${e.location}` : ''}`);
-    }
-  } else {
-    lines.push('', 'Calendar checked: nothing scheduled in the next 14 days. If asked about the week, say the calendar is clear in one line. Do NOT invent events, and do NOT list things that are not happening. Class times in the profile are reference only, not confirmed events.');
+  const events = ctx.events.slice(0, 25);
+  const todays = events.filter((e) => localDate(e.start_at) === todayStr);
+  const later = events.filter((e) => localDate(e.start_at) !== todayStr);
+
+  lines.push(
+    '',
+    `On the calendar TODAY (${now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: tz })}):`,
+    todays.length ? todays.map(fmt).join('\n') : '- nothing',
+  );
+  if (later.length) {
+    lines.push('', 'Later (next 8 days):', later.map(fmt).join('\n'));
   }
+  lines.push(
+    '',
+    'This block is the ONLY source of truth for what is scheduled. Class times and routines in the profile are background reference, NOT a schedule for today or any specific day. Never list a class, shift, or meeting as happening on a given day unless it appears above for that day. Do not invent events.',
+  );
 
   if (ctx.emails.length) {
     lines.push('', 'Recent mail in the watched label:', '<untrusted source="gmail">');
@@ -182,7 +196,7 @@ export function assemble(userText: string, state: TurnState, images?: { media_ty
   if (state.location) system.push({ type: 'text', text: state.location });
 
   if (state.integrations) {
-    system.push({ type: 'text', text: renderIntegrations(state.integrations, state.tz) });
+    system.push({ type: 'text', text: renderIntegrations(state.integrations, state.tz, state.now) });
   }
   if (state.loops?.length) {
     system.push({ type: 'text', text: renderLoops(state.loops, state.tz) });
