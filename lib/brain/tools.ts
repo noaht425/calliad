@@ -14,9 +14,9 @@ import type Anthropic from '@anthropic-ai/sdk';
 // fixing. A false positive just costs one model call. So: err heavily toward
 // true.
 const ACTION_VERB =
-  /\b(add|creat\w*|schedul\w*|put|book|pencil\w*|block(?:ed|ing)?|set(?:ting)? up|mov\w*|reschedul\w*|push(?:ed|ing)?|bump\w*|shift\w*|renam\w*|chang\w*|updat\w*|edit\w*|fix\w*|delet\w*|remov\w*|cancel\w*|scrap\w*|drop\w*|clear\w*|remind\w*|jot\w*|not(?:e|ed|ing)|remember\w*|mark\w*|finish\w*|complet\w*|log(?:ged|ging)?|track\w*|sav\w*|keep|kept|import\w*)\b/i;
+  /\b(add|creat\w*|schedul\w*|put|book|pencil\w*|block(?:ed|ing)?|set(?:ting)? up|mov\w*|reschedul\w*|push(?:ed|ing)?|bump\w*|shift\w*|renam\w*|chang\w*|updat\w*|edit\w*|fix\w*|delet\w*|remov\w*|cancel\w*|scrap\w*|drop\w*|clear\w*|remind\w*|jot\w*|not(?:e|ed|ing)|remember\w*|mark\w*|finish\w*|complet\w*|log(?:ged|ging)?|track\w*|sav\w*|keep|kept|import\w*|watch\w*|read|reading|play\w*|rate[ds]?|rating|loved|hated|adored|binged?|bailed|go(?:ing)? to|head(?:ed|ing)? (?:to|out)|fly(?:ing)? (?:to|out)|trip to|visiting|talked to|spoke (?:to|with)|caught up|called|texted|met (?:up )?with|had (?:lunch|dinner|coffee) with)\b/i;
 const ACTION_NOUN =
-  /\b(calendar|schedule|class(?:es)?|assignments?|syllab\w*|shifts?|exams?|midterms?|quiz(?:zes)?|tests?|deadlines?|appointments?|appts?|meetings?|events?|tasks?|to-?dos?|reminders?|notes?)\b/i;
+  /\b(calendar|schedule|class(?:es)?|assignments?|syllab\w*|shifts?|exams?|midterms?|quiz(?:zes)?|tests?|deadlines?|appointments?|appts?|meetings?|events?|tasks?|to-?dos?|reminders?|notes?|watch ?list|show|series|movie|film|episode|season|book|game|trip)\b/i;
 
 export function looksActionable(text: string): boolean {
   return ACTION_VERB.test(text) || ACTION_NOUN.test(text) || /\b(to|on|off)\b.{0,12}\bmy\b/i.test(text);
@@ -156,6 +156,76 @@ export const CHAT_TOOLS: Anthropic.Tool[] = [
       type: 'object',
       properties: { text: { type: 'string', description: 'The note, one concise standalone sentence, keep the specifics.' } },
       required: ['text'],
+    },
+  },
+  {
+    name: 'add_to_watchlist',
+    description:
+      "Add a show, film, or anything watchable to Noah's watch list (\"add Lanterns to my list\", \"I should watch the new Dune\", \"start tracking Shogun\"). status is 'watching' if he's already started it, else 'want'.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'The title as Noah said it.' },
+        status: { type: 'string', enum: ['want', 'watching'], description: "'watching' if he's begun it, else 'want'." },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'update_watchlist_item',
+    description:
+      "Record progress or a rating on something already on Noah's watch list (\"I'm on season 3 of The Bear\", \"rate Severance 5 stars\", \"finished Shogun\", \"gave up on that one\"). Set only the fields he stated.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Which item on the list.' },
+        rating: { type: 'number', description: '1 to 5.' },
+        on_season: { type: 'number', description: 'The season he is currently on.' },
+        finished_season: { type: 'number', description: 'A single season he just finished.' },
+        finished: { type: 'boolean', description: 'True if he finished the whole thing / is all caught up.' },
+        status: { type: 'string', enum: ['want', 'watching', 'done'] },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'log_media_reaction',
+    description:
+      "Log Noah's verdict on a specific book / show / film / game / album he read, watched, or played (\"loved Piranesi\", \"that movie was mid\", \"bailed on the new one\", \"Hades II is fantastic\"). Not for a plan to watch something (that's add_to_watchlist).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Canonical title only.' },
+        kind: { type: 'string', enum: ['book', 'screen', 'game', 'music', 'other'] },
+        verdict: { type: 'string', enum: ['loved', 'liked', 'fine', 'bailed', 'hated'], description: "'bailed' = started, didn't finish. 'fine' = lukewarm." },
+        why: { type: 'string', description: 'His reason, a short phrase. Omit if none given.' },
+      },
+      required: ['title', 'verdict'],
+    },
+  },
+  {
+    name: 'log_contact',
+    description:
+      "Record that Noah saw / talked to / called / texted someone (\"caught up with Dad\", \"lunch with Priya\", \"called my sister\"). Just the name; this only works for people already in his contacts.",
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The person, as Noah refers to them.' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'plan_trip',
+    description:
+      "Record an upcoming trip so Calliad can nudge Noah on prep (bank, mail hold, airport plan) as it nears (\"I'm going to Chicago March 3 to 10\", \"heading to NYC next weekend\"). Needs a real destination and at least a start date.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        destination: { type: 'string', description: '"City, Country" or "City, ST".' },
+        start_date: { type: 'string', description: 'YYYY-MM-DD.' },
+        end_date: { type: 'string', description: 'YYYY-MM-DD. Omit if one-day or unknown.' },
+        has_pet: { type: 'boolean', description: 'True only if he mentions bringing a pet.' },
+      },
+      required: ['destination', 'start_date'],
     },
   },
 ];

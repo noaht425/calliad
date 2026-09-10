@@ -27,11 +27,20 @@ Return {"ok":true|false,"title":"canonical title only","kind":"book|screen|game|
     { maxOutputTokens: 120 },
   );
   if (!out?.ok || !out.title?.trim()) return null;
+  return saveTaste(userId, { title: out.title, kind: out.kind, verdict: out.verdict, why: out.why });
+}
 
-  const title = out.title.trim();
-  const kind = (KINDS as readonly string[]).includes(out.kind) ? out.kind : 'other';
-  const verdict: Verdict = (VERDICTS as readonly string[]).includes(out.verdict) ? (out.verdict as Verdict) : 'liked';
-  const why = out.why?.trim() || null;
+/** DB half of the above, callable with already-structured fields (the tool
+ *  path has them and shouldn't pay for a second extraction). */
+export async function saveTaste(
+  userId: string,
+  fields: { title: string; kind?: string; verdict?: string; why?: string | null },
+): Promise<string | null> {
+  const title = fields.title.trim();
+  if (!title) return null;
+  const kind = (KINDS as readonly string[]).includes(fields.kind ?? '') ? (fields.kind as string) : 'other';
+  const verdict: Verdict = (VERDICTS as readonly string[]).includes(fields.verdict ?? '') ? (fields.verdict as Verdict) : 'liked';
+  const why = fields.why?.trim() || null;
 
   // taste_log has no unique key — match on title, update if it's already there
   // (opinions change: "loved it" → "actually it dragged").
@@ -46,12 +55,12 @@ Return {"ok":true|false,"title":"canonical title only","kind":"book|screen|game|
     const row = existing[0];
     await adminClient.from('taste_log').update({ verdict, why: why ?? row.why }).eq('id', row.id);
     return row.verdict === verdict
-      ? `Already had ${title} as "${verdict}" — noted.`
+      ? `Already had ${title} as "${verdict}", noted.`
       : `Updated ${title}: ${row.verdict} → ${verdict}.`;
   }
 
   await adminClient.from('taste_log').insert({
     user_id: userId, title, kind, verdict, why, dated: new Date().toISOString().slice(0, 10),
   });
-  return `Logged: ${title} — ${verdict}${why ? ` (${why})` : ''}.`;
+  return `Logged: ${title}, ${verdict}${why ? ` (${why})` : ''}.`;
 }

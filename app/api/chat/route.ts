@@ -23,7 +23,7 @@ import { addItem as addQuizItem } from '@/lib/quiz/items';
 import { upsertLoop, RECUR_LABEL, findLoopByHint, setLoopTitle, setLoopStatus, type Recur } from '@/lib/memory/loops';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isNoteCapture, extractNote, saveNote, isRecallQuestion, isLookupQuestion, searchNotes, notesRecallBlock, ambientNotesBlock, maybeIndexTurn } from '@/lib/memory/notes';
-import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
+import { isTasteReaction, saveTasteFromText, saveTaste } from '@/lib/taste/capture';
 import { proposeAction, pendingFor, decideAction } from '@/lib/actions/gate';
 import { isAutoAllowed, runAutoCreateEvent, runAutoUpdateEvent, isUndo, undoLastAuto, recordScheduleImport } from '@/lib/actions/auto';
 import type { CalendarChange } from '@/lib/integrations/icloud-calendar-write';
@@ -74,7 +74,7 @@ import { isSubscriptionAdd, isSubscriptionQuery, extractSubscriptions, upsertSub
 import {
   isWatchAdd, isWatchUpdate, isWatchQuery, extractWatchTitle, addWatchFromText,
   upgradeWatchRowViaWeb, looksVague,
-  applyWatchUpdate, listWatch, watchListBlock, watchContextLine,
+  applyWatchUpdate, updateWatch, listWatch, watchListBlock, watchContextLine,
 } from '@/lib/tools/watchlist';
 import {
   isWatchPageAdd, extractPageWatch, isWeatherWatchAdd, extractWeatherWatch,
@@ -473,7 +473,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── silent tier: "talked to Mom today" / "had lunch with Dave" → log contact ──
-  {
+  if (!toolsWillHandle) {
     const g = await inferredGuess();
     const who = detectContactLog(text) ?? (g?.intent === 'contact.log' && (g.confidence ?? 0) >= 0.7 ? g.person ?? null : null);
     if (who) {
@@ -619,7 +619,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── silent tier: "I'm going to <place> <dates>" → trip record for prep nudges ──
-  if (isTripPlan(text) && !isTaskAdd(text)) {
+  if (isTripPlan(text) && !isTaskAdd(text) && !toolsWillHandle) {
     const t = await extractTrip(text, new Date(), recent).catch(() => null);
     if (t) {
       const trip = await createTrip(user.id, t);
@@ -708,7 +708,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── silent tier: watch list — add / update / query ────────────────────
-  if (isWatchAdd(text) || await inferred('watchlist.add')) {
+  if ((isWatchAdd(text) || await inferred('watchlist.add')) && !toolsWillHandle) {
     const w = extractWatchTitle(text);
     if (w) {
       const r = await addWatchFromText(user.id, w.raw, w.status, text).catch(() => null);
@@ -728,7 +728,7 @@ export async function POST(req: NextRequest) {
       return say(`Couldn't add "${w.title}"; try the /watch screen.`, 'watch-add-failed');
     }
   }
-  if (isWatchUpdate(text) || await inferred('watchlist.update')) {
+  if ((isWatchUpdate(text) || await inferred('watchlist.update')) && !toolsWillHandle) {
     const msg = await applyWatchUpdate(user.id, text).catch(() => null);
     if (msg) return say(msg, 'watch-update');
     // no match on the list → fall through (maybe it's a taste reaction)
@@ -737,7 +737,7 @@ export async function POST(req: NextRequest) {
   // ── silent tier: a reaction to a book/show/film/game → taste_log ────────
   // Runs before the profile-fact path so "remember I loved X" lands in the
   // taste log (verdict + why), not as a loose profile fact.
-  if (isTasteReaction(text) || await inferred('taste.reaction')) {
+  if ((isTasteReaction(text) || await inferred('taste.reaction')) && !toolsWillHandle) {
     const logged = await saveTasteFromText(user.id, text).catch(() => null);
     if (logged) return say(logged, 'taste-logged');
     // not actually a media reaction → fall through
@@ -1444,6 +1444,59 @@ async function executeChatTool(
       if (t.length < 3) return "There wasn't anything specific enough to save.";
       const ok = await saveNote(ctx.userId, t, { source: 'chat' }).catch(() => false);
       return ok ? 'Noted.' : "Couldn't save that note.";
+    }
+
+    if (name === 'add_to_watchlist') {
+      const title = str('title');
+      if (!title) return "What should I add to your watch list?";
+      const status = str('status') === 'watching' ? 'watching' : 'want';
+      const r = await addWatchFromText(ctx.userId, title, status, ctx.text).catch(() => null);
+      if (!r?.row) return `Couldn't add "${title}"; try the /watch screen.`;
+      if (!r.row.tmdb_id && looksVague(title)) waitUntil(upgradeWatchRowViaWeb(ctx.userId, r.row.id, title));
+      const tail = r.row.tmdb_id ? '' : ' (couldn\'t find it on TMDB, added by name)';
+      return `${r.added ? 'Added' : 'Updated'} **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''}, ${r.row.status === 'watching' ? 'watching' : 'want to watch'}${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${tail}`;
+    }
+
+    if (name === 'update_watchlist_item') {
+      const title = str('title');
+      if (!title) return "Which item on your list?";
+      const n = (k: string) => (typeof input[k] === 'number' ? (input[k] as number) : undefined);
+      const st = ['want', 'watching', 'done'].includes(str('status')) ? (str('status') as 'want' | 'watching' | 'done') : undefined;
+      const msg = await updateWatch(ctx.userId, {
+        title, rating: n('rating'), on_season: n('on_season'), finished_season: n('finished_season'),
+        finished: input.finished === true, status: st,
+      }).catch(() => null);
+      return msg ?? `I don't see "${title}" on your watch list.`;
+    }
+
+    if (name === 'log_media_reaction') {
+      const title = str('title');
+      if (!title) return "What did you have a reaction to?";
+      const msg = await saveTaste(ctx.userId, { title, kind: str('kind') || 'other', verdict: str('verdict') || 'liked', why: str('why') || null }).catch(() => null);
+      return msg ?? `Couldn't log that one.`;
+    }
+
+    if (name === 'log_contact') {
+      const who = str('name');
+      if (!who) return "Who did you catch up with?";
+      const c = (await findContacts(ctx.userId, who).catch(() => []))[0];
+      if (!c || !(c.name.toLowerCase() === who.toLowerCase() || (c.first_name ?? '').toLowerCase() === who.toLowerCase().split(' ')[0])) {
+        return `I don't have a contact called "${who}", so I didn't log it.`;
+      }
+      await logContact(ctx.userId, c.id).catch(() => {});
+      return `Noted, last caught up with ${c.name.split(' ')[0]} today.`;
+    }
+
+    if (name === 'plan_trip') {
+      const destination = str('destination');
+      const start = str('start_date');
+      if (!destination || !start || Number.isNaN(Date.parse(start))) return "I need a destination and a start date for that.";
+      const end = str('end_date') && !Number.isNaN(Date.parse(str('end_date'))) ? str('end_date') : null;
+      const trip = await createTrip(ctx.userId, { destination, start_date: start, end_date: end, has_pet: input.has_pet === true }).catch(() => null);
+      const range = end ? `${fmtDay(start)}–${fmtDay(end)}` : fmtDay(start);
+      return trip
+        ? `Noted your trip to ${destination}, ${range}. I'll nudge you on prep as it gets closer.`
+        : `Already had that ${destination} trip on file.`;
     }
 
     return `(unrecognised tool: ${name})`;

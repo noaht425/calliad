@@ -338,6 +338,42 @@ export async function applyWatchUpdate(userId: string, text: string): Promise<st
   return null;
 }
 
+/** Structured version for the tool path — same effects as applyWatchUpdate,
+ *  no text parsing. Any subset of the fields. */
+export async function updateWatch(
+  userId: string,
+  fields: { title: string; rating?: number; on_season?: number; finished_season?: number; finished?: boolean; status?: 'want' | 'watching' | 'done' },
+): Promise<string | null> {
+  const row = await matchWatchRow(userId, fields.title);
+  if (!row) return null;
+  const done: string[] = [];
+  if (fields.rating != null && fields.rating >= 1 && fields.rating <= 5) {
+    await setWatchRating(userId, row.id, Math.round(fields.rating));
+    done.push(`rated ${'★'.repeat(Math.round(fields.rating))}`);
+  }
+  if (fields.on_season != null && fields.on_season >= 1) {
+    for (const s of row.seasons) {
+      await setSeasonState(userId, row.id, s.season, (s.season < fields.on_season! ? 'watched' : s.season === fields.on_season! ? 'watching' : 'pending') as SeasonState);
+    }
+    if (row.status !== 'watching') await setWatchStatus(userId, row.id, 'watching');
+    done.push(`on season ${fields.on_season}`);
+  }
+  if (fields.finished_season != null && fields.finished_season >= 1) {
+    await setSeasonState(userId, row.id, fields.finished_season, 'watched');
+    done.push(`S${fields.finished_season} watched`);
+  }
+  if (fields.finished) {
+    for (const s of row.seasons) await setSeasonState(userId, row.id, s.season, 'watched');
+    done.push('all caught up');
+  }
+  if (fields.status && fields.status !== row.status) {
+    await setWatchStatus(userId, row.id, fields.status);
+    done.push(fields.status === 'want' ? 'moved to want-to-watch' : fields.status === 'watching' ? 'now watching' : 'marked done');
+  }
+  if (!done.length) return null;
+  return `${row.title}: ${done.join(', ')}.`;
+}
+
 export function watchListBlock(rows: WatchRow[]): string {
   if (!rows.length) return `## Watch list\nEmpty.`;
   const fmt = (r: WatchRow) => {
