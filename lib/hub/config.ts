@@ -27,6 +27,9 @@ const SEED: Record<string, string> = {
   // Knowledge base: one-time backfill of old chat history into notes.
   notes_backfill_cursor: '',
   notes_backfill_done: '',
+  // Tool-calling migration: '1' routes the calendar/task/class/note cluster
+  // through model tool calls instead of the regex handlers. '0' = old path.
+  chat_tools: process.env.CHAT_TOOLS ?? '1',
 };
 
 export async function getConfig(key: string): Promise<string> {

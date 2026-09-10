@@ -20,7 +20,7 @@ import { profileSections, semanticSections, learnedFacts } from '@/lib/brain/pro
 import { summarizeThread } from '@/lib/brain/thread';
 import { quizTurn } from '@/lib/quiz/session';
 import { addItem as addQuizItem } from '@/lib/quiz/items';
-import { upsertLoop, RECUR_LABEL, findLoopByHint, setLoopTitle } from '@/lib/memory/loops';
+import { upsertLoop, RECUR_LABEL, findLoopByHint, setLoopTitle, setLoopStatus, type Recur } from '@/lib/memory/loops';
 import { isExplicitRemember, saveFactFromText } from '@/lib/memory/facts';
 import { isNoteCapture, extractNote, saveNote, isRecallQuestion, isLookupQuestion, searchNotes, notesRecallBlock, ambientNotesBlock, maybeIndexTurn } from '@/lib/memory/notes';
 import { isTasteReaction, saveTasteFromText } from '@/lib/taste/capture';
@@ -84,6 +84,7 @@ import {
 import { createWatcher, listWatchers, matchWatcher, removeWatcher } from '@/lib/watch/watchers';
 import { flightStatusAvailable } from '@/lib/watch/flight';
 import type { TurnState } from '@/lib/brain/prompt';
+import { CHAT_TOOLS, looksActionable } from '@/lib/brain/tools';
 import { personaExtra, presetOverlay, resolvePreset, detectPresetSwitch, PRESETS } from '@/lib/brain/persona';
 import { detectPracticeLang, detectPracticeExit, practiceOverlay, type PracticeLang } from '@/lib/brain/practice';
 import { config } from '@/lib/hub/config';
@@ -171,6 +172,18 @@ export async function POST(req: NextRequest) {
   // (task-edit, calendar-write) fetched its own redundant copy — this is the
   // single shared source now.
   const recent = await recentTurns(conversationId, text).catch(() => []);
+
+  // Tool-calling migration (Stage 1): when on, the model handles the
+  // calendar / task / class-schedule / note cluster via tool calls at the
+  // final brain step, so the matching regex handlers below stand down. A
+  // deliberately broad "looks actionable" pre-filter keeps pure chit-chat on
+  // the single-call path.
+  const toolsWillHandle =
+    ((await config.get('chat_tools').catch(() => '1')) === '1') &&
+    !images.length &&
+    currentMode === 'default' &&
+    !modeState.practiceLang &&
+    looksActionable(text);
 
   const medLine = await medContextLine(user.id).catch(() => '');
 
@@ -574,7 +587,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── silent tier: add a task → open loop (tagged 'task'), no gate ────────
-  if ((isTaskAdd(text) || await inferred('task.add')) && !isSubscriptionAdd(text)) {
+  if ((isTaskAdd(text) || await inferred('task.add')) && !isSubscriptionAdd(text) && !toolsWillHandle) {
     const { title, due_at, recur } = await extractTask(text, new Date(), recent).catch(() => ({ title: text.trim(), due_at: null, recur: null }));
     if (title) {
       // "remind me to watch <show>" with no time attached is really a watch-list add
@@ -731,7 +744,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── silent tier: "note that…" / "jot this down" → a searchable note ────
-  if (isNoteCapture(text) || await inferred('note.remember')) {
+  if ((isNoteCapture(text) || await inferred('note.remember')) && !toolsWillHandle) {
     const body = extractNote(text);
     if (body.length >= 3) {
       const ok = await saveNote(user.id, body, { source: 'chat' }).catch(() => false);
@@ -758,7 +771,7 @@ export async function POST(req: NextRequest) {
   // Checked before calendar.change: "the note in Tasks still says X" points at
   // the Tasks list, not an event, and the calendar-edit path's "which event?"
   // question doesn't fit a task that has no day/time of its own.
-  if (isTaskEdit(text) || await inferred('task.edit')) {
+  if ((isTaskEdit(text) || await inferred('task.edit')) && !toolsWillHandle) {
     const draft = await extractTaskChange(text, recent).catch(() => null);
     if (!draft) return say(`Which task do you mean?`, 'task-edit-underspecified');
     const found = await findLoopByHint(user.id, draft.match).catch(() => ({ none: true as const }));
@@ -788,7 +801,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── put a dropped class back ("keep Voodoo after all", "add Latin back") ──
-  if (/\b(keep|kept|not drop\w*|didn'?t drop|un-?drop|re-?add|add\b.{0,30}\bback|put\b.{0,30}\bback|bring\b.{0,30}\bback|still (taking|in|have)|back (in|on)\b.{0,20}\bschedule)\b/i.test(text)) {
+  if (!toolsWillHandle && /\b(keep|kept|not drop\w*|didn'?t drop|un-?drop|re-?add|add\b.{0,30}\bback|put\b.{0,30}\bback|bring\b.{0,30}\bback|still (taking|in|have)|back (in|on)\b.{0,20}\bschedule)\b/i.test(text)) {
     const r = await restoreCourse(user.id, text).catch(() => ({ none: true as const }));
     if ('ok' in r) return say(`Done, **${r.title}** is back on your schedule for the rest of the term.`, 'restore-course');
     if ('ambiguous' in r) return say(`Which one: ${r.ambiguous.join('; ')}?`, 'restore-course-ambiguous');
@@ -796,7 +809,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── confirm / named-consequence: change or cancel a calendar event ──────
-  if ((isCalendarChange(text) || await inferred('calendar.change')) && !isCalendarWrite(text) && !isTaskEdit(text)) {
+  if ((isCalendarChange(text) || await inferred('calendar.change')) && !isCalendarWrite(text) && !isTaskEdit(text) && !toolsWillHandle) {
     const ch = await extractCalendarChange(text, new Date(), recent).catch(() => null);
     if (!ch) return say(`Which event do you mean? Name it and the day.`, 'cal-change-underspecified');
     const found = await findEventByHint(user.id, ch.match).catch(() => ({ none: true as const }));
@@ -869,7 +882,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── calendar write → auto-add if trusted, else propose and wait for yes ──
-  if (isCalendarWrite(text) || await inferred('calendar.create')) {
+  if ((isCalendarWrite(text) || await inferred('calendar.create')) && !toolsWillHandle) {
     const ev = await extractEvent(text, new Date(), recent).catch(() => null);
     if (!ev) return say(`I can put that on your calendar: when, exactly?`, 'calendar-write-underspecified');
     const r = await createOrProposeEvent(ev, text, user.id, conversationId);
@@ -1114,18 +1127,25 @@ export async function POST(req: NextRequest) {
     /\b(search\b|google\b|look (it |this )?up|looking (it |this )?up|look (to see|into)|(go )?(find out|find me|check online)|can you (find|check|look)(?! (my|the calendar|your|at))|latest (on|news|from|version|release)|newest\b|most recent\b|what'?s the latest|any (news|updates?) (on|about|for)|news (on|about|for)|what'?s (going on|happening|new) (with|in|on)(?! my\b)|(coming|come) out\b|just (came out|released|announced|dropped)|recently (released|announced|came out|launched|added)|new releases?|as of (today|now|this)|up[ -]to[- ]date|right now\b|check (again|now)|try (again|now)|now try\b|\b(new|upcoming|latest|just[- ]?spoiled|recently spoiled|previewed) .{0,40}\b(card|set|precon|commander deck)\b|from the .{2,40}\bset\b|\bspoilers?\b)/i.test(text);
   const maxTokens = images.length || toolResult ? Math.min(4096, 1500 + Math.ceil((toolResult?.length ?? 3000) / 8)) : webSearch ? 2000 : 1200;
 
+  // Give the model the action tools when this looked actionable and nothing on
+  // the regex path already answered it. tool_use turns run on T2 (haiku can't).
+  const useTools = toolsWillHandle && !toolResult && !webSearch;
+
   const { meta, stream } = await call({
     purpose: 'chat',
     // a photo goes to T2 for vision quality; a search-shaped turn goes to T2
     // because haiku (the T1 chat model) can't run the 2026 web-search tool
-    tier: (images.length > 0 || webSearch) && decision.tier === 'T1' ? 'T2' : decision.tier,
+    tier: (images.length > 0 || webSearch || useTools) && decision.tier === 'T1' ? 'T2' : decision.tier,
     proactive: false,
     conversationId,
-    userText: text,
+    userText: useTools
+      ? `${text}\n\n[Action tools are available this turn. If one fits, call it and keep your own text to a short acknowledgement, do NOT state the action as finished, the system confirms it or asks Noah to approve. If nothing actionable is being asked, just reply normally and call no tool.]`
+      : text,
     state,
     maxTokens,
     webSearch,
     images,
+    tools: useTools ? CHAT_TOOLS : undefined,
   });
 
   // Language this reply will be in — so the client can pick a matching TTS voice
@@ -1141,8 +1161,24 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       yield sse({ error: String(err) });
     }
-    // stream is fully drained here → meta.text / meta.costUsd populated
-    const finalText = meta.text || 'Something broke on my end; try that again in a minute.';
+    // stream is fully drained here → meta.text / meta.toolUses / meta.costUsd populated
+    let finalText = meta.text || '';
+
+    // Run any tool calls the model made, through the same gate as the regex
+    // handlers, and append the result lines to the reply.
+    if (meta.toolUses.length) {
+      const results: string[] = [];
+      for (const tu of meta.toolUses) {
+        results.push(await executeChatTool(tu.name, tu.input, { userId: user.id, conversationId, text }));
+      }
+      const tail = results.filter(Boolean).join(' ');
+      if (tail) {
+        const sep = finalText.trim() ? '\n\n' : '';
+        yield sse({ delta: sep + tail });
+        finalText = `${finalText.trim()}${sep}${tail}`;
+      }
+    }
+    if (!finalText) finalText = 'Something broke on my end; try that again in a minute.';
     await adminClient.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: finalText });
     await audit.log('outbound_message', 'calliad', conversationId, {
       text: finalText, surface, tier: meta.tier, model: meta.model, cost_usd: meta.costUsd, capped: meta.capped,
@@ -1252,6 +1288,144 @@ async function createOrProposeEvent(
     message: `Put **${ev.title}** on your calendar for **${when}**${ev.location ? ` (${ev.location})` : ''}${guestLine}? Say yes and I'll add it.${clashNote}`,
     reason: 'action-proposed',
   };
+}
+
+/** Run one model tool call through the existing gate / trust-ladder machinery
+ *  and return the line to show Noah. The tool IS the extraction; the gate still
+ *  gates (auto-run vs propose-and-confirm), so nothing here bypasses approval. */
+async function executeChatTool(
+  name: string,
+  input: Record<string, unknown>,
+  ctx: { userId: string; conversationId: string; text: string },
+): Promise<string> {
+  const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string).trim() : '');
+  const iso = (k: string) => {
+    const v = str(k);
+    return v && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null;
+  };
+  try {
+    if (name === 'create_calendar_event') {
+      const start = iso('start_at');
+      if (!start) return "I couldn't pin down when that should be, give me a day and time.";
+      const r = await createOrProposeEvent(
+        { title: str('title') || 'Untitled', start_at: start, end_at: iso('end_at'), all_day: input.all_day === true, location: str('location') || null, city: null },
+        ctx.text, ctx.userId, ctx.conversationId,
+      );
+      return r.message;
+    }
+
+    if (name === 'update_calendar_event') {
+      const match = str('match');
+      const found = await findEventByHint(ctx.userId, match).catch(() => ({ none: true as const }));
+      if ('none' in found) {
+        const course = await findDroppableCourse(match).catch(() => null);
+        if (course && !('ambiguous' in course)) return `**${course.title}** is a fixed weekly class, I can't move one meeting of it. Want to drop the class instead?`;
+        return `I don't see "${match}" on your calendar.`;
+      }
+      if ('ambiguous' in found) return `A few could match: ${found.ambiguous.map((e) => `${e.title}, ${whenLabel(e.start_at)}`).join('; ')}. Which one?`;
+      const e = found.hit;
+      const change: CalendarChange = {
+        title: str('new_title') || undefined,
+        start_at: iso('new_start_at') ?? undefined,
+        end_at: iso('new_end_at') ?? undefined,
+        location: str('new_location') || undefined,
+      };
+      const bits: string[] = [];
+      if (change.start_at) bits.push(`→ ${whenLabel(change.start_at)}`);
+      if (change.title) bits.push(`renamed to "${change.title}"`);
+      if (change.location) bits.push(`at ${change.location}`);
+      if (!bits.length && change.end_at === undefined) return `What's the change to **${e.title}** (${whenLabel(e.start_at)})?`;
+
+      if (await isAutoAllowed('update_event').catch(() => false)) {
+        const { data: cur } = await adminClient.from('calendar_events').select('end_at, location').eq('user_id', ctx.userId).eq('uid', e.uid).maybeSingle();
+        const prev: CalendarChange = {};
+        if (change.title !== undefined) prev.title = e.title;
+        if (change.start_at !== undefined) prev.start_at = e.start_at;
+        if (change.end_at !== undefined) prev.end_at = (cur?.end_at as string | null) ?? null;
+        if (change.location !== undefined) prev.location = (cur?.location as string | null) ?? null;
+        const r = await runAutoUpdateEvent(ctx.userId, e.uid, e.title, change, prev, ctx.conversationId).catch(() => ({ ok: false }));
+        if (r.ok) return `Done. **${change.title ?? e.title}**: ${bits.join(', ')}. Say "undo" to put it back.`;
+      }
+      await proposeAction({
+        userId: ctx.userId, kind: 'update_event', riskTier: 'confirm',
+        summary: `Update "${e.title}": ${bits.join(', ')}`,
+        payload: { uid: e.uid, new_title: change.title ?? null, new_start: change.start_at ?? null, new_end: change.end_at ?? null, new_location: change.location ?? null },
+        createdBy: ctx.conversationId,
+      });
+      return `Update **${e.title}** (${whenLabel(e.start_at)}): ${bits.join(', ')}? Say yes and I'll change it.`;
+    }
+
+    if (name === 'delete_calendar_event') {
+      const match = str('match');
+      const found = await findEventByHint(ctx.userId, match).catch(() => ({ none: true as const }));
+      if ('none' in found) {
+        const course = await findDroppableCourse(match).catch(() => null);
+        if (course && !('ambiguous' in course)) {
+          await proposeAction({ userId: ctx.userId, kind: 'drop_course', riskTier: 'confirm', summary: `Drop ${course.title} (${course.course})`, payload: { course: course.course, title: course.title }, createdBy: ctx.conversationId });
+          return `**${course.title}** is part of your class schedule. Dropping it clears every remaining block for the term. Say yes and I'll do it.`;
+        }
+        return `I looked and don't see "${match}" on your calendar or class schedule.`;
+      }
+      if ('ambiguous' in found) return `A few could match: ${found.ambiguous.map((e) => `${e.title}, ${whenLabel(e.start_at)}`).join('; ')}. Which one?`;
+      const e = found.hit;
+      await proposeAction({ userId: ctx.userId, kind: 'delete_event', riskTier: 'named_consequence', summary: `Delete "${e.title}" (${whenLabel(e.start_at)})`, payload: { uid: e.uid, title: e.title, start_at: e.start_at }, createdBy: ctx.conversationId });
+      return `Remove **${e.title}** (${whenLabel(e.start_at)}) from your calendar? If it has other guests this cancels for them too; reply **yes, delete it**.`;
+    }
+
+    if (name === 'drop_class') {
+      const course = await findDroppableCourse(str('name')).catch(() => null);
+      if (!course) return `I don't have a class matching "${str('name')}" in your schedule.`;
+      if ('ambiguous' in course) return `Which class: ${course.ambiguous.join('; ')}?`;
+      await proposeAction({ userId: ctx.userId, kind: 'drop_course', riskTier: 'confirm', summary: `Drop ${course.title} (${course.course})`, payload: { course: course.course, title: course.title }, createdBy: ctx.conversationId });
+      return `Drop **${course.title}** from your schedule for the rest of the term? Say yes.`;
+    }
+
+    if (name === 'restore_class') {
+      const r = await restoreCourse(ctx.userId, str('name')).catch(() => ({ none: true as const }));
+      if ('ok' in r) return `Done, **${r.title}** is back on your schedule for the rest of the term.`;
+      if ('ambiguous' in r) return `Which one: ${r.ambiguous.join('; ')}?`;
+      return `I don't have "${str('name')}" listed as a dropped class.`;
+    }
+
+    if (name === 'add_task') {
+      const title = str('title');
+      if (!title) return "What's the task?";
+      const due = iso('due_at');
+      const recur = (['daily', 'weekdays', 'weekly', 'biweekly', 'monthly'] as const).includes(str('recur') as Recur) ? (str('recur') as Recur) : null;
+      await upsertLoop(ctx.userId, { title, due_at: due, recur, source: 'manual', tags: ['task'] });
+      const whenNote = due ? `, ${recur ? 'first due ' : 'due '}${new Date(due).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ })}` : '';
+      return `Added: ${title}${whenNote}${recur ? ` (${RECUR_LABEL[recur]})` : ''}.`;
+    }
+
+    if (name === 'edit_task') {
+      const found = await findLoopByHint(ctx.userId, str('match')).catch(() => ({ none: true as const }));
+      if ('none' in found) return `I don't see a task matching "${str('match')}" on your list.`;
+      if ('ambiguous' in found) return `A few match: ${found.ambiguous.map((l) => l.title).join('; ')}. Which one?`;
+      if (!str('new_title')) return `What should "${found.hit.title}" say instead?`;
+      await setLoopTitle(ctx.userId, found.hit.id, str('new_title'));
+      return `Fixed: "${found.hit.title}" now reads "${str('new_title')}".`;
+    }
+
+    if (name === 'complete_task') {
+      const found = await findLoopByHint(ctx.userId, str('match')).catch(() => ({ none: true as const }));
+      if ('none' in found) return `I don't see a task matching "${str('match')}" on your list.`;
+      if ('ambiguous' in found) return `Which one: ${found.ambiguous.map((l) => l.title).join('; ')}?`;
+      await setLoopStatus(ctx.userId, found.hit.id, 'done');
+      return `Marked "${found.hit.title}" done.`;
+    }
+
+    if (name === 'remember_note') {
+      const t = str('text');
+      if (t.length < 3) return "There wasn't anything specific enough to save.";
+      const ok = await saveNote(ctx.userId, t, { source: 'chat' }).catch(() => false);
+      return ok ? 'Noted.' : "Couldn't save that note.";
+    }
+
+    return `(unrecognised tool: ${name})`;
+  } catch (err) {
+    console.error('[chat] tool exec', name, err);
+    return `Something broke doing that one, try again in a moment.`;
+  }
 }
 
 async function recentTurns(conversationId: string, currentText: string) {

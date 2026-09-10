@@ -19,6 +19,13 @@ export interface BrainRequest {
   maxTokens?: number;
   webSearch?: boolean; // let the model run Anthropic's server-side web search this turn
   images?: { media_type: string; data: string }[]; // base64, attached to the user turn
+  tools?: Anthropic.Tool[]; // client-executed tools; caller runs meta.toolUses after the stream
+}
+
+export interface ToolUse {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
 }
 
 export interface BrainMeta {
@@ -28,6 +35,8 @@ export interface BrainMeta {
   capped: boolean;   // reply should acknowledge the spend cap
   deferred: boolean; // proactive turn skipped entirely (no stream)
   text: string;      // full accumulated reply
+  toolUses: ToolUse[]; // tool calls the model made this turn (caller executes)
+  stopReason: string | null;
 }
 
 export interface BrainStream {
@@ -56,7 +65,7 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
       await audit.log('spend_cap', 'system', req.conversationId, {
         action: 'defer', month_to_date: mtd, cap, purpose: req.purpose,
       });
-      const meta: BrainMeta = { model: '', tier, costUsd: 0, capped: true, deferred: true, text: '' };
+      const meta: BrainMeta = { model: '', tier, costUsd: 0, capped: true, deferred: true, text: '', toolUses: [], stopReason: null };
       return { meta, stream: (async function* () {})() };
     }
     tier = 'T1';
@@ -76,7 +85,7 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
     req.images,
   );
 
-  const meta: BrainMeta = { model, tier, costUsd: 0, capped, deferred: false, text: '' };
+  const meta: BrainMeta = { model, tier, costUsd: 0, capped, deferred: false, text: '', toolUses: [], stopReason: null };
   const startedAt = Date.now();
 
   async function* gen(): AsyncGenerator<string> {
@@ -96,9 +105,13 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
           // when the router flagged a search-shaped turn (cost is per-search).
           // web_search_20260209 is Sonnet/Opus only — haiku (spend-cap downgrade)
           // 400s on it, so skip there and let the model answer without it.
+          const paramTools: Anthropic.ToolUnion[] = [];
           if (req.webSearch && (model === 'claude-sonnet-5' || model === 'claude-opus-5')) {
-            params.tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }];
+            paramTools.push({ type: 'web_search_20260209', name: 'web_search', max_uses: 5 });
           }
+          if (req.tools?.length) paramTools.push(...req.tools);
+          if (paramTools.length) params.tools = paramTools;
+
           const s = anthropic.messages.stream(params);
           for await (const ev of s) {
             if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
@@ -106,7 +119,14 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
               yield ev.delta.text;
             }
           }
-          usage = (await s.finalMessage()).usage;
+          const final = await s.finalMessage();
+          usage = final.usage;
+          meta.stopReason = final.stop_reason ?? null;
+          for (const block of final.content) {
+            if (block.type === 'tool_use') {
+              meta.toolUses.push({ id: block.id, name: block.name, input: (block.input ?? {}) as Record<string, unknown> });
+            }
+          }
           break;
         } catch (err) {
           if (attempt >= 2) {
