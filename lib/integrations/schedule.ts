@@ -1,8 +1,13 @@
 import { adminClient } from '@/lib/supabase.server';
+import { config } from '@/lib/hub/config';
 
 // Noah's fixed Fall-2026 class schedule → dated calendar_events rows (source
 // 'schedule'). Sourced from planning/inputs/course-schedule-fall2026.md +
 // trinity-academic-calendar-2026-27.md. Re-run when the Greek time is set.
+//
+// A class Noah drops mid-term goes on a `dropped_courses` config list (course
+// codes) instead of being hand-edited out of CLASSES; materializeSchedule
+// skips it and re-running purges its rows. "keep X after all" reverses it.
 
 const TZ = 'America/New_York';
 const TERM_START = '2026-09-08';
@@ -35,6 +40,89 @@ const RECURRING = [
   { title: 'Counseling', day: 'W', start: '15:45', end: '16:45', room: null as string | null, from: '2026-09-16', to: TERM_END },
 ];
 
+const DROPPED_KEY = 'dropped_courses';
+
+async function droppedCourses(): Promise<string[]> {
+  try {
+    const v = JSON.parse(await config.get(DROPPED_KEY));
+    return Array.isArray(v) ? v.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/** Fuzzy-match a spoken hint ("voodoo", "my anth class", "ANTH 222") to a class.
+ *  `pool` defaults to every defined class; pass the dropped list for restores. */
+export function matchCourse(hint: string, pool: ClassMeeting[] = CLASSES): ClassMeeting[] {
+  const h = norm(hint);
+  const words = h.split(' ').filter((w) => w.length > 1 && !['class', 'course', 'the', 'my', 'lecture', 'section'].includes(w));
+  if (!words.length) return [];
+  const scored = pool
+    .map((c) => {
+      const hay = `${norm(c.title)} ${norm(c.course)}`;
+      const s = words.reduce((acc, w) => acc + (hay.includes(w) ? 1 : 0), 0);
+      return { c, s };
+    })
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s);
+  if (!scored.length) return [];
+  const top = scored[0].s;
+  return scored.filter((x) => x.s === top).map((x) => x.c);
+}
+
+/** Resolve a hint to a still-active class WITHOUT changing anything (for a
+ *  propose-then-confirm flow). */
+export async function findDroppableCourse(
+  hint: string,
+): Promise<{ course: string; title: string } | { ambiguous: string[] } | null> {
+  const dropped = await droppedCourses();
+  const live = CLASSES.filter((c) => !dropped.includes(c.course));
+  const hits = matchCourse(hint, live);
+  if (!hits.length) return null;
+  if (hits.length > 1) return { ambiguous: hits.map((c) => `${c.title} (${c.course})`) };
+  return { course: hits[0].course, title: hits[0].title };
+}
+
+/** Drop a class for the rest of the term. Idempotent; re-materializes. */
+export async function dropCourse(
+  userId: string,
+  hint: string,
+): Promise<{ ok: true; title: string; course: string } | { none: true } | { ambiguous: string[] }> {
+  const dropped = await droppedCourses();
+  const live = CLASSES.filter((c) => !dropped.includes(c.course));
+  const hits = matchCourse(hint, live);
+  if (!hits.length) return { none: true };
+  if (hits.length > 1) return { ambiguous: hits.map((c) => `${c.title} (${c.course})`) };
+  const c = hits[0];
+  await config.set(DROPPED_KEY, JSON.stringify([...new Set([...dropped, c.course])]));
+  await materializeSchedule(userId);
+  return { ok: true, title: c.title, course: c.course };
+}
+
+/** Put a dropped class back. */
+export async function restoreCourse(
+  userId: string,
+  hint: string,
+): Promise<{ ok: true; title: string } | { none: true } | { ambiguous: string[] }> {
+  const dropped = await droppedCourses();
+  const droppedClasses = CLASSES.filter((c) => dropped.includes(c.course));
+  const hits = matchCourse(hint, droppedClasses);
+  if (!hits.length) return { none: true };
+  if (hits.length > 1) return { ambiguous: hits.map((c) => `${c.title} (${c.course})`) };
+  const c = hits[0];
+  await config.set(DROPPED_KEY, JSON.stringify(dropped.filter((x) => x !== c.course)));
+  await materializeSchedule(userId);
+  return { ok: true, title: c.title };
+}
+
+/** Titles of currently-dropped classes, for context / "what did I drop". */
+export async function droppedCourseTitles(): Promise<string[]> {
+  const dropped = await droppedCourses();
+  return CLASSES.filter((c) => dropped.includes(c.course)).map((c) => `${c.title} (${c.course})`);
+}
+
 /** Local wall-clock (America/New_York) → UTC ISO, DST-correct via Intl inverse-lookup. */
 function localToUtcISO(dateStr: string, timeStr: string): string {
   const [y, mo, d] = dateStr.split('-').map(Number);
@@ -61,8 +149,10 @@ function* eachDate(from: string, to: string): Generator<string> {
 
 export async function materializeSchedule(userId: string): Promise<{ inserted: number; classes: number }> {
   const rows: Record<string, unknown>[] = [];
+  const dropped = new Set(await droppedCourses());
 
   for (const c of CLASSES) {
+    if (dropped.has(c.course)) continue; // Noah dropped this class
     const wantDows = new Set([...c.days.replace('Th', 'R').replace('Tu', 'T')].map((l) => DOW[l]).filter(Boolean));
     for (const date of eachDate(TERM_START, TERM_END)) {
       if (NO_CLASS.has(date)) continue;
@@ -113,5 +203,5 @@ export async function materializeSchedule(userId: string): Promise<{ inserted: n
   if (rows.length) {
     await adminClient.from('calendar_events').upsert(rows, { onConflict: 'user_id,uid' });
   }
-  return { inserted: rows.length, classes: CLASSES.length };
+  return { inserted: rows.length, classes: CLASSES.length - dropped.size };
 }

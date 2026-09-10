@@ -4,6 +4,7 @@ import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@
 import { handoffEmail } from '@/lib/actions/email';
 import { setRelationship, type Relationship } from '@/lib/integrations/icloud-contacts';
 import { materializeEvents } from '@/lib/tools/schedule-extract';
+import { dropCourse } from '@/lib/integrations/schedule';
 
 // Graduated-authorization gate. Every world-changing action is proposed as a
 // pending row; friction scales with risk_tier:
@@ -11,7 +12,7 @@ import { materializeEvents } from '@/lib/tools/schedule-extract';
 //   confirm           → one "yes"
 //   named_consequence → Noah must restate the consequence (fees, irreversible)
 
-export type ActionKind = 'create_event' | 'update_event' | 'delete_event' | 'draft_email' | 'set_relationship' | 'create_schedule'; // extend: book, merge_pr, ...
+export type ActionKind = 'create_event' | 'update_event' | 'delete_event' | 'draft_email' | 'set_relationship' | 'create_schedule' | 'drop_course'; // extend: book, merge_pr, ...
 export type RiskTier = 'silent' | 'confirm' | 'named_consequence';
 
 export interface PendingAction {
@@ -135,8 +136,13 @@ export async function decideAction(
       const r = await materializeEvents(userId, events, label);
       result = {
         ok: true,
-        message: `Done — added ${r.created} event${r.created === 1 ? '' : 's'}${r.skipped ? ` (${r.skipped} were already on your calendar)` : ''}.`,
+        message: `Done, added ${r.created} event${r.created === 1 ? '' : 's'}${r.skipped ? ` (${r.skipped} were already on your calendar)` : ''}.`,
       };
+    } else if (action.kind === 'drop_course') {
+      const r = await dropCourse(userId, String(payload.course));
+      result = 'ok' in r
+        ? { ok: true, message: `Done. ${r.title} is off your schedule for the rest of the term. Say "add ${r.title.split(' ')[0]} back" if that changes.` }
+        : { ok: false, message: `Couldn't drop that, the class isn't in your schedule.` };
     } else {
       result = { ok: false, message: `Don't know how to run "${action.kind}" yet.` };
     }

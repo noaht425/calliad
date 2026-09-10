@@ -50,6 +50,7 @@ import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
 import { isRecipeShare, extractShareUrl, shareRecipeToAbentfork } from '@/lib/tools/abentfork';
 import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock, isRestaurantTasteQuery, restaurantTasteBlock } from '@/lib/tools/beli';
 import { isScheduleShare, extractSchedule, expandBlocks, materializeEvents, scheduleDefaultTerm } from '@/lib/tools/schedule-extract';
+import { findDroppableCourse, restoreCourse } from '@/lib/integrations/schedule';
 import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine, detectContactLog, logContact, occasionsContextLine, resolveAttendees } from '@/lib/integrations/icloud-contacts';
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
 import { isTidyRequest, scanForTidy, applyTidyItems, type TidyItem } from '@/lib/memory/tidy';
@@ -786,12 +787,38 @@ export async function POST(req: NextRequest) {
     return say(fixedNote, 'task-edit-done');
   }
 
+  // ── put a dropped class back ("keep Voodoo after all", "add Latin back") ──
+  if (/\b(keep|kept|not drop\w*|didn'?t drop|un-?drop|re-?add|add\b.{0,30}\bback|put\b.{0,30}\bback|bring\b.{0,30}\bback|still (taking|in|have)|back (in|on)\b.{0,20}\bschedule)\b/i.test(text)) {
+    const r = await restoreCourse(user.id, text).catch(() => ({ none: true as const }));
+    if ('ok' in r) return say(`Done, **${r.title}** is back on your schedule for the rest of the term.`, 'restore-course');
+    if ('ambiguous' in r) return say(`Which one: ${r.ambiguous.join('; ')}?`, 'restore-course-ambiguous');
+    // no dropped class matched → fall through, it's some other request
+  }
+
   // ── confirm / named-consequence: change or cancel a calendar event ──────
   if ((isCalendarChange(text) || await inferred('calendar.change')) && !isCalendarWrite(text) && !isTaskEdit(text)) {
     const ch = await extractCalendarChange(text, new Date(), recent).catch(() => null);
     if (!ch) return say(`Which event do you mean? Name it and the day.`, 'cal-change-underspecified');
     const found = await findEventByHint(user.id, ch.match).catch(() => ({ none: true as const }));
-    if ('none' in found) return say(`I don't see "${ch.match}" on your synced calendar. Try naming it the way it reads there.`, 'cal-change-nomatch');
+    if ('none' in found) {
+      // A class Noah's dropping lives in the generated class schedule, not as an
+      // editable calendar row, so findEventByHint never sees it. Catch that here.
+      if (ch.op === 'delete') {
+        const course = await findDroppableCourse(ch.match).catch(() => null);
+        if (course && 'ambiguous' in course) {
+          return say(`A few classes match: ${course.ambiguous.join('; ')}. Which one?`, 'drop-course-ambiguous');
+        }
+        if (course) {
+          await proposeAction({
+            userId: user.id, kind: 'drop_course', riskTier: 'confirm',
+            summary: `Drop ${course.title} (${course.course}) from the class schedule`,
+            payload: { course: course.course, title: course.title }, createdBy: conversationId,
+          });
+          return say(`**${course.title}** is part of your class schedule, not a one-off event. Dropping it clears every remaining ${course.title} block for the term. Say yes and I'll do it.`, 'action-proposed');
+        }
+      }
+      return say(`I looked and don't see anything matching "${ch.match}" on your calendar or class schedule. What's it called where you see it?`, 'cal-change-nomatch');
+    }
     if ('ambiguous' in found) {
       const opts = found.ambiguous.map((e) => `${e.title}, ${whenLabel(e.start_at)}`).join('; ');
       return say(`A few could match: ${opts}. Which one?`, 'cal-change-ambiguous');
