@@ -33,10 +33,13 @@ const SEED: Record<string, string> = {
 };
 
 export async function getConfig(key: string): Promise<string> {
-  // The monthly spend cap is an operator setting, controlled via env — not runtime
-  // state. Env wins when set; the config row is only a fallback / record.
+  // Operator settings controlled via env, not runtime state. Env wins when set;
+  // the config row is only a fallback / record.
   if (key === 'spend_cap_usd_month' && process.env.SPEND_CAP_USD_MONTH) {
     return process.env.SPEND_CAP_USD_MONTH;
+  }
+  if (key === 'chat_tools' && process.env.CHAT_TOOLS) {
+    return process.env.CHAT_TOOLS; // set CHAT_TOOLS=0 in Vercel to hard-disable
   }
 
   const { data } = await adminClient.from('config').select('value').eq('key', key).maybeSingle();
