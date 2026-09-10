@@ -8,7 +8,7 @@ import { classifyIntent, type Intent, type IntentGuess } from '@/lib/router/inte
 import { geocodePlace } from '@/lib/geo/place';
 import { sameDayConflict } from '@/lib/actions/geo-conflict';
 import { captureCorrection, correctionsBlock } from '@/lib/brain/corrections';
-import { call } from '@/lib/brain/call';
+import { call, followupStream } from '@/lib/brain/call';
 import { audit } from '@/lib/hub/audit';
 import { getIntegrationContext } from '@/lib/integrations/context';
 import { relevantLoops } from '@/lib/memory/loops';
@@ -84,7 +84,7 @@ import {
 import { createWatcher, listWatchers, matchWatcher, removeWatcher } from '@/lib/watch/watchers';
 import { flightStatusAvailable } from '@/lib/watch/flight';
 import type { TurnState } from '@/lib/brain/prompt';
-import { CHAT_TOOLS, looksActionable } from '@/lib/brain/tools';
+import { CHAT_TOOLS, looksActionable, LOOKUP_TOOL_NAMES } from '@/lib/brain/tools';
 import { personaExtra, presetOverlay, resolvePreset, detectPresetSwitch, PRESETS } from '@/lib/brain/persona';
 import { detectPracticeLang, detectPracticeExit, practiceOverlay, type PracticeLang } from '@/lib/brain/practice';
 import { config } from '@/lib/hub/config';
@@ -1035,21 +1035,21 @@ export async function POST(req: NextRequest) {
     toolResult = target
       ? await runWebFetch(target, text).catch(() => undefined)
       : `## Web fetch\nNoah asked about a saved link but his reading list is empty.`;
-  } else if (isRecallQuestion(text) || await inferred('recall.question')) {
+  } else if ((isRecallQuestion(text) || await inferred('recall.question')) && !toolsWillHandle) {
     const hits = await searchNotes(user.id, text).catch(() => []);
     toolResult = notesRecallBlock(hits);
-  } else if (isSubscriptionQuery(text) || await inferred('subscription.query')) {
+  } else if ((isSubscriptionQuery(text) || await inferred('subscription.query')) && !toolsWillHandle) {
     toolResult = await subscriptionsSummary(user.id).catch(() => undefined);
-  } else if (isWatchQuery(text) || await inferred('watchlist.query')) {
+  } else if ((isWatchQuery(text) || await inferred('watchlist.query')) && !toolsWillHandle) {
     if (/\b(airing|dropping|coming out|new (episode|season)) (soon|this week|next)|what'?s (airing|new|dropping)/i.test(text)) {
       const soon = await watchContextLine(user.id).catch(() => [] as string[]);
       toolResult = soon.length ? `## Airing soon\n${soon.map((s) => `- ${s}`).join('\n')}` : `## Airing soon\nNothing in your watch list has an episode in the next ~10 days.`;
     } else {
       toolResult = watchListBlock(await listWatch(user.id).catch(() => []));
     }
-  } else if (isRestaurantTasteQuery(text) || await inferred('restaurant.reco')) {
+  } else if ((isRestaurantTasteQuery(text) || await inferred('restaurant.reco')) && !toolsWillHandle) {
     toolResult = await restaurantTasteBlock(user.id, text).catch(() => undefined);
-  } else if (/\b(would i (like|enjoy|hate|bounce off)|should i (watch|read|play|start|bother with|eat at|go to)|do you think i'?d (like|enjoy)|worth (watching|reading|playing|a visit|going to)|think i'?d (like|enjoy)|what did i (rate|think of|give)|have i (been (to|there)|tried|eaten at)|my (score|rating) (for|of|on))\b/i.test(text)) {
+  } else if (!toolsWillHandle && /\b(would i (like|enjoy|hate|bounce off)|should i (watch|read|play|start|bother with|eat at|go to)|do you think i'?d (like|enjoy)|worth (watching|reading|playing|a visit|going to)|think i'?d (like|enjoy)|what did i (rate|think of|give)|have i (been (to|there)|tried|eaten at)|my (score|rating) (for|of|on))\b/i.test(text)) {
     // restaurant first (covers "would I like <place>" / "what did I rate <place>"),
     // then books / screen / games
     toolResult =
@@ -1131,15 +1131,16 @@ export async function POST(req: NextRequest) {
   // the regex path already answered it. tool_use turns run on T2 (haiku can't).
   const useTools = toolsWillHandle && !toolResult && !webSearch;
 
-  const { meta, stream } = await call({
+  const effectiveTier = (images.length > 0 || webSearch || useTools) && decision.tier === 'T1' ? 'T2' as const : decision.tier;
+  const { meta, stream, assembled } = await call({
     purpose: 'chat',
     // a photo goes to T2 for vision quality; a search-shaped turn goes to T2
     // because haiku (the T1 chat model) can't run the 2026 web-search tool
-    tier: (images.length > 0 || webSearch || useTools) && decision.tier === 'T1' ? 'T2' : decision.tier,
+    tier: effectiveTier,
     proactive: false,
     conversationId,
     userText: useTools
-      ? `${text}\n\n[Action tools are available this turn. If one fits, call it and keep your own text to a short acknowledgement, do NOT state the action as finished, the system confirms it or asks Noah to approve. If nothing actionable is being asked, just reply normally and call no tool.]`
+      ? `${text}\n\n[Action tools are available this turn. If one fits, call it and keep your own text to a brief lead-in, do NOT state the action as finished, a follow-up step reports what actually happened. If nothing actionable is being asked, just reply normally and call no tool.]`
       : text,
     state,
     maxTokens,
@@ -1164,18 +1165,37 @@ export async function POST(req: NextRequest) {
     // stream is fully drained here → meta.text / meta.toolUses / meta.costUsd populated
     let finalText = meta.text || '';
 
-    // Run any tool calls the model made, through the same gate as the regex
-    // handlers, and append the result lines to the reply.
     if (meta.toolUses.length) {
-      const results: string[] = [];
-      for (const tu of meta.toolUses) {
-        results.push(await executeChatTool(tu.name, tu.input, { userId: user.id, conversationId, text }));
-      }
-      const tail = results.filter(Boolean).join(' ');
-      if (tail) {
+      // Run each call through the same gate/trust-ladder as the regex handlers.
+      const outcomes = await Promise.all(
+        meta.toolUses.map((tu) => executeChatTool(tu.name, tu.input, { userId: user.id, conversationId, text })),
+      );
+      const needFollowup =
+        outcomes.some((o) => !o.ok) || meta.toolUses.some((tu) => LOOKUP_TOOL_NAMES.has(tu.name));
+
+      if (needFollowup) {
+        // Hand the results back so the model phrases the answer / reacts to a
+        // miss in its own voice, instead of a canned line getting stapled on.
+        const fu = followupStream({
+          model: meta.model, tier: effectiveTier,
+          system: assembled.system, baseMessages: assembled.messages,
+          assistantText: meta.text, toolUses: meta.toolUses,
+          toolResults: meta.toolUses.map((tu, i) => ({ id: tu.id, content: outcomes[i].text })),
+          conversationId, maxTokens: 700,
+        });
+        if (finalText.trim()) yield sse({ delta: '\n\n' });
+        for await (const d of fu.stream) yield sse({ delta: d });
         const sep = finalText.trim() ? '\n\n' : '';
-        yield sse({ delta: sep + tail });
-        finalText = `${finalText.trim()}${sep}${tail}`;
+        finalText = `${finalText.trim()}${sep}${fu.meta.text.trim()}`;
+        meta.costUsd += fu.meta.costUsd;
+      } else {
+        // All actions, all clean → just append the confirmation line(s).
+        const tail = outcomes.map((o) => o.text).filter(Boolean).join(' ');
+        if (tail) {
+          const sep = finalText.trim() ? '\n\n' : '';
+          yield sse({ delta: sep + tail });
+          finalText = `${finalText.trim()}${sep}${tail}`;
+        }
       }
     }
     if (!finalText) finalText = 'Something broke on my end; try that again in a minute.';
@@ -1293,25 +1313,29 @@ async function createOrProposeEvent(
 /** Run one model tool call through the existing gate / trust-ladder machinery
  *  and return the line to show Noah. The tool IS the extraction; the gate still
  *  gates (auto-run vs propose-and-confirm), so nothing here bypasses approval. */
+interface ToolOutcome { text: string; ok: boolean }
+
 async function executeChatTool(
   name: string,
   input: Record<string, unknown>,
   ctx: { userId: string; conversationId: string; text: string },
-): Promise<string> {
+): Promise<ToolOutcome> {
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string).trim() : '');
   const iso = (k: string) => {
     const v = str(k);
     return v && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null;
   };
+  const ok = (text: string): ToolOutcome => ({ text, ok: true });
+  const miss = (text: string): ToolOutcome => ({ text, ok: false }); // triggers the follow-up model call
   try {
     if (name === 'create_calendar_event') {
       const start = iso('start_at');
-      if (!start) return "I couldn't pin down when that should be, give me a day and time.";
+      if (!start) return miss("no determinable date/time given");
       const r = await createOrProposeEvent(
         { title: str('title') || 'Untitled', start_at: start, end_at: iso('end_at'), all_day: input.all_day === true, location: str('location') || null, city: null },
         ctx.text, ctx.userId, ctx.conversationId,
       );
-      return r.message;
+      return ok(r.message);
     }
 
     if (name === 'update_calendar_event') {
@@ -1319,10 +1343,10 @@ async function executeChatTool(
       const found = await findEventByHint(ctx.userId, match).catch(() => ({ none: true as const }));
       if ('none' in found) {
         const course = await findDroppableCourse(match).catch(() => null);
-        if (course && !('ambiguous' in course)) return `**${course.title}** is a fixed weekly class, I can't move one meeting of it. Want to drop the class instead?`;
-        return `I don't see "${match}" on your calendar.`;
+        if (course && !('ambiguous' in course)) return miss(`"${match}" is not a one-off event, it's the fixed weekly class ${course.title} (${course.course}); a single meeting can't be moved. Offer to drop the class instead.`);
+        return miss(`no event matching "${match}" on the calendar or class schedule`);
       }
-      if ('ambiguous' in found) return `A few could match: ${found.ambiguous.map((e) => `${e.title}, ${whenLabel(e.start_at)}`).join('; ')}. Which one?`;
+      if ('ambiguous' in found) return miss(`multiple events match "${match}": ${found.ambiguous.map((e) => `${e.title} (${whenLabel(e.start_at)})`).join('; ')}. Ask which.`);
       const e = found.hit;
       const change: CalendarChange = {
         title: str('new_title') || undefined,
@@ -1334,7 +1358,7 @@ async function executeChatTool(
       if (change.start_at) bits.push(`→ ${whenLabel(change.start_at)}`);
       if (change.title) bits.push(`renamed to "${change.title}"`);
       if (change.location) bits.push(`at ${change.location}`);
-      if (!bits.length && change.end_at === undefined) return `What's the change to **${e.title}** (${whenLabel(e.start_at)})?`;
+      if (!bits.length && change.end_at === undefined) return miss(`found "${e.title}" (${whenLabel(e.start_at)}) but no change was specified. Ask what to change.`);
 
       if (await isAutoAllowed('update_event').catch(() => false)) {
         const { data: cur } = await adminClient.from('calendar_events').select('end_at, location').eq('user_id', ctx.userId).eq('uid', e.uid).maybeSingle();
@@ -1344,7 +1368,7 @@ async function executeChatTool(
         if (change.end_at !== undefined) prev.end_at = (cur?.end_at as string | null) ?? null;
         if (change.location !== undefined) prev.location = (cur?.location as string | null) ?? null;
         const r = await runAutoUpdateEvent(ctx.userId, e.uid, e.title, change, prev, ctx.conversationId).catch(() => ({ ok: false }));
-        if (r.ok) return `Done. **${change.title ?? e.title}**: ${bits.join(', ')}. Say "undo" to put it back.`;
+        if (r.ok) return ok(`Done. **${change.title ?? e.title}**: ${bits.join(', ')}. Say "undo" to put it back.`);
       }
       await proposeAction({
         userId: ctx.userId, kind: 'update_event', riskTier: 'confirm',
@@ -1352,7 +1376,7 @@ async function executeChatTool(
         payload: { uid: e.uid, new_title: change.title ?? null, new_start: change.start_at ?? null, new_end: change.end_at ?? null, new_location: change.location ?? null },
         createdBy: ctx.conversationId,
       });
-      return `Update **${e.title}** (${whenLabel(e.start_at)}): ${bits.join(', ')}? Say yes and I'll change it.`;
+      return ok(`Update **${e.title}** (${whenLabel(e.start_at)}): ${bits.join(', ')}? Say yes and I'll change it.`);
     }
 
     if (name === 'delete_calendar_event') {
@@ -1362,56 +1386,56 @@ async function executeChatTool(
         const course = await findDroppableCourse(match).catch(() => null);
         if (course && !('ambiguous' in course)) {
           await proposeAction({ userId: ctx.userId, kind: 'drop_course', riskTier: 'confirm', summary: `Drop ${course.title} (${course.course})`, payload: { course: course.course, title: course.title }, createdBy: ctx.conversationId });
-          return `**${course.title}** is part of your class schedule. Dropping it clears every remaining block for the term. Say yes and I'll do it.`;
+          return ok(`**${course.title}** is part of your class schedule. Dropping it clears every remaining block for the term. Say yes and I'll do it.`);
         }
-        return `I looked and don't see "${match}" on your calendar or class schedule.`;
+        return miss(`no event matching "${match}" on the calendar or class schedule`);
       }
-      if ('ambiguous' in found) return `A few could match: ${found.ambiguous.map((e) => `${e.title}, ${whenLabel(e.start_at)}`).join('; ')}. Which one?`;
+      if ('ambiguous' in found) return miss(`multiple events match "${match}": ${found.ambiguous.map((e) => `${e.title} (${whenLabel(e.start_at)})`).join('; ')}. Ask which.`);
       const e = found.hit;
       await proposeAction({ userId: ctx.userId, kind: 'delete_event', riskTier: 'named_consequence', summary: `Delete "${e.title}" (${whenLabel(e.start_at)})`, payload: { uid: e.uid, title: e.title, start_at: e.start_at }, createdBy: ctx.conversationId });
-      return `Remove **${e.title}** (${whenLabel(e.start_at)}) from your calendar? If it has other guests this cancels for them too; reply **yes, delete it**.`;
+      return ok(`Remove **${e.title}** (${whenLabel(e.start_at)}) from your calendar? If it has other guests this cancels for them too; reply **yes, delete it**.`);
     }
 
     if (name === 'drop_class') {
       const course = await findDroppableCourse(str('name')).catch(() => null);
-      if (!course) return `I don't have a class matching "${str('name')}" in your schedule.`;
-      if ('ambiguous' in course) return `Which class: ${course.ambiguous.join('; ')}?`;
+      if (!course) return miss(`no class matching "${str('name')}" in the schedule`);
+      if ('ambiguous' in course) return miss(`multiple classes match: ${course.ambiguous.join('; ')}. Ask which.`);
       await proposeAction({ userId: ctx.userId, kind: 'drop_course', riskTier: 'confirm', summary: `Drop ${course.title} (${course.course})`, payload: { course: course.course, title: course.title }, createdBy: ctx.conversationId });
-      return `Drop **${course.title}** from your schedule for the rest of the term? Say yes.`;
+      return ok(`Drop **${course.title}** from your schedule for the rest of the term? Say yes.`);
     }
 
     if (name === 'restore_class') {
       const r = await restoreCourse(ctx.userId, str('name')).catch(() => ({ none: true as const }));
-      if ('ok' in r) return `Done, **${r.title}** is back on your schedule for the rest of the term.`;
-      if ('ambiguous' in r) return `Which one: ${r.ambiguous.join('; ')}?`;
-      return `I don't have "${str('name')}" listed as a dropped class.`;
+      if ('ok' in r) return ok(`Done, **${r.title}** is back on your schedule for the rest of the term.`);
+      if ('ambiguous' in r) return miss(`multiple dropped classes match: ${r.ambiguous.join('; ')}. Ask which.`);
+      return miss(`"${str('name')}" is not on the list of dropped classes`);
     }
 
     if (name === 'add_task') {
       const title = str('title');
-      if (!title) return "What's the task?";
+      if (!title) return miss("no task text given");
       const due = iso('due_at');
       const recur = (['daily', 'weekdays', 'weekly', 'biweekly', 'monthly'] as const).includes(str('recur') as Recur) ? (str('recur') as Recur) : null;
       await upsertLoop(ctx.userId, { title, due_at: due, recur, source: 'manual', tags: ['task'] });
       const whenNote = due ? `, ${recur ? 'first due ' : 'due '}${new Date(due).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ })}` : '';
-      return `Added: ${title}${whenNote}${recur ? ` (${RECUR_LABEL[recur]})` : ''}.`;
+      return ok(`Added: ${title}${whenNote}${recur ? ` (${RECUR_LABEL[recur]})` : ''}.`);
     }
 
     if (name === 'edit_task') {
       const found = await findLoopByHint(ctx.userId, str('match')).catch(() => ({ none: true as const }));
-      if ('none' in found) return `I don't see a task matching "${str('match')}" on your list.`;
-      if ('ambiguous' in found) return `A few match: ${found.ambiguous.map((l) => l.title).join('; ')}. Which one?`;
-      if (!str('new_title')) return `What should "${found.hit.title}" say instead?`;
+      if ('none' in found) return miss(`no task matching "${str('match')}" on the list`);
+      if ('ambiguous' in found) return miss(`multiple tasks match: ${found.ambiguous.map((l) => l.title).join('; ')}. Ask which.`);
+      if (!str('new_title')) return miss(`found "${found.hit.title}" but no new wording given. Ask what it should say.`);
       await setLoopTitle(ctx.userId, found.hit.id, str('new_title'));
-      return `Fixed: "${found.hit.title}" now reads "${str('new_title')}".`;
+      return ok(`Fixed: "${found.hit.title}" now reads "${str('new_title')}".`);
     }
 
     if (name === 'complete_task') {
       const found = await findLoopByHint(ctx.userId, str('match')).catch(() => ({ none: true as const }));
-      if ('none' in found) return `I don't see a task matching "${str('match')}" on your list.`;
-      if ('ambiguous' in found) return `Which one: ${found.ambiguous.map((l) => l.title).join('; ')}?`;
+      if ('none' in found) return miss(`no task matching "${str('match')}" on the list`);
+      if ('ambiguous' in found) return miss(`multiple tasks match: ${found.ambiguous.map((l) => l.title).join('; ')}. Ask which.`);
       await setLoopStatus(ctx.userId, found.hit.id, 'done');
-      return `Marked "${found.hit.title}" done.`;
+      return ok(`Marked "${found.hit.title}" done.`);
     }
 
     if (name === 'import_calendar_items') {
@@ -1424,85 +1448,116 @@ async function executeChatTool(
         const end = typeof it?.end_at === 'string' && !Number.isNaN(Date.parse(it.end_at)) ? new Date(it.end_at).toISOString() : null;
         events.push({ title, location: typeof it?.location === 'string' ? it.location : null, start_at: start, end_at: end ?? start });
       }
-      if (!events.length) return "I couldn't read any dated items out of that.";
+      if (!events.length) return miss("no dated items could be read from the list");
       const label = str('label') || 'calendar import';
       if (await isAutoAllowed('create_event').catch(() => false)) {
         const r = await materializeEvents(ctx.userId, events, label);
         if (r.uids.length) await recordScheduleImport({ label, uids: r.uids, created: r.created, skipped: r.skipped }, ctx.conversationId).catch(() => {});
-        return `Added ${r.created} event${r.created === 1 ? '' : 's'} to your calendar${r.skipped ? ` (${r.skipped} were already there)` : ''}. Say "undo" to take them back.`;
+        return ok(`Added ${r.created} event${r.created === 1 ? '' : 's'} to your calendar${r.skipped ? ` (${r.skipped} were already there)` : ''}. Say "undo" to take them back.`);
       }
       await proposeAction({
         userId: ctx.userId, kind: 'create_schedule', riskTier: 'confirm',
         summary: `Add ${events.length} events (${label})`,
         payload: { events, label }, createdBy: ctx.conversationId,
       });
-      return `Add ${events.length} event${events.length === 1 ? '' : 's'} to your calendar (${label})? Say yes.`;
+      return ok(`Add ${events.length} event${events.length === 1 ? '' : 's'} to your calendar (${label})? Say yes.`);
     }
 
     if (name === 'remember_note') {
       const t = str('text');
-      if (t.length < 3) return "There wasn't anything specific enough to save.";
-      const ok = await saveNote(ctx.userId, t, { source: 'chat' }).catch(() => false);
-      return ok ? 'Noted.' : "Couldn't save that note.";
+      if (t.length < 3) return miss("nothing specific enough to save");
+      const saved = await saveNote(ctx.userId, t, { source: 'chat' }).catch(() => false);
+      return saved ? ok('Noted.') : miss("the note failed to save");
     }
 
     if (name === 'add_to_watchlist') {
       const title = str('title');
-      if (!title) return "What should I add to your watch list?";
+      if (!title) return miss("no title given");
       const status = str('status') === 'watching' ? 'watching' : 'want';
       const r = await addWatchFromText(ctx.userId, title, status, ctx.text).catch(() => null);
-      if (!r?.row) return `Couldn't add "${title}"; try the /watch screen.`;
+      if (!r?.row) return miss(`"${title}" couldn't be added`);
       if (!r.row.tmdb_id && looksVague(title)) waitUntil(upgradeWatchRowViaWeb(ctx.userId, r.row.id, title));
       const tail = r.row.tmdb_id ? '' : ' (couldn\'t find it on TMDB, added by name)';
-      return `${r.added ? 'Added' : 'Updated'} **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''}, ${r.row.status === 'watching' ? 'watching' : 'want to watch'}${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${tail}`;
+      return ok(`${r.added ? 'Added' : 'Updated'} **${r.row.title}**${r.row.year ? ` (${r.row.year})` : ''}, ${r.row.status === 'watching' ? 'watching' : 'want to watch'}${r.row.streaming[0] ? ` · ${r.row.streaming[0]}` : ''}.${tail}`);
     }
 
     if (name === 'update_watchlist_item') {
       const title = str('title');
-      if (!title) return "Which item on your list?";
+      if (!title) return miss("no title given");
       const n = (k: string) => (typeof input[k] === 'number' ? (input[k] as number) : undefined);
       const st = ['want', 'watching', 'done'].includes(str('status')) ? (str('status') as 'want' | 'watching' | 'done') : undefined;
       const msg = await updateWatch(ctx.userId, {
         title, rating: n('rating'), on_season: n('on_season'), finished_season: n('finished_season'),
         finished: input.finished === true, status: st,
       }).catch(() => null);
-      return msg ?? `I don't see "${title}" on your watch list.`;
+      return msg ? ok(msg) : miss(`no watch-list item matching "${title}"`);
     }
 
     if (name === 'log_media_reaction') {
       const title = str('title');
-      if (!title) return "What did you have a reaction to?";
+      if (!title) return miss("no title given");
       const msg = await saveTaste(ctx.userId, { title, kind: str('kind') || 'other', verdict: str('verdict') || 'liked', why: str('why') || null }).catch(() => null);
-      return msg ?? `Couldn't log that one.`;
+      return msg ? ok(msg) : miss("that reaction couldn't be logged");
     }
 
     if (name === 'log_contact') {
       const who = str('name');
-      if (!who) return "Who did you catch up with?";
+      if (!who) return miss("no name given");
       const c = (await findContacts(ctx.userId, who).catch(() => []))[0];
       if (!c || !(c.name.toLowerCase() === who.toLowerCase() || (c.first_name ?? '').toLowerCase() === who.toLowerCase().split(' ')[0])) {
-        return `I don't have a contact called "${who}", so I didn't log it.`;
+        return miss(`no contact called "${who}" (so the touch wasn't logged)`);
       }
       await logContact(ctx.userId, c.id).catch(() => {});
-      return `Noted, last caught up with ${c.name.split(' ')[0]} today.`;
+      return ok(`Noted, last caught up with ${c.name.split(' ')[0]} today.`);
     }
 
     if (name === 'plan_trip') {
       const destination = str('destination');
       const start = str('start_date');
-      if (!destination || !start || Number.isNaN(Date.parse(start))) return "I need a destination and a start date for that.";
+      if (!destination || !start || Number.isNaN(Date.parse(start))) return miss("need a destination and a start date");
       const end = str('end_date') && !Number.isNaN(Date.parse(str('end_date'))) ? str('end_date') : null;
       const trip = await createTrip(ctx.userId, { destination, start_date: start, end_date: end, has_pet: input.has_pet === true }).catch(() => null);
       const range = end ? `${fmtDay(start)}–${fmtDay(end)}` : fmtDay(start);
-      return trip
+      return ok(trip
         ? `Noted your trip to ${destination}, ${range}. I'll nudge you on prep as it gets closer.`
-        : `Already had that ${destination} trip on file.`;
+        : `Already had that ${destination} trip on file.`);
     }
 
-    return `(unrecognised tool: ${name})`;
+    // ── lookups: return data for the model to speak (always via follow-up) ──
+    if (name === 'list_watchlist') {
+      const filter = str('filter');
+      if (filter === 'airing') {
+        const soon = await watchContextLine(ctx.userId).catch(() => [] as string[]);
+        return ok(soon.length ? `## Airing soon\n${soon.map((s) => `- ${s}`).join('\n')}` : `## Airing soon\nNothing in the watch list has an episode in the next ~10 days.`);
+      }
+      const rows = await listWatch(ctx.userId).catch(() => []);
+      const scoped = filter === 'watching' || filter === 'want' ? rows.filter((r) => r.status === filter) : rows;
+      return ok(watchListBlock(scoped));
+    }
+    if (name === 'would_i_like') {
+      const q = str('title') || ctx.text;
+      const block =
+        (await restaurantTasteBlock(ctx.userId, q).catch(() => undefined)) ??
+        (await wouldILike(ctx.userId, q).catch(() => undefined));
+      return ok(block || `## Taste check\nNothing in Noah's taste log or restaurant history covers "${q}". Give a best guess and say it's not grounded in his own data.`);
+    }
+    if (name === 'restaurant_suggestion') {
+      const block = await restaurantTasteBlock(ctx.userId, str('query') || ctx.text).catch(() => undefined);
+      return ok(block || `## Restaurant reco\nNo saved restaurant taste to lean on. Ask what he's in the mood for, or suggest generally.`);
+    }
+    if (name === 'list_subscriptions') {
+      const block = await subscriptionsSummary(ctx.userId).catch(() => undefined);
+      return ok(block || `## Subscriptions\nNothing tracked yet.`);
+    }
+    if (name === 'search_my_notes') {
+      const hits = await searchNotes(ctx.userId, str('query') || ctx.text).catch(() => []);
+      return ok(notesRecallBlock(hits));
+    }
+
+    return miss(`unrecognised tool: ${name}`);
   } catch (err) {
     console.error('[chat] tool exec', name, err);
-    return `Something broke doing that one, try again in a moment.`;
+    return miss(`the "${name}" step threw an error`);
   }
 }
 

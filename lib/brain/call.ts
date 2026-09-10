@@ -42,6 +42,9 @@ export interface BrainMeta {
 export interface BrainStream {
   meta: BrainMeta;
   stream: AsyncGenerator<string>;
+  /** The assembled prompt for this turn — so a caller running tools can build
+   *  the follow-up call (tool_use + tool_result turns appended). */
+  assembled: { system: Anthropic.TextBlockParam[]; messages: Anthropic.MessageParam[] };
 }
 
 const FALLBACK = 'Something broke on my end — try that again in a minute.';
@@ -66,7 +69,7 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
         action: 'defer', month_to_date: mtd, cap, purpose: req.purpose,
       });
       const meta: BrainMeta = { model: '', tier, costUsd: 0, capped: true, deferred: true, text: '', toolUses: [], stopReason: null };
-      return { meta, stream: (async function* () {})() };
+      return { meta, stream: (async function* () {})(), assembled: { system: [], messages: [] } };
     }
     tier = 'T1';
     capped = true;
@@ -173,6 +176,71 @@ export async function call(req: BrainRequest): Promise<BrainStream> {
           cost_usd: meta.costUsd,
           latency_ms: latency,
         });
+        await config.set('spend_month_to_date_usd', String(mtd + meta.costUsd));
+      }
+    }
+  }
+
+  return { meta, stream: gen(), assembled: { system, messages } };
+}
+
+/** One extra streamed round after tool calls: feed the tool results back so the
+ *  model phrases the answer (lookups) or reacts to a miss in its own voice.
+ *  No tools offered here — a single round is enough for stage 4. */
+export function followupStream(opts: {
+  model: string;
+  tier: Tier;
+  system: Anthropic.TextBlockParam[];
+  baseMessages: Anthropic.MessageParam[];
+  assistantText: string;
+  toolUses: ToolUse[];
+  toolResults: { id: string; content: string }[];
+  conversationId: string | null;
+  maxTokens?: number;
+}): { meta: { text: string; costUsd: number }; stream: AsyncGenerator<string> } {
+  const meta = { text: '', costUsd: 0 };
+  const startedAt = Date.now();
+  const assistantContent: Anthropic.ContentBlockParam[] = [
+    ...(opts.assistantText.trim() ? [{ type: 'text' as const, text: opts.assistantText }] : []),
+    ...opts.toolUses.map((tu) => ({ type: 'tool_use' as const, id: tu.id, name: tu.name, input: tu.input })),
+  ];
+  const messages: Anthropic.MessageParam[] = [
+    ...opts.baseMessages,
+    { role: 'assistant', content: assistantContent },
+    { role: 'user', content: opts.toolResults.map((tr) => ({ type: 'tool_result' as const, tool_use_id: tr.id, content: tr.content })) },
+  ];
+
+  async function* gen(): AsyncGenerator<string> {
+    let usage: Anthropic.Messages.Usage | undefined;
+    try {
+      const params: Anthropic.Messages.MessageStreamParams = {
+        model: opts.model,
+        max_tokens: opts.maxTokens ?? 700,
+        system: opts.system,
+        messages,
+      };
+      const effort = EFFORT_MODELS[opts.model];
+      if (effort) params.output_config = { effort };
+      const s = anthropic.messages.stream(params);
+      for await (const ev of s) {
+        if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
+          meta.text += ev.delta.text;
+          yield ev.delta.text;
+        }
+      }
+      usage = (await s.finalMessage()).usage;
+    } catch (err) {
+      await audit.log('error', 'system', opts.conversationId, { where: 'brain.followup', message: String(err) });
+    } finally {
+      if (usage) {
+        meta.costUsd = anthropicCostUsd(opts.model, usage);
+        await audit.modelCall({
+          conversation_id: opts.conversationId, purpose: 'chat', tier: opts.tier, model: opts.model,
+          input_tokens: usage.input_tokens, cached_read_tokens: usage.cache_read_input_tokens ?? 0,
+          cache_write_tokens: usage.cache_creation_input_tokens ?? 0, output_tokens: usage.output_tokens,
+          cost_usd: meta.costUsd, latency_ms: Date.now() - startedAt,
+        });
+        const mtd = parseFloat(await config.get('spend_month_to_date_usd').catch(() => '0'));
         await config.set('spend_month_to_date_usd', String(mtd + meta.costUsd));
       }
     }

@@ -18,9 +18,21 @@ const ACTION_VERB =
 const ACTION_NOUN =
   /\b(calendar|schedule|class(?:es)?|assignments?|syllab\w*|shifts?|exams?|midterms?|quiz(?:zes)?|tests?|deadlines?|appointments?|appts?|meetings?|events?|tasks?|to-?dos?|reminders?|notes?|watch ?list|show|series|movie|film|episode|season|book|game|trip)\b/i;
 
+// Lookup phrasings — "what's on my list", "would I like X", "recommend a
+// place", "what am I paying for". These want a tool that fetches data the model
+// then speaks, so they also need to reach the tool path.
+const LOOKUP =
+  /\b(what'?s on|what am i|what do i (have|owe)|how much (am i|do i)|recommend|suggestions?|any (recs|recommendations|ideas)|where should i|what should i (watch|read|play|do|eat|see)|would i (like|enjoy|hate)|should i (watch|read|play|start|bother|see|go)|do you think i'?d|worth (watching|reading|playing|seeing|a (visit|watch|read|go))|what did i (rate|think|give)|have i (seen|read|played|watched|been|tried|rated)|my (subscriptions?|watch ?list|list|ratings?)|paying for)\b/i;
+
 export function looksActionable(text: string): boolean {
-  return ACTION_VERB.test(text) || ACTION_NOUN.test(text) || /\b(to|on|off)\b.{0,12}\bmy\b/i.test(text);
+  return ACTION_VERB.test(text) || ACTION_NOUN.test(text) || LOOKUP.test(text) || /\b(to|on|off)\b.{0,12}\bmy\b/i.test(text);
 }
+
+/** Tools whose result is context for the model to speak, not a confirmation to
+ *  append. Any of these in a turn forces the follow-up model call. */
+export const LOOKUP_TOOL_NAMES = new Set([
+  'list_watchlist', 'restaurant_suggestion', 'would_i_like', 'list_subscriptions', 'search_my_notes',
+]);
 
 export const CHAT_TOOLS: Anthropic.Tool[] = [
   {
@@ -226,6 +238,51 @@ export const CHAT_TOOLS: Anthropic.Tool[] = [
         has_pet: { type: 'boolean', description: 'True only if he mentions bringing a pet.' },
       },
       required: ['destination', 'start_date'],
+    },
+  },
+  {
+    name: 'list_watchlist',
+    description:
+      "Look at Noah's watch list to answer a question about it (\"what's on my list\", \"what should I watch next\", \"anything airing soon\"). filter 'airing' for what has a new episode/season coming; otherwise omit or use 'watching' / 'want'.",
+    input_schema: {
+      type: 'object',
+      properties: { filter: { type: 'string', enum: ['all', 'watching', 'want', 'airing'] } },
+      required: [],
+    },
+  },
+  {
+    name: 'would_i_like',
+    description:
+      "Check Noah's taste history to judge whether he'd like a specific book / show / film / game / restaurant, or to recall his verdict on one (\"would I like Dune\", \"what did I rate Severance\", \"have I been to that place\"). title is the work or place.",
+    input_schema: {
+      type: 'object',
+      properties: { title: { type: 'string', description: 'The specific work or restaurant.' } },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'restaurant_suggestion',
+    description:
+      "Pull Noah's restaurant taste + nearby options when he wants somewhere to eat or drink (\"where should I eat\", \"somewhere good for tacos near Cambridge\", \"dinner spot for a date\"). Put his ask (cuisine, area, occasion) in query.",
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'Cuisine / area / occasion, roughly as Noah said it.' } },
+      required: [],
+    },
+  },
+  {
+    name: 'list_subscriptions',
+    description: "Summarise what Noah is paying for on a recurring basis (\"what am I paying for\", \"list my subscriptions\", \"how much on streaming\").",
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'search_my_notes',
+    description:
+      "Search Noah's own saved notes for a detail he told Calliad before (\"what's the storage code\", \"what did I say about the landlord\", \"when's the deadline for X\"). query is what he's trying to recall.",
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'What he is trying to recall.' } },
+      required: ['query'],
     },
   },
 ];
