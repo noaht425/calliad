@@ -38,7 +38,7 @@ function isPdf(filename: string, mime?: string): boolean {
 export async function ingestSyllabus(
   userId: string,
   input: { filename: string; mime?: string; bytesBase64?: string; text?: string },
-): Promise<{ ok: true; documentId: string; course: string | null; loopsFiled: number; extract: SyllabusExtract } | { ok: false; error: string }> {
+): Promise<{ ok: true; documentId: string; course: string | null; loopsFiled: number; eventsFiled: number; extract: SyllabusExtract } | { ok: false; error: string }> {
   const started = Date.now();
 
   const content: Anthropic.ContentBlockParam[] = [];
@@ -94,7 +94,10 @@ export async function ingestSyllabus(
     .select('id')
     .single();
 
-  // Clean replace: drop existing open syllabus-sourced loops for this course, then re-file.
+  // Clean replace: drop existing open syllabus-sourced loops + calendar rows for
+  // this course, then re-file both. The loop drives deadline nudges; the
+  // all-day calendar row makes the deadline show up in the schedule views and
+  // the morning brief.
   if (course) {
     await adminClient
       .from('open_loops')
@@ -103,9 +106,21 @@ export async function ingestSyllabus(
       .eq('source', 'syllabus')
       .eq('status', 'open')
       .contains('tags', [course.toLowerCase()]);
+    await adminClient
+      .from('calendar_events')
+      .delete()
+      .eq('user_id', userId)
+      .eq('source', 'syllabus')
+      .like('uid', `syllabus::${course}::%`);
   }
 
   const tagBase = course ? [course.toLowerCase()] : [];
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+  const calRows: Record<string, unknown>[] = [];
+  const dated: { label: string; date: string; kind: 'exam' | 'assignment' }[] = [];
+  for (const e of extract.exams ?? []) if (e.date) dated.push({ label: e.label, date: e.date, kind: 'exam' });
+  for (const a of extract.assignments ?? []) if (a.due_date) dated.push({ label: a.label, date: a.due_date, kind: 'assignment' });
+
   let filed = 0;
   for (const e of extract.exams ?? []) {
     if (!e.date) continue;
@@ -130,5 +145,28 @@ export async function ingestSyllabus(
     filed++;
   }
 
-  return { ok: true, documentId: doc?.id ?? '', course, loopsFiled: filed, extract };
+  if (course) {
+    for (const d of dated) {
+      calRows.push({
+        user_id: userId,
+        uid: `syllabus::${course}::${d.kind}-${slug(d.label)}-${d.date}`,
+        calendar_url: null,
+        calendar_name: 'Coursework',
+        title: `${course} ${d.label}${d.kind === 'exam' ? '' : ' due'}`.trim(),
+        start_at: `${d.date}T12:00:00Z`, // noon-UTC anchor keeps an all-day item on the right local date
+        end_at: null,
+        all_day: true,
+        location: null,
+        description: `From the ${course} syllabus.`,
+        raw_ical: null,
+        source: 'syllabus',
+        updated_at: new Date().toISOString(),
+      });
+    }
+    if (calRows.length) {
+      await adminClient.from('calendar_events').upsert(calRows, { onConflict: 'user_id,uid' });
+    }
+  }
+
+  return { ok: true, documentId: doc?.id ?? '', course, loopsFiled: filed, eventsFiled: calRows.length, extract };
 }

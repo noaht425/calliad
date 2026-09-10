@@ -122,6 +122,33 @@ export const CHAT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'import_calendar_items',
+    description:
+      "Add several events to Noah's calendar in one go: he pasted a list of assignments, exam dates, or work shifts. Prefer this over calling create_calendar_event repeatedly when there are 2 or more items. Each item needs a title and a start time; use all_day: true for a date-only deadline (e.g. \"essay due Oct 3\"). Resolve relative/partial dates against the current time in context; if the year isn't given use the current one unless that puts the date in the past.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          description: 'The events to add.',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              start_at: { type: 'string', description: 'ISO 8601 with timezone offset.' },
+              end_at: { type: 'string', description: 'ISO 8601. Omit for all-day or unknown.' },
+              all_day: { type: 'boolean' },
+              location: { type: 'string' },
+            },
+            required: ['title', 'start_at'],
+          },
+        },
+        label: { type: 'string', description: 'Short name for the batch, e.g. "CLCV-390 assignments", "shifts week of Sep 15".' },
+      },
+      required: ['items'],
+    },
+  },
+  {
     name: 'remember_note',
     description:
       "Save a durable fact or detail to Noah's notes so it's searchable later (\"the storage code is 4417\", \"the car's due for service in March\", \"Priya's kid is called Sam\"). Not for tasks, not for calendar events, not for passing small talk.",

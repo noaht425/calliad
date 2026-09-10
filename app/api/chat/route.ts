@@ -49,7 +49,7 @@ import { isWeatherQuery, runForecast } from '@/lib/tools/weather';
 import { isRecipeQuery, runRecipe } from '@/lib/tools/recipes';
 import { isRecipeShare, extractShareUrl, shareRecipeToAbentfork } from '@/lib/tools/abentfork';
 import { isBeliShare, extractBeli, saveBeliRows, restaurantPrefsBlock, isRestaurantTasteQuery, restaurantTasteBlock } from '@/lib/tools/beli';
-import { isScheduleShare, extractSchedule, expandBlocks, materializeEvents, scheduleDefaultTerm } from '@/lib/tools/schedule-extract';
+import { isScheduleShare, extractSchedule, expandBlocks, materializeEvents, scheduleDefaultTerm, type PlannedEvent } from '@/lib/tools/schedule-extract';
 import { findDroppableCourse, restoreCourse } from '@/lib/integrations/schedule';
 import { detectRelationshipMention, relationshipFor, findContacts, contactContextLine, detectContactLog, logContact, occasionsContextLine, resolveAttendees } from '@/lib/integrations/icloud-contacts';
 import { isSaveRequest, sweepConversation, commitSweepItems, type SweepItem } from '@/lib/memory/sweep';
@@ -1412,6 +1412,31 @@ async function executeChatTool(
       if ('ambiguous' in found) return `Which one: ${found.ambiguous.map((l) => l.title).join('; ')}?`;
       await setLoopStatus(ctx.userId, found.hit.id, 'done');
       return `Marked "${found.hit.title}" done.`;
+    }
+
+    if (name === 'import_calendar_items') {
+      const raw = Array.isArray(input.items) ? (input.items as Record<string, unknown>[]) : [];
+      const events: PlannedEvent[] = [];
+      for (const it of raw) {
+        const start = typeof it?.start_at === 'string' && !Number.isNaN(Date.parse(it.start_at)) ? new Date(it.start_at).toISOString() : null;
+        const title = typeof it?.title === 'string' ? it.title.trim().slice(0, 200) : '';
+        if (!start || !title) continue;
+        const end = typeof it?.end_at === 'string' && !Number.isNaN(Date.parse(it.end_at)) ? new Date(it.end_at).toISOString() : null;
+        events.push({ title, location: typeof it?.location === 'string' ? it.location : null, start_at: start, end_at: end ?? start });
+      }
+      if (!events.length) return "I couldn't read any dated items out of that.";
+      const label = str('label') || 'calendar import';
+      if (await isAutoAllowed('create_event').catch(() => false)) {
+        const r = await materializeEvents(ctx.userId, events, label);
+        if (r.uids.length) await recordScheduleImport({ label, uids: r.uids, created: r.created, skipped: r.skipped }, ctx.conversationId).catch(() => {});
+        return `Added ${r.created} event${r.created === 1 ? '' : 's'} to your calendar${r.skipped ? ` (${r.skipped} were already there)` : ''}. Say "undo" to take them back.`;
+      }
+      await proposeAction({
+        userId: ctx.userId, kind: 'create_schedule', riskTier: 'confirm',
+        summary: `Add ${events.length} events (${label})`,
+        payload: { events, label }, createdBy: ctx.conversationId,
+      });
+      return `Add ${events.length} event${events.length === 1 ? '' : 's'} to your calendar (${label})? Say yes.`;
     }
 
     if (name === 'remember_note') {

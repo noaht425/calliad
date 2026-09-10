@@ -1019,7 +1019,7 @@ export default function SettingsPage() {
     });
     const j = await r.json();
     setBusy(null);
-    setSyllabusMsg(j.ok ? `${j.course ?? 'course'}: ${j.loopsFiled} deadline(s) filed` : (j.error ?? 'failed'));
+    setSyllabusMsg(j.ok ? `${j.course ?? 'course'}: ${j.loopsFiled} deadline(s) filed, ${j.eventsFiled ?? 0} on the calendar` : (j.error ?? 'failed'));
     loadSyllabi(); loadLoops();
   }
 
