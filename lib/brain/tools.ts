@@ -38,7 +38,7 @@ export const CHAT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_calendar_event',
     description:
-      "Put a new event on Noah's calendar. Use for anything with a time or a date: appointments, meetings, plans, one-off commitments. Resolve relative dates/times against the current time given in the context. If a time is given with no end, omit end_at (defaults to 1 hour). Use all_day only when no clock time is implied. Do NOT use this for a class that meets weekly (that's the fixed class schedule) or for a recurring to-do with no clock time (use add_task).",
+      "Put a new event on Noah's calendar. Use for something Noah himself is doing or attending: appointments, meetings, plans, one-off commitments. Resolve relative dates/times against the current time given in the context. If a time is given with no end, omit end_at (defaults to 1 hour). Use all_day only when no clock time is implied. Do NOT use this for a class that meets weekly (that's the fixed class schedule) or for a recurring to-do with no clock time (use add_task). Do NOT use this when Noah asks you to BOOK/ORDER/ARRANGE something (a rideshare, a delivery, a reservation, a purchase) — you have no way to actually do that regardless of whether it has a time attached, so say so plainly instead of quietly logging a reminder as if it were the booking. A calendar entry is never a substitute for an action you can't perform.",
     input_schema: {
       type: 'object',
       properties: {
