@@ -1,6 +1,7 @@
 import { t1Json, t1Available } from '@/lib/llm/gemini';
 import { adminClient } from '@/lib/supabase.server';
 import { upsertLoop } from '@/lib/memory/loops';
+import { recordCapabilityGap } from '@/lib/dev/capability-gaps';
 
 const TZ = process.env.TZ_DEFAULT ?? 'America/New_York';
 
@@ -10,6 +11,7 @@ interface Detected {
   loops: { title: string; body?: string; due_hint?: string; tags?: string[] }[];
   facts: { section: string; key: string; value: string }[];
   checkins?: { what: string; when: string; tone?: string }[];
+  gap?: { title: string; why_not_possible: string; rough_approach?: string } | null;
 }
 
 /** Local wall-clock "YYYY-MM-DDTHH:mm" → UTC ISO, DST-correct (two-pass offset). */
@@ -57,7 +59,8 @@ Calliad: "${assistantText.slice(0, 1500)}"
 Return JSON only:
 {"loops":[{"title":"short handle (<8 words)","body":"one-sentence detail","due_hint":"YYYY-MM-DD if a deadline is stated/implied else omit","tags":["1-2 lowercase tags"]}],
  "facts":[{"section":"one of: ${FACT_SECTIONS.join(', ')}","key":"short slug e.g. coffee_order","value":"the fact as a complete sentence"}],
- "checkins":[{"what":"the thing to follow up on, Noah's words","when":"YYYY-MM-DDTHH:mm local, when to check in AFTERWARD","tone":"one phrase, e.g. 'light and warm' or 'gentle, he was anxious'"}]}
+ "checkins":[{"what":"the thing to follow up on, Noah's words","when":"YYYY-MM-DDTHH:mm local, when to check in AFTERWARD","tone":"one phrase, e.g. 'light and warm' or 'gentle, he was anxious'"}],
+ "gap": null}
 
 LOOPS = things Noah committed to, is waiting on, or must decide. Not answered questions, not saved links, not bare facts.
 FACTS = durable, stable things about Noah HIMSELF that he stated as true (a preference, allergy, habit, routine, relationship, where he lives/works/studies, a tool he uses, a constraint). NOT:
@@ -67,9 +70,17 @@ FACTS = durable, stable things about Noah HIMSELF that he stated as true (a pref
 - anything he asked about rather than asserted
 - guesses — only what he plainly said about himself
 CHECKINS = a friend would remember to ask how this went. A dated stressful/notable thing ("interview Tuesday 2pm", "first shift Monday", "big presentation Friday", "date this weekend"), or Noah being unwell ("came down with something", "migraine again"). Set "when" to shortly AFTER it should be over: ~2h after a timed event; the next morning (09:00) for an all-day or vague-time thing; ~24h later for illness. Skip anything routine, anything already far in the past, and anything with no natural "how did it go". Most exchanges yield [].
-Most exchanges yield {"loops":[],"facts":[],"checkins":[]}.`;
+GAP = Noah asked Calliad to do or fetch something entirely outside what it can do today, and it plainly said so. Be strict — this files a GitHub issue, false positives are expensive. A real gap is a request for an ACTION or an INTEGRATION that's plausibly a feature to build: "can you order me an Uber", "check my bank balance", "add this to my Spotify queue", "set a kitchen timer", "text my landlord for me". NOT a gap, return null:
+- no DATA for something Calliad already handles (no Beli entry for a place, nothing on the calendar, no note on file — the capability exists, the data doesn't)
+- general knowledge / trivia Calliad just doesn't know
+- something Calliad deliberately declined by design (a financial trade, entering a password, anything it should refuse) — correct behavior, not a gap
+- a pending confirmation ("say yes and I'll…") or a "which one did you mean" — the system working as intended
+- a physical-world impossibility ("I can't taste it for you")
+- small talk, a joke, a rhetorical question
+If (and only if) a real gap: {"title":"short handle, <6 words","why_not_possible":"one sentence","rough_approach":"one short paragraph on how it might be built — omit the key entirely if you have no real idea"}. Otherwise gap is null. This should be null in almost every exchange.
+Most exchanges yield {"loops":[],"facts":[],"checkins":[],"gap":null}.`;
 
-  const out = await t1Json<Detected>('detect_turn', prompt, { conversationId, maxOutputTokens: 600 });
+  const out = await t1Json<Detected>('detect_turn', prompt, { conversationId, maxOutputTokens: 700 });
   if (!out) return;
 
   for (const l of (out.loops ?? []).slice(0, 4)) {
@@ -109,6 +120,18 @@ Most exchanges yield {"loops":[],"facts":[],"checkins":[]}.`;
       { user_id: userId, section, key: f.key.trim(), value: f.value.trim(), source: 'chat', confirmed: false, updated_at: new Date().toISOString() },
       { onConflict: 'user_id,section,key' },
     );
+  }
+
+  // "Self-improve, step 1": a genuine capability miss gets drafted into a spec
+  // and filed as a GitHub issue (recordCapabilityGap dedupes repeats and
+  // no-ops without GITHUB_TOKEN) instead of just evaporating in the thread.
+  if (out.gap?.title?.trim() && out.gap.why_not_possible?.trim()) {
+    await recordCapabilityGap(userId, {
+      title: out.gap.title.trim(),
+      whyNotPossible: out.gap.why_not_possible.trim(),
+      roughApproach: out.gap.rough_approach?.trim() || undefined,
+      exampleText: userText,
+    }).catch((e) => console.error('[detect] capability gap', e));
   }
 }
 
