@@ -14,7 +14,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 // fixing. A false positive just costs one model call. So: err heavily toward
 // true.
 const ACTION_VERB =
-  /\b(add|creat\w*|schedul\w*|put|book|pencil\w*|block(?:ed|ing)?|set(?:ting)? up|mov\w*|reschedul\w*|push(?:ed|ing)?|bump\w*|shift\w*|renam\w*|chang\w*|updat\w*|edit\w*|fix\w*|delet\w*|remov\w*|cancel\w*|scrap\w*|drop\w*|clear\w*|remind\w*|jot\w*|not(?:e|ed|ing)|remember\w*|mark\w*|finish\w*|complet\w*|log(?:ged|ging)?|track\w*|sav\w*|keep|kept|import\w*|watch\w*|read|reading|play\w*|rate[ds]?|rating|loved|hated|adored|binged?|bailed|go(?:ing)? to|head(?:ed|ing)? (?:to|out)|fly(?:ing)? (?:to|out)|trip to|visiting|talked to|spoke (?:to|with)|caught up|called|texted|met (?:up )?with|had (?:lunch|dinner|coffee) with)\b/i;
+  /\b(add|creat\w*|schedul\w*|put|book|pencil\w*|block(?:ed|ing)?|set(?:ting)? up|mov\w*|reschedul\w*|push(?:ed|ing)?|bump\w*|shift\w*|renam\w*|chang\w*|updat\w*|edit\w*|fix\w*|delet\w*|remov\w*|cancel\w*|scrap\w*|drop\w*|clear\w*|remind\w*|jot\w*|not(?:e|ed|ing)|remember\w*|mark\w*|finish\w*|complet\w*|log(?:ged|ging)?|track\w*|sav\w*|keep|kept|import\w*|watch\w*|read|reading|play\w*|rate[ds]?|rating|loved|hated|adored|binged?|bailed|go(?:ing)? to|head(?:ed|ing)? (?:to|out)|fly(?:ing)? (?:to|out)|trip to|visiting|talked to|spoke (?:to|with)|caught up|called|texted|met (?:up )?with|had (?:lunch|dinner|coffee) with|order\w*|arrang\w*|hir\w*|reserv\w*|get me a|grab me a|call me a|request\w*)\b/i;
 const ACTION_NOUN =
   /\b(calendar|schedule|class(?:es)?|assignments?|syllab\w*|shifts?|exams?|midterms?|quiz(?:zes)?|tests?|deadlines?|appointments?|appts?|meetings?|events?|tasks?|to-?dos?|reminders?|notes?|watch ?list|show|series|movie|film|episode|season|book|game|trip)\b/i;
 

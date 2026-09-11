@@ -67,7 +67,7 @@ Request: "${text}"
 Return JSON only:
 {"ok": true|false, "title": "short", "start_at": "UTC ISO 8601", "end_at": "UTC ISO 8601 or null", "all_day": false, "location": "or null", "city": "or null"}
 
-ok=false if there's no determinable date/time. If a time is given but no duration, set end_at null (the writer defaults to 1h). all_day=true only when no clock time is implied. city = the city the location is in ONLY if a well-known venue or a full address makes it unambiguous (e.g. "Climate Pledge Arena" → "Seattle"); otherwise null. Never invent a generic title like "Meeting" or a title made out of the date/time itself, if the subject genuinely isn't stated anywhere (including recent conversation), leave title empty so the caller can ask.`,
+ok=false if there's no determinable date/time. ok=false ALSO if Noah is asking you to book/order/arrange a real-world service on his behalf (a rideshare, a delivery, a reservation, a purchase) rather than stating his own plan or commitment, even if it carries a time, you have no way to actually do that and a calendar entry isn't a substitute for it. If a time is given but no duration, set end_at null (the writer defaults to 1h). all_day=true only when no clock time is implied. city = the city the location is in ONLY if a well-known venue or a full address makes it unambiguous (e.g. "Climate Pledge Arena" → "Seattle"); otherwise null. Never invent a generic title like "Meeting" or a title made out of the date/time itself, if the subject genuinely isn't stated anywhere (including recent conversation), leave title empty so the caller can ask.`,
     { maxOutputTokens: 220 },
   );
   if (!out?.ok || !out.start_at || Number.isNaN(Date.parse(out.start_at))) return null;
